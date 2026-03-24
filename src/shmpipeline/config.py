@@ -112,8 +112,9 @@ class KernelConfig:
 
     name: str
     kind: str
-    inputs: tuple[str, ...]
-    outputs: tuple[str, ...]
+    input: str
+    output: str
+    auxiliary: tuple[str, ...] = field(default_factory=tuple)
     parameters: dict[str, Any] = field(default_factory=dict)
     read_timeout: float = 1.0
     pause_sleep: float = 0.01
@@ -124,11 +125,35 @@ class KernelConfig:
         data = _expect_mapping(raw, context="kernel entry")
         name = _normalize_name(data.get("name"), context="kernel name")
         kind = _normalize_name(data.get("kind"), context=f"kind for kernel {name}")
-        inputs = _normalize_names(data.get("inputs"), context=f"inputs for {name}")
-        outputs = _normalize_names(
-            data.get("outputs"),
-            context=f"outputs for {name}",
-        )
+        input_name = data.get("input")
+        output_name = data.get("output")
+        auxiliary_raw = data.get("auxiliary", ())
+        if input_name is None and "inputs" in data:
+            legacy_inputs = _normalize_names(
+                data.get("inputs"),
+                context=f"inputs for {name}",
+            )
+            input_name = legacy_inputs[0]
+            auxiliary_raw = legacy_inputs[1:]
+        if output_name is None and "outputs" in data:
+            legacy_outputs = _normalize_names(
+                data.get("outputs"),
+                context=f"outputs for {name}",
+            )
+            if len(legacy_outputs) != 1:
+                raise ConfigValidationError(
+                    f"kernel {name!r} requires exactly one output"
+                )
+            output_name = legacy_outputs[0]
+        input_name = _normalize_name(input_name, context=f"input for {name}")
+        output_name = _normalize_name(output_name, context=f"output for {name}")
+        if auxiliary_raw in (None, ()):  # normalize omitted auxiliary values
+            auxiliary = ()
+        else:
+            auxiliary = _normalize_names(
+                auxiliary_raw,
+                context=f"auxiliary for {name}",
+            )
         parameters = data.get("parameters", {})
         if not isinstance(parameters, dict):
             raise ConfigValidationError(
@@ -147,8 +172,9 @@ class KernelConfig:
         return cls(
             name=name,
             kind=kind,
-            inputs=inputs,
-            outputs=outputs,
+            input=input_name,
+            output=output_name,
+            auxiliary=tuple(auxiliary),
             parameters=dict(parameters),
             read_timeout=read_timeout,
             pause_sleep=pause_sleep,
@@ -156,11 +182,24 @@ class KernelConfig:
 
     def __post_init__(self) -> None:
         """Validate basic kernel wiring constraints."""
-        if set(self.inputs) & set(self.outputs):
+        if self.input == self.output:
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot use the same shared memory for "
                 "both input and output"
             )
+        if self.input in set(self.auxiliary):
+            raise ConfigValidationError(
+                f"kernel {self.name!r} cannot reuse the trigger input as auxiliary"
+            )
+        if self.output in set(self.auxiliary):
+            raise ConfigValidationError(
+                f"kernel {self.name!r} cannot reuse the output as auxiliary"
+            )
+
+    @property
+    def all_inputs(self) -> tuple[str, ...]:
+        """Return the trigger input followed by ordered auxiliary streams."""
+        return (self.input, *self.auxiliary)
 
 
 @dataclass(frozen=True)
@@ -212,7 +251,7 @@ class PipelineConfig:
         for kernel in self.kernels:
             missing = [
                 name
-                for name in (*kernel.inputs, *kernel.outputs)
+                for name in (*kernel.all_inputs, kernel.output)
                 if name not in available
             ]
             if missing:

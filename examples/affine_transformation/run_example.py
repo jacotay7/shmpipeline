@@ -2,26 +2,29 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 import time
 
 import numpy as np
 
 from shmpipeline import PipelineManager
+from shmpipeline.logging_utils import configure_colored_logging
+import logging
 
 
-LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
-
-
-def configure_logging() -> None:
-    """Configure console logging for the example script."""
-    logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+def wait_for_next_write(stream, previous_count: int, *, timeout: float = 2.0):
+    """Wait until a stream's write count advances beyond a known baseline."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if stream.count > previous_count:
+            return stream.read()
+        time.sleep(1e-4)
+    raise TimeoutError(f"timed out waiting for a new write on {stream.name!r}")
 
 
 def main() -> None:
     """Build the example pipeline and verify thousands of affine transforms."""
-    configure_logging()
+    configure_colored_logging()
     logger = logging.getLogger("shmpipeline.example.affine")
     config_path = Path(__file__).with_name("pipeline.yaml")
     manager = PipelineManager(config_path)
@@ -55,8 +58,9 @@ def main() -> None:
         for index in range(sample_count):
             vector = rng.standard_normal(3, dtype=np.float32)
             expected = transform_matrix @ vector + offset_vector
+            baseline = output_stream.count
             input_stream.write(vector)
-            result = output_stream.read_new(timeout=2.0)
+            result = wait_for_next_write(output_stream, baseline, timeout=2.0)
             np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
             if index == 0:
                 logger.info(

@@ -61,8 +61,8 @@ def test_pipeline_config_rejects_unknown_shared_memory_reference():
                     {
                         "name": "copy",
                         "kind": "cpu.copy",
-                        "inputs": ["input_frame"],
-                        "outputs": ["missing_output"],
+                        "input": "input_frame",
+                        "output": "missing_output",
                     }
                 ],
             }
@@ -88,8 +88,8 @@ def test_pipeline_config_rejects_same_input_and_output_name():
                     {
                         "name": "copy",
                         "kind": "cpu.copy",
-                        "inputs": ["frame"],
-                        "outputs": ["frame"],
+                        "input": "frame",
+                        "output": "frame",
                     }
                 ],
             }
@@ -129,12 +129,9 @@ def test_affine_kernel_rejects_incompatible_shapes():
                 {
                     "name": "affine",
                     "kind": "cpu.affine_transform",
-                    "inputs": [
-                        "input_vector",
-                        "transform_matrix",
-                        "offset_vector",
-                    ],
-                    "outputs": ["output_vector"],
+                    "input": "input_vector",
+                    "output": "output_vector",
+                    "auxiliary": ["transform_matrix", "offset_vector"],
                 }
             ],
         }

@@ -22,10 +22,9 @@ shared_memory:
 kernels:
   - name: affine_stage
     kind: cpu.affine_transform
-    inputs:
-      - affine_input_vector
+    input: affine_input_vector
+    output: affine_output_vector
+    auxiliary:
       - affine_transform_matrix
       - affine_offset_vector
-    outputs:
-      - affine_output_vector
     read_timeout: 0.1

@@ -26,7 +26,12 @@ class CopyCpuKernel(CpuKernel):
         super().validate_config(config, shared_memory)
         validate_unary_same_shape_and_dtype(config, shared_memory)
 
-    def compute(self, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Return a copy of the input payload."""
-        source = inputs[self.context.config.inputs[0]]
-        return {self.context.config.outputs[0]: np.array(source, copy=True)}
+    def compute_into(
+        self,
+        trigger_input: Any,
+        output: Any,
+        auxiliary_inputs: Mapping[str, Any],
+    ) -> None:
+        """Copy the input payload into the reusable output buffer."""
+        del auxiliary_inputs
+        np.copyto(output, np.asarray(trigger_input))

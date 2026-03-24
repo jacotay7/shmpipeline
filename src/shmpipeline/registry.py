@@ -10,8 +10,12 @@ from shmpipeline.kernel import Kernel, KernelContext
 from shmpipeline.kernels.cpu import AddConstantCpuKernel
 from shmpipeline.kernels.cpu import AffineTransformCpuKernel
 from shmpipeline.kernels.cpu import CopyCpuKernel
+from shmpipeline.kernels.cpu import FlattenCpuKernel
+from shmpipeline.kernels.cpu import LeakyIntegratorCpuKernel
 from shmpipeline.kernels.cpu import RaiseErrorCpuKernel
 from shmpipeline.kernels.cpu import ScaleCpuKernel
+from shmpipeline.kernels.cpu import ScaleOffsetCpuKernel
+from shmpipeline.kernels.cpu import ShackHartmannCentroidCpuKernel
 
 
 class KernelRegistry:
@@ -52,8 +56,12 @@ _DEFAULT_REGISTRY = KernelRegistry(
         AddConstantCpuKernel.kind: AddConstantCpuKernel,
         AffineTransformCpuKernel.kind: AffineTransformCpuKernel,
         CopyCpuKernel.kind: CopyCpuKernel,
+        FlattenCpuKernel.kind: FlattenCpuKernel,
+        LeakyIntegratorCpuKernel.kind: LeakyIntegratorCpuKernel,
         RaiseErrorCpuKernel.kind: RaiseErrorCpuKernel,
         ScaleCpuKernel.kind: ScaleCpuKernel,
+        ScaleOffsetCpuKernel.kind: ScaleOffsetCpuKernel,
+        ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
     }
 )
 

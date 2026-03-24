@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 import os
 import time
 import traceback
 from queue import Empty
 from typing import Any
+
+import numpy as np
 
 import pyshmem
 
@@ -32,6 +35,17 @@ def _pin_current_process(cpu_slot: int | None) -> None:
         return
 
 
+def _wait_for_trigger(stream, previous_count: float, *, timeout: float) -> float | None:
+    """Wait for a trigger stream count to advance beyond the previous count."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = stream.count
+        if current > previous_count:
+            return current
+        time.sleep(1e-5)
+    return None
+
+
 def run_kernel_process(
     kernel_config: KernelConfig,
     shared_memory: tuple[SharedMemoryConfig, ...],
@@ -46,12 +60,11 @@ def run_kernel_process(
     shared_by_name = {item.name: item for item in shared_memory}
     registry = get_default_registry()
     kernel = registry.create(kernel_config, shared_by_name)
-    input_streams = {
-        name: _open_stream(shared_by_name[name]) for name in kernel_config.inputs
+    trigger_stream = _open_stream(shared_by_name[kernel_config.input])
+    auxiliary_streams = {
+        name: _open_stream(shared_by_name[name]) for name in kernel_config.auxiliary
     }
-    output_streams = {
-        name: _open_stream(shared_by_name[name]) for name in kernel_config.outputs
-    }
+    output_stream = _open_stream(shared_by_name[kernel_config.output])
     event_queue.put(
         {
             "type": "worker_started",
@@ -68,32 +81,48 @@ def run_kernel_process(
     )
 
     try:
-        primary_input = kernel_config.inputs[0]
+        last_seen_count = trigger_stream.count
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(kernel_config.pause_sleep)
                 continue
 
-            try:
-                inputs = {
-                    primary_input: input_streams[primary_input].read_new(
-                        timeout=kernel_config.read_timeout
-                    )
-                }
-            except TimeoutError:
+            triggered_count = _wait_for_trigger(
+                trigger_stream,
+                last_seen_count,
+                timeout=kernel_config.read_timeout,
+            )
+            if triggered_count is None:
                 continue
-            for name in kernel_config.inputs[1:]:
-                inputs[name] = input_streams[name].read()
 
-            outputs = kernel.compute(inputs)
-            expected_outputs = set(kernel_config.outputs)
-            if set(outputs) != expected_outputs:
-                raise KernelExecutionError(
-                    f"kernel {kernel_config.name!r} produced outputs "
-                    f"{sorted(outputs)} but expected {sorted(expected_outputs)}"
+            locked_streams = {kernel_config.input: trigger_stream, **auxiliary_streams, kernel_config.output: output_stream}
+            with ExitStack() as stack:
+                for name in sorted(locked_streams):
+                    stack.enter_context(locked_streams[name].locked(timeout=kernel_config.read_timeout))
+
+                current_count = trigger_stream.count
+                if current_count <= last_seen_count:
+                    continue
+
+                trigger_input = trigger_stream.read(safe=False)
+                auxiliary_inputs = {
+                    name: stream.read(safe=False)
+                    for name, stream in auxiliary_streams.items()
+                }
+                output_view = output_stream.read(safe=False)
+
+                kernel.compute_into(
+                    trigger_input,
+                    kernel.output_buffer,
+                    auxiliary_inputs,
                 )
-            for name, value in outputs.items():
-                output_streams[name].write(value)
+                output_stream._mark_write_started()
+                if isinstance(output_view, np.ndarray):
+                    np.copyto(output_view, kernel.output_buffer)
+                else:
+                    output_view.copy_(kernel.output_buffer)
+                output_stream._finish_write()
+                last_seen_count = current_count
     except BaseException as exc:
         logger.exception("worker runtime failed: kernel=%s", kernel_config.name)
         event_queue.put(
@@ -108,10 +137,10 @@ def run_kernel_process(
         )
         raise
     finally:
-        for stream in input_streams.values():
+        trigger_stream.close()
+        for stream in auxiliary_streams.values():
             stream.close()
-        for stream in output_streams.values():
-            stream.close()
+        output_stream.close()
         logger.info("worker runtime stopping: kernel=%s pid=%s", kernel_config.name, os.getpid())
         event_queue.put(
             {

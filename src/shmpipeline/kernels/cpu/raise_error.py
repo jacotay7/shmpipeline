@@ -29,7 +29,12 @@ class RaiseErrorCpuKernel(CpuKernel):
                 "parameter"
             )
 
-    def compute(self, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
+    def compute_into(
+        self,
+        trigger_input: Any,
+        output: Any,
+        auxiliary_inputs: Mapping[str, Any],
+    ) -> None:
         """Always raise the configured failure."""
-        del inputs
+        del trigger_input, output, auxiliary_inputs
         raise RuntimeError(self.context.config.parameters["message"])

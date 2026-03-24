@@ -84,11 +84,12 @@ class PipelineManager:
         for kernel_config in self.config.kernels:
             self.registry.validate(kernel_config, shared_by_name)
             self._logger.info(
-                "validated kernel: name=%s kind=%s inputs=%s outputs=%s",
+                "validated kernel: name=%s kind=%s input=%s output=%s auxiliary=%s",
                 kernel_config.name,
                 kernel_config.kind,
-                list(kernel_config.inputs),
-                list(kernel_config.outputs),
+                kernel_config.input,
+                kernel_config.output,
+                list(kernel_config.auxiliary),
             )
         for spec in self.config.shared_memory:
             create_kwargs = {

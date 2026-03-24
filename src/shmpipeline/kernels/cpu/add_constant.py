@@ -40,9 +40,12 @@ class AddConstantCpuKernel(CpuKernel):
             name="constant",
         )
 
-    def compute(self, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Add the configured constant into a fresh output buffer."""
-        source = np.asarray(inputs[self.context.config.inputs[0]])
-        destination = np.empty_like(source)
-        add_constant_array(source, destination, self.constant)
-        return {self.context.config.outputs[0]: destination}
+    def compute_into(
+        self,
+        trigger_input: Any,
+        output: Any,
+        auxiliary_inputs: Mapping[str, Any],
+    ) -> None:
+        """Add the configured constant into the reusable output buffer."""
+        del auxiliary_inputs
+        add_constant_array(np.asarray(trigger_input), output, self.constant)

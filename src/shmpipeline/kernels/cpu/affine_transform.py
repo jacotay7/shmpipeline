@@ -16,7 +16,7 @@ class AffineTransformCpuKernel(CpuKernel):
     """Apply an affine transform `y = A x + b` to a vector input."""
 
     kind = "cpu.affine_transform"
-    input_arity = 3
+    auxiliary_arity = 2
 
     @classmethod
     def validate_config(
@@ -26,10 +26,10 @@ class AffineTransformCpuKernel(CpuKernel):
     ) -> None:
         """Validate vector, matrix, offset, and output compatibility."""
         super().validate_config(config, shared_memory)
-        vector_spec = shared_memory[config.inputs[0]]
-        matrix_spec = shared_memory[config.inputs[1]]
-        offset_spec = shared_memory[config.inputs[2]]
-        output_spec = shared_memory[config.outputs[0]]
+        vector_spec = shared_memory[config.input]
+        matrix_spec = shared_memory[config.auxiliary[0]]
+        offset_spec = shared_memory[config.auxiliary[1]]
+        output_spec = shared_memory[config.output]
 
         if len(vector_spec.shape) != 1:
             raise ConfigValidationError(
@@ -74,13 +74,14 @@ class AffineTransformCpuKernel(CpuKernel):
                 "affine inputs and outputs"
             )
 
-    def compute(self, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Compute the affine transform into a fresh output vector."""
-        vector_name, matrix_name, offset_name = self.context.config.inputs
-        output_name = self.context.config.outputs[0]
-        vector = np.asarray(inputs[vector_name])
-        matrix = np.asarray(inputs[matrix_name])
-        offset = np.asarray(inputs[offset_name])
-        destination = np.empty(offset.shape, dtype=vector.dtype)
-        affine_transform_array(matrix, vector, offset, destination)
-        return {output_name: destination}
+    def compute_into(
+        self,
+        trigger_input: Any,
+        output: Any,
+        auxiliary_inputs: Mapping[str, Any],
+    ) -> None:
+        """Compute the affine transform into the reusable output buffer."""
+        vector = np.asarray(trigger_input)
+        matrix = np.asarray(auxiliary_inputs[self.context.config.auxiliary[0]])
+        offset = np.asarray(auxiliary_inputs[self.context.config.auxiliary[1]])
+        affine_transform_array(matrix, vector, offset, output)

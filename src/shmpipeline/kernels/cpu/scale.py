@@ -37,9 +37,12 @@ class ScaleCpuKernel(CpuKernel):
         super().__init__(context)
         self.factor = require_numeric_parameter(context.config, name="factor")
 
-    def compute(self, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
-        """Scale the incoming array into a fresh output buffer."""
-        source = np.asarray(inputs[self.context.config.inputs[0]])
-        destination = np.empty_like(source)
-        scale_array(source, destination, self.factor)
-        return {self.context.config.outputs[0]: destination}
+    def compute_into(
+        self,
+        trigger_input: Any,
+        output: Any,
+        auxiliary_inputs: Mapping[str, Any],
+    ) -> None:
+        """Scale the incoming array into the reusable output buffer."""
+        del auxiliary_inputs
+        scale_array(np.asarray(trigger_input), output, self.factor)

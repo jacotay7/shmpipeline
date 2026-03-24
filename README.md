@@ -45,6 +45,19 @@ It defines a pipeline that computes $y = A x + b$ where:
 	memory
 - `output_vector` receives the transformed result
 
+## AO Example
+
+The repository also includes a basic adaptive-optics style example in
+`examples/basic_ao_system/`.
+
+That example verifies a multi-stage CPU pipeline with:
+
+- Shack-Hartmann centroid extraction
+- gain and offset correction
+- flattening into slope vectors
+- affine reconstruction
+- leaky-integrator control
+
 GPU kernels are not implemented yet, but the configuration model and base
 classes already reserve storage-specific validation for them.
 
