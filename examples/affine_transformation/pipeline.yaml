@@ -1,0 +1,31 @@
+shared_memory:
+  - name: affine_input_vector
+    shape: [3]
+    dtype: float32
+    storage: cpu
+
+  - name: affine_transform_matrix
+    shape: [2, 3]
+    dtype: float32
+    storage: cpu
+
+  - name: affine_offset_vector
+    shape: [2]
+    dtype: float32
+    storage: cpu
+
+  - name: affine_output_vector
+    shape: [2]
+    dtype: float32
+    storage: cpu
+
+kernels:
+  - name: affine_stage
+    kind: cpu.affine_transform
+    inputs:
+      - affine_input_vector
+      - affine_transform_matrix
+      - affine_offset_vector
+    outputs:
+      - affine_output_vector
+    read_timeout: 0.1
