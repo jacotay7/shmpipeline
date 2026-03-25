@@ -29,8 +29,8 @@ def test_pipeline_config_loads_from_yaml(tmp_path):
             kernels:
               - name: scale
                 kind: cpu.scale
-                inputs: [input_frame]
-                outputs: [output_frame]
+                input: input_frame
+                output: output_frame
                 parameters:
                   factor: 3.0
             """
@@ -145,3 +145,70 @@ def test_affine_kernel_rejects_incompatible_shapes():
 
         manager = PipelineManager(config)
         manager.build()
+
+
+def test_kernel_config_rejects_legacy_inputs_outputs_keys():
+    with pytest.raises(
+        ConfigValidationError,
+        match="must use 'input', 'output', and optional 'auxiliary'",
+    ):
+        PipelineConfig.from_dict(
+            {
+                "shared_memory": [
+                    {
+                        "name": "input_frame",
+                        "shape": [4],
+                        "dtype": "float32",
+                        "storage": "cpu",
+                    },
+                    {
+                        "name": "output_frame",
+                        "shape": [4],
+                        "dtype": "float32",
+                        "storage": "cpu",
+                    },
+                ],
+                "kernels": [
+                    {
+                        "name": "copy",
+                        "kind": "cpu.copy",
+                        "inputs": ["input_frame"],
+                        "outputs": ["output_frame"],
+                    }
+                ],
+            }
+        )
+
+
+def test_kernel_config_rejects_unexpected_fields():
+    with pytest.raises(
+        ConfigValidationError,
+        match="contains unsupported fields",
+    ):
+        PipelineConfig.from_dict(
+            {
+                "shared_memory": [
+                    {
+                        "name": "input_frame",
+                        "shape": [4],
+                        "dtype": "float32",
+                        "storage": "cpu",
+                    },
+                    {
+                        "name": "output_frame",
+                        "shape": [4],
+                        "dtype": "float32",
+                        "storage": "cpu",
+                    },
+                ],
+                "kernels": [
+                    {
+                        "name": "copy",
+                        "kind": "cpu.copy",
+                        "input": "input_frame",
+                        "output": "output_frame",
+                        "unexpected": 123,
+                    }
+                ],
+            }
+        )

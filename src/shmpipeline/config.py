@@ -18,6 +18,20 @@ def _expect_mapping(value: Any, *, context: str) -> Mapping[str, Any]:
     return value
 
 
+def _reject_unexpected_keys(
+    data: Mapping[str, Any],
+    *,
+    context: str,
+    allowed: set[str],
+) -> None:
+    unexpected = sorted(set(data) - allowed)
+    if unexpected:
+        joined = ", ".join(repr(key) for key in unexpected)
+        raise ConfigValidationError(
+            f"{context} contains unsupported fields: {joined}"
+        )
+
+
 def _normalize_name(value: Any, *, context: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigValidationError(f"{context} must be a non-empty string")
@@ -65,6 +79,18 @@ class SharedMemoryConfig:
     def from_dict(cls, raw: Mapping[str, Any]) -> "SharedMemoryConfig":
         """Build a normalized shared-memory configuration from a mapping."""
         data = _expect_mapping(raw, context="shared_memory entry")
+        _reject_unexpected_keys(
+            data,
+            context="shared_memory entry",
+            allowed={
+                "name",
+                "shape",
+                "dtype",
+                "storage",
+                "gpu_device",
+                "cpu_mirror",
+            },
+        )
         name = _normalize_name(data.get("name"), context="shared memory name")
         shape = _normalize_shape(data.get("shape"), context=f"shape for {name}")
         try:
@@ -123,28 +149,30 @@ class KernelConfig:
     def from_dict(cls, raw: Mapping[str, Any]) -> "KernelConfig":
         """Build a normalized kernel configuration from a mapping."""
         data = _expect_mapping(raw, context="kernel entry")
+        if "inputs" in data or "outputs" in data:
+            raise ConfigValidationError(
+                "kernel entry must use 'input', 'output', and optional "
+                "'auxiliary'; 'inputs' and 'outputs' are not supported"
+            )
+        _reject_unexpected_keys(
+            data,
+            context="kernel entry",
+            allowed={
+                "name",
+                "kind",
+                "input",
+                "output",
+                "auxiliary",
+                "parameters",
+                "read_timeout",
+                "pause_sleep",
+            },
+        )
         name = _normalize_name(data.get("name"), context="kernel name")
         kind = _normalize_name(data.get("kind"), context=f"kind for kernel {name}")
         input_name = data.get("input")
         output_name = data.get("output")
         auxiliary_raw = data.get("auxiliary", ())
-        if input_name is None and "inputs" in data:
-            legacy_inputs = _normalize_names(
-                data.get("inputs"),
-                context=f"inputs for {name}",
-            )
-            input_name = legacy_inputs[0]
-            auxiliary_raw = legacy_inputs[1:]
-        if output_name is None and "outputs" in data:
-            legacy_outputs = _normalize_names(
-                data.get("outputs"),
-                context=f"outputs for {name}",
-            )
-            if len(legacy_outputs) != 1:
-                raise ConfigValidationError(
-                    f"kernel {name!r} requires exactly one output"
-                )
-            output_name = legacy_outputs[0]
         input_name = _normalize_name(input_name, context=f"input for {name}")
         output_name = _normalize_name(output_name, context=f"output for {name}")
         if auxiliary_raw in (None, ()):  # normalize omitted auxiliary values
@@ -213,6 +241,11 @@ class PipelineConfig:
     def from_dict(cls, raw: Mapping[str, Any]) -> "PipelineConfig":
         """Create a pipeline configuration from a plain mapping."""
         data = _expect_mapping(raw, context="pipeline config")
+        _reject_unexpected_keys(
+            data,
+            context="pipeline config",
+            allowed={"shared_memory", "kernels"},
+        )
         shared_memory_raw = data.get("shared_memory")
         kernels_raw = data.get("kernels")
         if not isinstance(shared_memory_raw, list) or not shared_memory_raw:

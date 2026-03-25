@@ -1,0 +1,89 @@
+shared_memory:
+  - name: ao_bench_sensor_image
+    shape: [120, 120]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_centroids
+    shape: [15, 15, 2]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_centroid_offset
+    shape: [15, 15, 2]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_corrected_centroids
+    shape: [15, 15, 2]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_flattened_slopes
+    shape: [450]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_reconstructor_matrix
+    shape: [128, 450]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_affine_offset
+    shape: [128]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_open_loop_command
+    shape: [128]
+    dtype: float32
+    storage: cpu
+
+  - name: ao_bench_dm_command
+    shape: [128]
+    dtype: float32
+    storage: cpu
+
+kernels:
+  - name: centroid_stage
+    kind: cpu.shack_hartmann_centroid
+    input: ao_bench_sensor_image
+    output: ao_bench_centroids
+    parameters:
+      tile_size: 8
+    read_timeout: 0.1
+
+  - name: centroid_gain_stage
+    kind: cpu.scale_offset
+    input: ao_bench_centroids
+    output: ao_bench_corrected_centroids
+    auxiliary: [ao_bench_centroid_offset]
+    parameters:
+      gain: 1.0
+    read_timeout: 0.1
+
+  - name: flatten_stage
+    kind: cpu.flatten
+    input: ao_bench_corrected_centroids
+    output: ao_bench_flattened_slopes
+    parameters: {}
+    read_timeout: 0.1
+
+  - name: reconstructor_stage
+    kind: cpu.affine_transform
+    input: ao_bench_flattened_slopes
+    output: ao_bench_open_loop_command
+    auxiliary:
+      - ao_bench_reconstructor_matrix
+      - ao_bench_affine_offset
+    parameters: {}
+    read_timeout: 0.1
+
+  - name: control_stage
+    kind: cpu.leaky_integrator
+    input: ao_bench_open_loop_command
+    output: ao_bench_dm_command
+    parameters:
+      leak: 0.98
+      gain: 0.3
+    read_timeout: 0.1

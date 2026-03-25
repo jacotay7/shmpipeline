@@ -18,3 +18,19 @@ Run it with:
 ```bash
 python examples/basic_ao_system/run_example.py
 ```
+
+There is also a benchmark-oriented workload for a more realistic AO size:
+
+- 120x120 Shack-Hartmann image
+- 8x8 pixel subapertures
+- 15x15 centroid grid
+- 128-element control vector
+
+Run it with:
+
+```bash
+python examples/basic_ao_system/run_benchmark.py
+```
+
+The current benchmark script reports achieved frame rate and compares it
+against the 2 kHz target without failing the run automatically.
