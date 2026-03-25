@@ -1,0 +1,35 @@
+shared_memory:
+  - name: raw_image
+    shape: [4, 4]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: dark_frame
+    shape: [4, 4]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: flat_field
+    shape: [4, 4]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: clean_image
+    shape: [4, 4]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+kernels:
+  - name: image_processing
+    kind: gpu.custom_operation
+    operation: (input - dark) / flat
+    input: raw_image
+    output: clean_image
+    auxiliary:
+      dark: dark_frame
+      flat: flat_field
+    read_timeout: 0.1

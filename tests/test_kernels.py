@@ -19,9 +19,30 @@ from shmpipeline.kernels.cpu import RaiseErrorCpuKernel
 from shmpipeline.kernels.cpu import ScaleCpuKernel
 from shmpipeline.kernels.cpu import ScaleOffsetCpuKernel
 from shmpipeline.kernels.cpu import ShackHartmannCentroidCpuKernel
+from shmpipeline.kernels.gpu import AddConstantGpuKernel
+from shmpipeline.kernels.gpu import AffineTransformGpuKernel
+from shmpipeline.kernels.gpu import CopyGpuKernel
+from shmpipeline.kernels.gpu import CustomOperationGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseAddGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseDivideGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseMultiplyGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseSubtractGpuKernel
+from shmpipeline.kernels.gpu import FlattenGpuKernel
+from shmpipeline.kernels.gpu import LeakyIntegratorGpuKernel
+from shmpipeline.kernels.gpu import RaiseErrorGpuKernel
+from shmpipeline.kernels.gpu import ScaleGpuKernel
+from shmpipeline.kernels.gpu import ScaleOffsetGpuKernel
+from shmpipeline.kernels.gpu import ShackHartmannCentroidGpuKernel
+
+try:
+    import torch
+except Exception:  # pragma: no cover - exercised when torch is unavailable
+    torch = None
 
 
 pytestmark = pytest.mark.unit
+
+CUDA_AVAILABLE = torch is not None and torch.cuda.is_available()
 
 
 def _make_shared_memory(specs: list[dict]) -> dict[str, SharedMemoryConfig]:
@@ -41,6 +62,8 @@ def _instantiate_kernel(
     auxiliary: list[dict] | None = None,
     parameters: dict | None = None,
     operation: str | None = None,
+    storage: str = "cpu",
+    gpu_device: str = "cuda:0",
 ):
     auxiliary = auxiliary or []
     parameters = parameters or {}
@@ -50,15 +73,18 @@ def _instantiate_kernel(
             "name": "input",
             "shape": list(input_shape),
             "dtype": input_dtype,
-            "storage": "cpu",
+            "storage": storage,
         },
         {
             "name": "output",
             "shape": list(output_shape),
             "dtype": output_dtype,
-            "storage": "cpu",
+            "storage": storage,
         },
     ]
+    if storage == "gpu":
+        shared_specs[0]["gpu_device"] = gpu_device
+        shared_specs[1]["gpu_device"] = gpu_device
     auxiliary_config: list[str] | dict[str, str] = []
     if auxiliary:
         if any("alias" in item for item in auxiliary):
@@ -73,7 +99,8 @@ def _instantiate_kernel(
                 "name": item["name"],
                 "shape": list(item["shape"]),
                 "dtype": item.get("dtype", input_dtype),
-                "storage": "cpu",
+                "storage": storage,
+                **({"gpu_device": gpu_device} if storage == "gpu" else {}),
             }
             for item in auxiliary
         )
@@ -91,6 +118,30 @@ def _instantiate_kernel(
     config = KernelConfig.from_dict(config_dict)
     kernel_cls.validate_config(config, shared_memory)
     return kernel_cls(KernelContext(config=config, shared_memory=shared_memory))
+
+
+def _device_array(value, *, storage: str):
+    if storage == "gpu":
+        if not CUDA_AVAILABLE:
+            pytest.skip("CUDA is not available")
+        return torch.as_tensor(value, device="cuda:0")
+    return np.asarray(value)
+
+
+def _empty_output(shape, *, dtype=np.float32, storage: str):
+    if storage == "gpu":
+        if not CUDA_AVAILABLE:
+            pytest.skip("CUDA is not available")
+        return torch.empty(shape, dtype=torch.float32 if dtype == np.float32 else None, device="cuda:0")
+    return np.empty(shape, dtype=dtype)
+
+
+def _assert_allclose(observed, expected, *, rtol=1e-7, atol=0.0):
+    if torch is not None and isinstance(observed, torch.Tensor):
+        observed = observed.detach().cpu().numpy()
+    if torch is not None and isinstance(expected, torch.Tensor):
+        expected = expected.detach().cpu().numpy()
+    np.testing.assert_allclose(observed, expected, rtol=rtol, atol=atol)
 
 
 def test_copy_kernel_copies_input():
@@ -335,5 +386,238 @@ def test_raise_error_kernel_raises_configured_message():
         kernel.compute_into(
             np.array([1.0], dtype=np.float32),
             np.empty(1, dtype=np.float32),
+            {},
+        )
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+@pytest.mark.parametrize(
+    ("kernel_cls", "parameters", "payload", "expected"),
+    [
+        (CopyGpuKernel, {}, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)),
+        (ScaleGpuKernel, {"factor": 2.5}, np.array([1.0, -2.0, 3.0, -4.0], dtype=np.float32), np.array([2.5, -5.0, 7.5, -10.0], dtype=np.float32)),
+        (AddConstantGpuKernel, {"constant": 3.0}, np.array([0.5, 1.5, -2.0, 4.0], dtype=np.float32), np.array([3.5, 4.5, 1.0, 7.0], dtype=np.float32)),
+    ],
+)
+def test_gpu_unary_kernels_match_expected_values(
+    kernel_cls,
+    parameters,
+    payload,
+    expected,
+):
+    kernel = _instantiate_kernel(
+        kernel_cls,
+        input_shape=payload.shape,
+        output_shape=payload.shape,
+        parameters=parameters,
+        storage="gpu",
+    )
+    output = _empty_output(payload.shape, storage="gpu")
+
+    kernel.compute_into(_device_array(payload, storage="gpu"), output, {})
+
+    _assert_allclose(output, expected)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+@pytest.mark.parametrize(
+    ("kernel_cls", "lhs", "rhs", "expected"),
+    [
+        (ElementwiseAddGpuKernel, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([0.5, -1.0, 2.0, 1.5], dtype=np.float32), np.array([1.5, 1.0, 5.0, 5.5], dtype=np.float32)),
+        (ElementwiseSubtractGpuKernel, np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32), np.array([1.0, 0.5, 2.0, 4.0], dtype=np.float32), np.array([4.0, 5.5, 5.0, 4.0], dtype=np.float32)),
+        (ElementwiseMultiplyGpuKernel, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([2.0, 0.5, -1.0, 3.0], dtype=np.float32), np.array([2.0, 1.0, -3.0, 12.0], dtype=np.float32)),
+        (ElementwiseDivideGpuKernel, np.array([2.0, 6.0, 8.0, 9.0], dtype=np.float32), np.array([2.0, 3.0, 4.0, 1.5], dtype=np.float32), np.array([1.0, 2.0, 2.0, 6.0], dtype=np.float32)),
+    ],
+)
+def test_gpu_binary_kernels_match_expected_values(kernel_cls, lhs, rhs, expected):
+    kernel = _instantiate_kernel(
+        kernel_cls,
+        input_shape=lhs.shape,
+        output_shape=lhs.shape,
+        auxiliary=[{"name": "aux", "shape": lhs.shape}],
+        storage="gpu",
+    )
+    output = _empty_output(lhs.shape, storage="gpu")
+
+    kernel.compute_into(
+        _device_array(lhs, storage="gpu"),
+        output,
+        {"aux": _device_array(rhs, storage="gpu")},
+    )
+
+    _assert_allclose(output, expected)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_scale_offset_gpu_kernel_applies_gain_and_offset():
+    kernel = _instantiate_kernel(
+        ScaleOffsetGpuKernel,
+        input_shape=(4,),
+        output_shape=(4,),
+        auxiliary=[{"name": "offset", "shape": (4,)}],
+        parameters={"gain": 1.75},
+        storage="gpu",
+    )
+    output = _empty_output((4,), storage="gpu")
+    payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    offset = np.array([0.5, 1.0, -1.0, 2.0], dtype=np.float32)
+
+    kernel.compute_into(
+        _device_array(payload, storage="gpu"),
+        output,
+        {"offset": _device_array(offset, storage="gpu")},
+    )
+
+    _assert_allclose(output, 1.75 * payload - offset)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_flatten_gpu_kernel_flattens_input():
+    kernel = _instantiate_kernel(
+        FlattenGpuKernel,
+        input_shape=(2, 3),
+        output_shape=(6,),
+        storage="gpu",
+    )
+    output = _empty_output((6,), storage="gpu")
+    payload = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+
+    kernel.compute_into(_device_array(payload, storage="gpu"), output, {})
+
+    _assert_allclose(output, payload.ravel())
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_affine_transform_gpu_kernel_applies_matrix_and_offset():
+    kernel = _instantiate_kernel(
+        AffineTransformGpuKernel,
+        input_shape=(3,),
+        output_shape=(2,),
+        auxiliary=[
+            {"name": "matrix", "shape": (2, 3)},
+            {"name": "offset", "shape": (2,)},
+        ],
+        storage="gpu",
+    )
+    output = _empty_output((2,), storage="gpu")
+    vector = np.array([2.0, -1.0, 4.0], dtype=np.float32)
+    matrix = np.array([[1.0, 2.0, -1.0], [0.5, 0.0, 3.0]], dtype=np.float32)
+    offset = np.array([1.0, -2.0], dtype=np.float32)
+
+    kernel.compute_into(
+        _device_array(vector, storage="gpu"),
+        output,
+        {
+            "matrix": _device_array(matrix, storage="gpu"),
+            "offset": _device_array(offset, storage="gpu"),
+        },
+    )
+
+    _assert_allclose(output, matrix @ vector + offset)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_leaky_integrator_gpu_kernel_updates_state():
+    kernel = _instantiate_kernel(
+        LeakyIntegratorGpuKernel,
+        input_shape=(3,),
+        output_shape=(3,),
+        parameters={"leak": 0.9, "gain": 0.5},
+        storage="gpu",
+    )
+    first_output = _empty_output((3,), storage="gpu")
+    second_output = _empty_output((3,), storage="gpu")
+    first_input = np.array([2.0, -2.0, 4.0], dtype=np.float32)
+    second_input = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+
+    kernel.compute_into(_device_array(first_input, storage="gpu"), first_output, {})
+    kernel.compute_into(_device_array(second_input, storage="gpu"), second_output, {})
+
+    expected_first = 0.5 * first_input
+    expected_second = 0.9 * expected_first + 0.5 * second_input
+    _assert_allclose(first_output, expected_first)
+    _assert_allclose(second_output, expected_second)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_centroid_gpu_kernel_computes_tile_centroids():
+    kernel = _instantiate_kernel(
+        ShackHartmannCentroidGpuKernel,
+        input_shape=(4, 4),
+        output_shape=(2, 2, 2),
+        parameters={"tile_size": 2},
+        storage="gpu",
+    )
+    output = _empty_output((2, 2, 2), storage="gpu")
+    image = np.array(
+        [
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 4.0, 2.0, 0.0],
+            [3.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 5.0],
+        ],
+        dtype=np.float32,
+    )
+
+    kernel.compute_into(_device_array(image, storage="gpu"), output, {})
+
+    expected = np.array(
+        [
+            [[0.5, 0.5], [0.16666667, -0.16666667]],
+            [[-0.5, -0.5], [0.5, 0.5]],
+        ],
+        dtype=np.float32,
+    )
+    _assert_allclose(output, expected, rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_custom_operation_gpu_kernel_supports_min_max_aliases():
+    kernel = _instantiate_kernel(
+        CustomOperationGpuKernel,
+        input_shape=(2, 2),
+        output_shape=(2, 2),
+        auxiliary=[
+            {"name": "dark_frame", "shape": (2, 2), "alias": "dark"},
+            {"name": "flat_field", "shape": (2, 2), "alias": "flat"},
+            {"name": "high_frame", "shape": (2, 2), "alias": "high"},
+        ],
+        operation="max(input, dark) - min(flat, high)",
+        storage="gpu",
+    )
+    output = _empty_output((2, 2), storage="gpu")
+    image = np.array([[1.0, 5.0], [2.0, 8.0]], dtype=np.float32)
+    dark = np.array([[3.0, 4.0], [1.0, 10.0]], dtype=np.float32)
+    flat = np.array([[2.0, 9.0], [6.0, 2.0]], dtype=np.float32)
+    high = np.array([[4.0, 3.0], [5.0, 5.0]], dtype=np.float32)
+
+    kernel.compute_into(
+        _device_array(image, storage="gpu"),
+        output,
+        {
+            "dark": _device_array(dark, storage="gpu"),
+            "flat": _device_array(flat, storage="gpu"),
+            "high": _device_array(high, storage="gpu"),
+        },
+    )
+
+    expected = np.maximum(image, dark) - np.minimum(flat, high)
+    _assert_allclose(output, expected)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_raise_error_gpu_kernel_raises_configured_message():
+    kernel = _instantiate_kernel(
+        RaiseErrorGpuKernel,
+        input_shape=(1,),
+        output_shape=(1,),
+        parameters={"message": "boom"},
+        storage="gpu",
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        kernel.compute_into(
+            _device_array(np.array([1.0], dtype=np.float32), storage="gpu"),
+            _empty_output((1,), storage="gpu"),
             {},
         )

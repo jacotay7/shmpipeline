@@ -40,6 +40,9 @@ or GPU base class.
 The first concrete example lives in
 `examples/affine_transformation/`.
 
+There is also a GPU-backed variant in
+`examples/gpu_affine_transformation/`.
+
 It defines a pipeline that computes $y = A x + b$ where:
 
 - `input_vector` is the streamed input
@@ -52,6 +55,9 @@ It defines a pipeline that computes $y = A x + b$ where:
 The repository also includes a basic adaptive-optics style example in
 `examples/basic_ao_system/`.
 
+There is also a GPU-backed variant in
+`examples/gpu_basic_ao_system/`.
+
 That example verifies a multi-stage CPU pipeline with:
 
 - Shack-Hartmann centroid extraction
@@ -60,13 +66,16 @@ That example verifies a multi-stage CPU pipeline with:
 - affine reconstruction
 - leaky-integrator control
 
-GPU kernels are not implemented yet, but the configuration model and base
-classes already reserve storage-specific validation for them.
+GPU kernels now mirror the built-in CPU kernels using CUDA-backed PyTorch
+tensors underneath `pyshmem` GPU streams.
 
 ## Custom Operations
 
 Simple arithmetic pipelines can be fused into a single CPU worker with
 `cpu.custom_operation`.
+
+The same expression support is available in the GPU example under
+`examples/gpu_custom_operations/`.
 
 Example:
 

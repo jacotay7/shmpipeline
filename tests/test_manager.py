@@ -11,8 +11,15 @@ from shmpipeline import PipelineConfig, PipelineManager, PipelineState
 from shmpipeline.errors import WorkerProcessError
 from shmpipeline.logging_utils import ColorFormatter
 
+try:
+    import torch
+except Exception:  # pragma: no cover - exercised when torch is unavailable
+    torch = None
+
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
+
+CUDA_AVAILABLE = torch is not None and torch.cuda.is_available()
 
 
 def _wait_for_next_write(stream, previous_count: int, *, timeout: float = 2.0):
@@ -22,6 +29,24 @@ def _wait_for_next_write(stream, previous_count: int, *, timeout: float = 2.0):
             return stream.read()
         time.sleep(1e-4)
     raise TimeoutError(f"timed out waiting for a new write on {stream.name!r}")
+
+
+def _to_host_array(value):
+    if torch is not None and isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy().copy()
+    return np.asarray(value).copy()
+
+
+def _wait_for_next_write_host(stream, previous_count: int, *, timeout: float = 2.0):
+    return _to_host_array(_wait_for_next_write(stream, previous_count, timeout=timeout))
+
+
+def _stream_payload(value, *, storage: str):
+    if storage == "gpu":
+        if not CUDA_AVAILABLE:
+            pytest.skip("CUDA is not available")
+        return torch.as_tensor(value, device="cuda:0")
+    return np.asarray(value)
 
 
 def _make_pipeline_config(shm_prefix: str, *, kind: str, parameters: dict):
@@ -41,6 +66,46 @@ def _make_pipeline_config(shm_prefix: str, *, kind: str, parameters: dict):
                     "storage": "cpu",
                 },
             ],
+            "kernels": [
+                {
+                    "name": "stage",
+                    "kind": kind,
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "parameters": parameters,
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
+def _make_pipeline_config_for_storage(
+    shm_prefix: str,
+    *,
+    kind: str,
+    parameters: dict,
+    storage: str,
+):
+    shared_memory = [
+        {
+            "name": f"{shm_prefix}_input",
+            "shape": [4],
+            "dtype": "float32",
+            "storage": storage,
+            **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+        },
+        {
+            "name": f"{shm_prefix}_output",
+            "shape": [4],
+            "dtype": "float32",
+            "storage": storage,
+            **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+        },
+    ]
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": shared_memory,
             "kernels": [
                 {
                     "name": "stage",
@@ -79,6 +144,30 @@ def _make_affine_pipeline_config(shm_prefix: str):
     )
 
 
+def _make_affine_pipeline_config_for_storage(shm_prefix: str, *, storage: str):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{shm_prefix}_input", "shape": [3], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_matrix", "shape": [2, 3], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_offset", "shape": [2], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_output", "shape": [2], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+            ],
+            "kernels": [
+                {
+                    "name": "affine_stage",
+                    "kind": f"{storage}.affine_transform",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": [f"{shm_prefix}_matrix", f"{shm_prefix}_offset"],
+                    "parameters": {},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
 def _make_elementwise_pipeline_config(shm_prefix: str, *, kind: str):
     return PipelineConfig.from_dict(
         {
@@ -86,6 +175,34 @@ def _make_elementwise_pipeline_config(shm_prefix: str, *, kind: str):
                 {"name": f"{shm_prefix}_input", "shape": [4], "dtype": "float32", "storage": "cpu"},
                 {"name": f"{shm_prefix}_aux", "shape": [4], "dtype": "float32", "storage": "cpu"},
                 {"name": f"{shm_prefix}_output", "shape": [4], "dtype": "float32", "storage": "cpu"},
+            ],
+            "kernels": [
+                {
+                    "name": "binary_stage",
+                    "kind": kind,
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": [f"{shm_prefix}_aux"],
+                    "parameters": {},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
+def _make_elementwise_pipeline_config_for_storage(
+    shm_prefix: str,
+    *,
+    kind: str,
+    storage: str,
+):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{shm_prefix}_input", "shape": [4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_aux", "shape": [4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_output", "shape": [4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
             ],
             "kernels": [
                 {
@@ -115,6 +232,39 @@ def _make_custom_operation_pipeline_config(shm_prefix: str, *, operation: str):
                 {
                     "name": "custom_stage",
                     "kind": "cpu.custom_operation",
+                    "operation": operation,
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": {
+                        "dark": f"{shm_prefix}_dark",
+                        "flat": f"{shm_prefix}_flat",
+                    },
+                    "parameters": {},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
+def _make_custom_operation_pipeline_config_for_storage(
+    shm_prefix: str,
+    *,
+    operation: str,
+    storage: str,
+):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{shm_prefix}_input", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_dark", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_flat", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {"name": f"{shm_prefix}_output", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+            ],
+            "kernels": [
+                {
+                    "name": "custom_stage",
+                    "kind": f"{storage}.custom_operation",
                     "operation": operation,
                     "input": f"{shm_prefix}_input",
                     "output": f"{shm_prefix}_output",
@@ -323,6 +473,31 @@ def test_manager_runs_cpu_scale_kernel_end_to_end(shm_prefix):
     manager.shutdown()
 
 
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_manager_runs_gpu_scale_kernel_end_to_end(shm_prefix):
+    config = _make_pipeline_config_for_storage(
+        shm_prefix,
+        kind="gpu.scale",
+        parameters={"factor": 2.5},
+        storage="gpu",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    input_stream = manager.get_stream(f"{shm_prefix}_input")
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    baseline = output_stream.count
+    input_stream.write(_stream_payload(payload, storage="gpu"))
+
+    received = _wait_for_next_write_host(output_stream, baseline, timeout=2.0)
+    np.testing.assert_allclose(received, payload * 2.5)
+
+    manager.stop()
+    manager.shutdown()
+
+
 def test_manager_runs_elementwise_subtract_kernel_end_to_end(shm_prefix):
     config = _make_elementwise_pipeline_config(
         shm_prefix,
@@ -347,6 +522,32 @@ def test_manager_runs_elementwise_subtract_kernel_end_to_end(shm_prefix):
     manager.shutdown()
 
 
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_manager_runs_gpu_elementwise_subtract_kernel_end_to_end(shm_prefix):
+    config = _make_elementwise_pipeline_config_for_storage(
+        shm_prefix,
+        kind="gpu.elementwise_subtract",
+        storage="gpu",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    input_stream = manager.get_stream(f"{shm_prefix}_input")
+    aux_stream = manager.get_stream(f"{shm_prefix}_aux")
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    input_payload = np.array([4.0, 5.0, 6.0, 7.0], dtype=np.float32)
+    aux_payload = np.array([1.5, 0.5, 2.0, 3.0], dtype=np.float32)
+    aux_stream.write(_stream_payload(aux_payload, storage="gpu"))
+    baseline = output_stream.count
+    input_stream.write(_stream_payload(input_payload, storage="gpu"))
+
+    received = _wait_for_next_write_host(output_stream, baseline, timeout=2.0)
+    np.testing.assert_allclose(received, input_payload - aux_payload)
+
+    manager.shutdown()
+
+
 def test_manager_surfaces_worker_failures(shm_prefix):
     config = _make_pipeline_config(
         shm_prefix,
@@ -359,6 +560,34 @@ def test_manager_surfaces_worker_failures(shm_prefix):
 
     manager.get_stream(f"{shm_prefix}_input").write(
         np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    )
+
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and manager.state != PipelineState.FAILED:
+        manager.poll_events()
+        time.sleep(0.05)
+
+    assert manager.state == PipelineState.FAILED
+    with pytest.raises(WorkerProcessError, match="intentional failure"):
+        manager.raise_if_failed()
+
+    manager.shutdown(force=True)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_manager_surfaces_gpu_worker_failures(shm_prefix):
+    config = _make_pipeline_config_for_storage(
+        shm_prefix,
+        kind="gpu.raise_error",
+        parameters={"message": "intentional failure"},
+        storage="gpu",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    manager.get_stream(f"{shm_prefix}_input").write(
+        _stream_payload(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), storage="gpu")
     )
 
     deadline = time.monotonic() + 2.0
@@ -397,6 +626,44 @@ def test_manager_runs_affine_transform_kernel_end_to_end(shm_prefix):
     )
 
     received = _wait_for_next_write(
+        manager.get_stream(f"{shm_prefix}_output"),
+        baseline,
+        timeout=2.0,
+    )
+    expected = np.array([6.5, 3.0], dtype=np.float32)
+    np.testing.assert_allclose(received, expected)
+
+    manager.shutdown()
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_manager_runs_gpu_affine_transform_kernel_end_to_end(shm_prefix):
+    config = _make_affine_pipeline_config_for_storage(shm_prefix, storage="gpu")
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    manager.get_stream(f"{shm_prefix}_matrix").write(
+        _stream_payload(
+            np.array(
+                [
+                    [1.0, 2.0, 0.0],
+                    [0.0, -1.0, 3.0],
+                ],
+                dtype=np.float32,
+            ),
+            storage="gpu",
+        )
+    )
+    manager.get_stream(f"{shm_prefix}_offset").write(
+        _stream_payload(np.array([0.5, -2.0], dtype=np.float32), storage="gpu")
+    )
+    baseline = manager.get_stream(f"{shm_prefix}_output").count
+    manager.get_stream(f"{shm_prefix}_input").write(
+        _stream_payload(np.array([4.0, 1.0, 2.0], dtype=np.float32), storage="gpu")
+    )
+
+    received = _wait_for_next_write_host(
         manager.get_stream(f"{shm_prefix}_output"),
         baseline,
         timeout=2.0,
@@ -481,6 +748,32 @@ def test_manager_runs_custom_dark_flat_operation(shm_prefix):
     manager.get_stream(f"{shm_prefix}_input").write(input_image)
 
     received = _wait_for_next_write(output_stream, baseline, timeout=2.0)
+    np.testing.assert_allclose(received, (input_image - dark_image) / flat_image)
+
+    manager.shutdown()
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_manager_runs_gpu_custom_dark_flat_operation(shm_prefix):
+    config = _make_custom_operation_pipeline_config_for_storage(
+        shm_prefix,
+        operation="(input - dark) / flat",
+        storage="gpu",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    input_image = np.arange(16, dtype=np.float32).reshape(4, 4) + 10.0
+    dark_image = np.full((4, 4), 2.0, dtype=np.float32)
+    flat_image = np.full((4, 4), 4.0, dtype=np.float32)
+    manager.get_stream(f"{shm_prefix}_dark").write(_stream_payload(dark_image, storage="gpu"))
+    manager.get_stream(f"{shm_prefix}_flat").write(_stream_payload(flat_image, storage="gpu"))
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(_stream_payload(input_image, storage="gpu"))
+
+    received = _wait_for_next_write_host(output_stream, baseline, timeout=2.0)
     np.testing.assert_allclose(received, (input_image - dark_image) / flat_image)
 
     manager.shutdown()

@@ -21,6 +21,20 @@ from shmpipeline.kernels.cpu import RaiseErrorCpuKernel
 from shmpipeline.kernels.cpu import ScaleCpuKernel
 from shmpipeline.kernels.cpu import ScaleOffsetCpuKernel
 from shmpipeline.kernels.cpu import ShackHartmannCentroidCpuKernel
+from shmpipeline.kernels.gpu import AddConstantGpuKernel
+from shmpipeline.kernels.gpu import AffineTransformGpuKernel
+from shmpipeline.kernels.gpu import CopyGpuKernel
+from shmpipeline.kernels.gpu import CustomOperationGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseAddGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseDivideGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseMultiplyGpuKernel
+from shmpipeline.kernels.gpu import ElementwiseSubtractGpuKernel
+from shmpipeline.kernels.gpu import FlattenGpuKernel
+from shmpipeline.kernels.gpu import LeakyIntegratorGpuKernel
+from shmpipeline.kernels.gpu import RaiseErrorGpuKernel
+from shmpipeline.kernels.gpu import ScaleGpuKernel
+from shmpipeline.kernels.gpu import ScaleOffsetGpuKernel
+from shmpipeline.kernels.gpu import ShackHartmannCentroidGpuKernel
 
 
 class KernelRegistry:
@@ -72,6 +86,20 @@ _DEFAULT_REGISTRY = KernelRegistry(
         ScaleCpuKernel.kind: ScaleCpuKernel,
         ScaleOffsetCpuKernel.kind: ScaleOffsetCpuKernel,
         ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
+        AddConstantGpuKernel.kind: AddConstantGpuKernel,
+        AffineTransformGpuKernel.kind: AffineTransformGpuKernel,
+        CopyGpuKernel.kind: CopyGpuKernel,
+        CustomOperationGpuKernel.kind: CustomOperationGpuKernel,
+        ElementwiseAddGpuKernel.kind: ElementwiseAddGpuKernel,
+        ElementwiseDivideGpuKernel.kind: ElementwiseDivideGpuKernel,
+        ElementwiseMultiplyGpuKernel.kind: ElementwiseMultiplyGpuKernel,
+        ElementwiseSubtractGpuKernel.kind: ElementwiseSubtractGpuKernel,
+        FlattenGpuKernel.kind: FlattenGpuKernel,
+        LeakyIntegratorGpuKernel.kind: LeakyIntegratorGpuKernel,
+        RaiseErrorGpuKernel.kind: RaiseErrorGpuKernel,
+        ScaleGpuKernel.kind: ScaleGpuKernel,
+        ScaleOffsetGpuKernel.kind: ScaleOffsetGpuKernel,
+        ShackHartmannCentroidGpuKernel.kind: ShackHartmannCentroidGpuKernel,
     }
 )
 

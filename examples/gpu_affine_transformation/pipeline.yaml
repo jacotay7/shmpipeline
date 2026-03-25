@@ -1,0 +1,34 @@
+shared_memory:
+  - name: affine_input_vector
+    shape: [3]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: affine_transform_matrix
+    shape: [2, 3]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: affine_offset_vector
+    shape: [2]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: affine_output_vector
+    shape: [2]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+kernels:
+  - name: affine_stage
+    kind: gpu.affine_transform
+    input: affine_input_vector
+    output: affine_output_vector
+    auxiliary:
+      - affine_transform_matrix
+      - affine_offset_vector
+    read_timeout: 0.1

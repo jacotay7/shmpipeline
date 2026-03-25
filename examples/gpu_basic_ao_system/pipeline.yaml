@@ -1,0 +1,97 @@
+shared_memory:
+  - name: ao_sensor_image
+    shape: [8, 8]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_centroids
+    shape: [4, 4, 2]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_centroid_offset
+    shape: [4, 4, 2]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_corrected_centroids
+    shape: [4, 4, 2]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_flattened_slopes
+    shape: [32]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_reconstructor_matrix
+    shape: [6, 32]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_affine_offset
+    shape: [6]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_open_loop_command
+    shape: [6]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+  - name: ao_dm_command
+    shape: [6]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+
+kernels:
+  - name: centroid_stage
+    kind: gpu.shack_hartmann_centroid
+    input: ao_sensor_image
+    output: ao_centroids
+    parameters:
+      tile_size: 2
+    read_timeout: 0.1
+
+  - name: gain_offset_stage
+    kind: gpu.scale_offset
+    input: ao_centroids
+    output: ao_corrected_centroids
+    auxiliary:
+      - ao_centroid_offset
+    parameters:
+      gain: 1.75
+    read_timeout: 0.1
+
+  - name: flatten_stage
+    kind: gpu.flatten
+    input: ao_corrected_centroids
+    output: ao_flattened_slopes
+    read_timeout: 0.1
+
+  - name: reconstructor_stage
+    kind: gpu.affine_transform
+    input: ao_flattened_slopes
+    output: ao_open_loop_command
+    auxiliary:
+      - ao_reconstructor_matrix
+      - ao_affine_offset
+    read_timeout: 0.1
+
+  - name: control_stage
+    kind: gpu.leaky_integrator
+    input: ao_open_loop_command
+    output: ao_dm_command
+    parameters:
+      leak: 0.92
+      gain: 0.35
+    read_timeout: 0.1
