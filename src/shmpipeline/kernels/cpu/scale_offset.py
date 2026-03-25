@@ -30,7 +30,7 @@ class ScaleOffsetCpuKernel(CpuKernel):
         super().validate_config(config, shared_memory)
         require_numeric_parameter(config, name="gain")
         input_spec = shared_memory[config.input]
-        offset_spec = shared_memory[config.auxiliary[0]]
+        offset_spec = shared_memory[config.auxiliary_names[0]]
         output_spec = shared_memory[config.output]
         if input_spec.shape != offset_spec.shape or input_spec.shape != output_spec.shape:
             raise ConfigValidationError(
@@ -39,7 +39,7 @@ class ScaleOffsetCpuKernel(CpuKernel):
         validate_same_dtype(
             config,
             shared_memory,
-            names=(config.input, config.auxiliary[0], config.output),
+            names=(config.input, config.auxiliary_names[0], config.output),
             description="scale-offset streams",
         )
 
@@ -55,5 +55,5 @@ class ScaleOffsetCpuKernel(CpuKernel):
         auxiliary_inputs: Mapping[str, Any],
     ) -> None:
         """Compute the scale-and-offset result into the reusable output buffer."""
-        offset = np.asarray(auxiliary_inputs[self.context.config.auxiliary[0]])
+        offset = np.asarray(auxiliary_inputs[self.context.config.auxiliary_aliases[0]])
         scale_offset_array(np.asarray(trigger_input), offset, output, self.gain)

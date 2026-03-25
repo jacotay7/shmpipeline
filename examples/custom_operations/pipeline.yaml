@@ -1,0 +1,31 @@
+shared_memory:
+  - name: raw_image
+    shape: [4, 4]
+    dtype: float32
+    storage: cpu
+
+  - name: dark_frame
+    shape: [4, 4]
+    dtype: float32
+    storage: cpu
+
+  - name: flat_field
+    shape: [4, 4]
+    dtype: float32
+    storage: cpu
+
+  - name: clean_image
+    shape: [4, 4]
+    dtype: float32
+    storage: cpu
+
+kernels:
+  - name: image_processing
+    kind: cpu.custom_operation
+    operation: (input - dark) / flat
+    input: raw_image
+    output: clean_image
+    auxiliary:
+      dark: dark_frame
+      flat: flat_field
+    read_timeout: 0.1

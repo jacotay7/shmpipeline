@@ -27,8 +27,8 @@ class AffineTransformCpuKernel(CpuKernel):
         """Validate vector, matrix, offset, and output compatibility."""
         super().validate_config(config, shared_memory)
         vector_spec = shared_memory[config.input]
-        matrix_spec = shared_memory[config.auxiliary[0]]
-        offset_spec = shared_memory[config.auxiliary[1]]
+        matrix_spec = shared_memory[config.auxiliary_names[0]]
+        offset_spec = shared_memory[config.auxiliary_names[1]]
         output_spec = shared_memory[config.output]
 
         if len(vector_spec.shape) != 1:
@@ -82,6 +82,6 @@ class AffineTransformCpuKernel(CpuKernel):
     ) -> None:
         """Compute the affine transform into the reusable output buffer."""
         vector = np.asarray(trigger_input)
-        matrix = np.asarray(auxiliary_inputs[self.context.config.auxiliary[0]])
-        offset = np.asarray(auxiliary_inputs[self.context.config.auxiliary[1]])
+        matrix = np.asarray(auxiliary_inputs[self.context.config.auxiliary_aliases[0]])
+        offset = np.asarray(auxiliary_inputs[self.context.config.auxiliary_aliases[1]])
         affine_transform_array(matrix, vector, offset, output)

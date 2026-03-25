@@ -62,7 +62,8 @@ def run_kernel_process(
     kernel = registry.create(kernel_config, shared_by_name)
     trigger_stream = _open_stream(shared_by_name[kernel_config.input])
     auxiliary_streams = {
-        name: _open_stream(shared_by_name[name]) for name in kernel_config.auxiliary
+        binding.alias: _open_stream(shared_by_name[binding.name])
+        for binding in kernel_config.auxiliary
     }
     output_stream = _open_stream(shared_by_name[kernel_config.output])
     event_queue.put(

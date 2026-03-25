@@ -79,6 +79,117 @@ def _make_affine_pipeline_config(shm_prefix: str):
     )
 
 
+def _make_elementwise_pipeline_config(shm_prefix: str, *, kind: str):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{shm_prefix}_input", "shape": [4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_aux", "shape": [4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_output", "shape": [4], "dtype": "float32", "storage": "cpu"},
+            ],
+            "kernels": [
+                {
+                    "name": "binary_stage",
+                    "kind": kind,
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": [f"{shm_prefix}_aux"],
+                    "parameters": {},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
+def _make_custom_operation_pipeline_config(shm_prefix: str, *, operation: str):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{shm_prefix}_input", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_dark", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_flat", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_output", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+            ],
+            "kernels": [
+                {
+                    "name": "custom_stage",
+                    "kind": "cpu.custom_operation",
+                    "operation": operation,
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": {
+                        "dark": f"{shm_prefix}_dark",
+                        "flat": f"{shm_prefix}_flat",
+                    },
+                    "parameters": {},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
+def _make_custom_intrinsic_pipeline_config(shm_prefix: str, *, operation: str):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{shm_prefix}_input", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_dark", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_flat", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_low", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_high", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_output", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+            ],
+            "kernels": [
+                {
+                    "name": "custom_stage",
+                    "kind": "cpu.custom_operation",
+                    "operation": operation,
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": {
+                        "dark": f"{shm_prefix}_dark",
+                        "flat": f"{shm_prefix}_flat",
+                        "low": f"{shm_prefix}_low",
+                        "high": f"{shm_prefix}_high",
+                    },
+                    "parameters": {},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
+def _make_custom_matmul_pipeline_config(shm_prefix: str):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{shm_prefix}_input", "shape": [3], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_matrix", "shape": [2, 3], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_bias", "shape": [2], "dtype": "float32", "storage": "cpu"},
+                {"name": f"{shm_prefix}_output", "shape": [2], "dtype": "float32", "storage": "cpu"},
+            ],
+            "kernels": [
+                {
+                    "name": "custom_stage",
+                    "kind": "cpu.custom_operation",
+                    "operation": "matrix @ input + bias",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": {
+                        "matrix": f"{shm_prefix}_matrix",
+                        "bias": f"{shm_prefix}_bias",
+                    },
+                    "parameters": {},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
 def _make_ao_pipeline_config(shm_prefix: str):
     return PipelineConfig.from_dict(
         {
@@ -212,6 +323,30 @@ def test_manager_runs_cpu_scale_kernel_end_to_end(shm_prefix):
     manager.shutdown()
 
 
+def test_manager_runs_elementwise_subtract_kernel_end_to_end(shm_prefix):
+    config = _make_elementwise_pipeline_config(
+        shm_prefix,
+        kind="cpu.elementwise_subtract",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    input_stream = manager.get_stream(f"{shm_prefix}_input")
+    aux_stream = manager.get_stream(f"{shm_prefix}_aux")
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    input_payload = np.array([4.0, 5.0, 6.0, 7.0], dtype=np.float32)
+    aux_payload = np.array([1.5, 0.5, 2.0, 3.0], dtype=np.float32)
+    aux_stream.write(aux_payload)
+    baseline = output_stream.count
+    input_stream.write(input_payload)
+
+    received = _wait_for_next_write(output_stream, baseline, timeout=2.0)
+    np.testing.assert_allclose(received, input_payload - aux_payload)
+
+    manager.shutdown()
+
+
 def test_manager_surfaces_worker_failures(shm_prefix):
     config = _make_pipeline_config(
         shm_prefix,
@@ -323,6 +458,121 @@ def test_manager_runs_many_affine_vectors(shm_prefix):
             timeout=2.0,
         )
         np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
+
+    manager.shutdown()
+
+
+def test_manager_runs_custom_dark_flat_operation(shm_prefix):
+    config = _make_custom_operation_pipeline_config(
+        shm_prefix,
+        operation="(input - dark) / flat",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    input_image = np.arange(16, dtype=np.float32).reshape(4, 4) + 10.0
+    dark_image = np.full((4, 4), 2.0, dtype=np.float32)
+    flat_image = np.full((4, 4), 4.0, dtype=np.float32)
+    manager.get_stream(f"{shm_prefix}_dark").write(dark_image)
+    manager.get_stream(f"{shm_prefix}_flat").write(flat_image)
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(input_image)
+
+    received = _wait_for_next_write(output_stream, baseline, timeout=2.0)
+    np.testing.assert_allclose(received, (input_image - dark_image) / flat_image)
+
+    manager.shutdown()
+
+
+def test_manager_runs_custom_matmul_operation(shm_prefix):
+    config = _make_custom_matmul_pipeline_config(shm_prefix)
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    matrix = np.array(
+        [
+            [1.0, 2.0, -1.0],
+            [0.5, 0.0, 3.0],
+        ],
+        dtype=np.float32,
+    )
+    bias = np.array([1.0, -2.0], dtype=np.float32)
+    vector = np.array([2.0, -1.0, 4.0], dtype=np.float32)
+    manager.get_stream(f"{shm_prefix}_matrix").write(matrix)
+    manager.get_stream(f"{shm_prefix}_bias").write(bias)
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(vector)
+
+    received = _wait_for_next_write(output_stream, baseline, timeout=2.0)
+    np.testing.assert_allclose(received, matrix @ vector + bias)
+
+    manager.shutdown()
+
+
+def test_manager_runs_custom_intrinsic_clip_abs_operation(shm_prefix):
+    config = _make_custom_intrinsic_pipeline_config(
+        shm_prefix,
+        operation="clip(abs(input - dark), low, high)",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    input_image = np.array(
+        [
+            [-3.0, -1.0, 1.0, 3.0],
+            [-5.0, -2.0, 2.0, 5.0],
+            [-7.0, -3.0, 3.0, 7.0],
+            [-9.0, -4.0, 4.0, 9.0],
+        ],
+        dtype=np.float32,
+    )
+    dark_image = np.ones((4, 4), dtype=np.float32)
+    low = np.full((4, 4), 1.5, dtype=np.float32)
+    high = np.full((4, 4), 6.0, dtype=np.float32)
+    manager.get_stream(f"{shm_prefix}_dark").write(dark_image)
+    manager.get_stream(f"{shm_prefix}_flat").write(np.ones((4, 4), dtype=np.float32))
+    manager.get_stream(f"{shm_prefix}_low").write(low)
+    manager.get_stream(f"{shm_prefix}_high").write(high)
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(input_image)
+
+    received = _wait_for_next_write(output_stream, baseline, timeout=2.0)
+    expected = np.clip(np.abs(input_image - dark_image), low, high)
+    np.testing.assert_allclose(received, expected)
+
+    manager.shutdown()
+
+
+def test_manager_runs_custom_intrinsic_minimum_maximum_operation(shm_prefix):
+    config = _make_custom_intrinsic_pipeline_config(
+        shm_prefix,
+        operation="maximum(input, dark) - minimum(flat, high)",
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+
+    input_image = np.arange(16, dtype=np.float32).reshape(4, 4) - 4.0
+    dark_image = np.full((4, 4), 3.0, dtype=np.float32)
+    flat = np.linspace(0.5, 8.0, 16, dtype=np.float32).reshape(4, 4)
+    high = np.full((4, 4), 5.0, dtype=np.float32)
+    manager.get_stream(f"{shm_prefix}_dark").write(dark_image)
+    manager.get_stream(f"{shm_prefix}_flat").write(flat)
+    manager.get_stream(f"{shm_prefix}_low").write(np.zeros((4, 4), dtype=np.float32))
+    manager.get_stream(f"{shm_prefix}_high").write(high)
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(input_image)
+
+    received = _wait_for_next_write(output_stream, baseline, timeout=2.0)
+    expected = np.maximum(input_image, dark_image) - np.minimum(flat, high)
+    np.testing.assert_allclose(received, expected)
 
     manager.shutdown()
 

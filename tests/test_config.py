@@ -212,3 +212,95 @@ def test_kernel_config_rejects_unexpected_fields():
                 ],
             }
         )
+
+
+def test_kernel_config_accepts_named_auxiliary_bindings():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "dark_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "flat_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "output_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "custom",
+                    "kind": "cpu.custom_operation",
+                    "operation": "(input - dark) / flat",
+                    "input": "input_frame",
+                    "output": "output_frame",
+                    "auxiliary": {
+                        "dark": "dark_frame",
+                        "flat": "flat_frame",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert config.kernels[0].auxiliary_aliases == ("dark", "flat")
+    assert config.kernels[0].auxiliary_names == ("dark_frame", "flat_frame")
+    assert config.kernels[0].auxiliary_by_alias == {
+        "dark": "dark_frame",
+        "flat": "flat_frame",
+    }
+
+
+def test_custom_operation_rejects_unsupported_function():
+    from shmpipeline import PipelineManager
+
+    with pytest.raises(
+        ConfigValidationError,
+        match="unsupported function",
+    ):
+        manager = PipelineManager(
+            PipelineConfig.from_dict(
+                {
+                    "shared_memory": [
+                        {
+                            "name": "input_frame",
+                            "shape": [4],
+                            "dtype": "float32",
+                            "storage": "cpu",
+                        },
+                        {
+                            "name": "output_frame",
+                            "shape": [4],
+                            "dtype": "float32",
+                            "storage": "cpu",
+                        },
+                    ],
+                    "kernels": [
+                        {
+                            "name": "custom",
+                            "kind": "cpu.custom_operation",
+                            "operation": "sqrt(input)",
+                            "input": "input_frame",
+                            "output": "output_frame",
+                        }
+                    ],
+                }
+            )
+        )
+        manager.build()

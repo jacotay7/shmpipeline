@@ -10,6 +10,11 @@ from shmpipeline.kernel import Kernel, KernelContext
 from shmpipeline.kernels.cpu import AddConstantCpuKernel
 from shmpipeline.kernels.cpu import AffineTransformCpuKernel
 from shmpipeline.kernels.cpu import CopyCpuKernel
+from shmpipeline.kernels.cpu import CustomOperationCpuKernel
+from shmpipeline.kernels.cpu import ElementwiseAddCpuKernel
+from shmpipeline.kernels.cpu import ElementwiseDivideCpuKernel
+from shmpipeline.kernels.cpu import ElementwiseMultiplyCpuKernel
+from shmpipeline.kernels.cpu import ElementwiseSubtractCpuKernel
 from shmpipeline.kernels.cpu import FlattenCpuKernel
 from shmpipeline.kernels.cpu import LeakyIntegratorCpuKernel
 from shmpipeline.kernels.cpu import RaiseErrorCpuKernel
@@ -56,6 +61,11 @@ _DEFAULT_REGISTRY = KernelRegistry(
         AddConstantCpuKernel.kind: AddConstantCpuKernel,
         AffineTransformCpuKernel.kind: AffineTransformCpuKernel,
         CopyCpuKernel.kind: CopyCpuKernel,
+        CustomOperationCpuKernel.kind: CustomOperationCpuKernel,
+        ElementwiseAddCpuKernel.kind: ElementwiseAddCpuKernel,
+        ElementwiseDivideCpuKernel.kind: ElementwiseDivideCpuKernel,
+        ElementwiseMultiplyCpuKernel.kind: ElementwiseMultiplyCpuKernel,
+        ElementwiseSubtractCpuKernel.kind: ElementwiseSubtractCpuKernel,
         FlattenCpuKernel.kind: FlattenCpuKernel,
         LeakyIntegratorCpuKernel.kind: LeakyIntegratorCpuKernel,
         RaiseErrorCpuKernel.kind: RaiseErrorCpuKernel,

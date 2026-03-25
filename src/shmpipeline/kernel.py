@@ -32,7 +32,7 @@ class KernelContext:
     @property
     def auxiliary_specs(self) -> tuple[SharedMemoryConfig, ...]:
         """Return auxiliary stream specifications in config order."""
-        return tuple(self.shared_memory[name] for name in self.config.auxiliary)
+        return tuple(self.shared_memory[name] for name in self.config.auxiliary_names)
 
     @property
     def output_spec(self) -> SharedMemoryConfig:

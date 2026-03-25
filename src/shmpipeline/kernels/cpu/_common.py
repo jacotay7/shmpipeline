@@ -61,6 +61,26 @@ def validate_same_dtype(
         )
 
 
+def validate_binary_same_shape_and_dtype(
+    config: KernelConfig,
+    shared_memory: Mapping[str, SharedMemoryConfig],
+) -> None:
+    """Require input, one auxiliary stream, and output to share shape/dtype."""
+    input_spec = shared_memory[config.input]
+    auxiliary_spec = shared_memory[config.auxiliary_names[0]]
+    output_spec = shared_memory[config.output]
+    if input_spec.shape != auxiliary_spec.shape or input_spec.shape != output_spec.shape:
+        raise ConfigValidationError(
+            f"kernel {config.name!r} requires matching shapes for input, auxiliary, and output"
+        )
+    validate_same_dtype(
+        config,
+        shared_memory,
+        names=(config.input, config.auxiliary_names[0], config.output),
+        description="binary-operation streams",
+    )
+
+
 if njit is not None:
 
     @njit(cache=True)

@@ -133,6 +133,14 @@ class SharedMemoryConfig:
 
 
 @dataclass(frozen=True)
+class AuxiliaryBinding:
+    """Bind one kernel-local auxiliary alias to a shared-memory stream."""
+
+    alias: str
+    name: str
+
+
+@dataclass(frozen=True)
 class KernelConfig:
     """Configuration for one compute kernel in the pipeline."""
 
@@ -140,7 +148,8 @@ class KernelConfig:
     kind: str
     input: str
     output: str
-    auxiliary: tuple[str, ...] = field(default_factory=tuple)
+    auxiliary: tuple[AuxiliaryBinding, ...] = field(default_factory=tuple)
+    operation: str | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
     read_timeout: float = 1.0
     pause_sleep: float = 0.01
@@ -163,6 +172,7 @@ class KernelConfig:
                 "input",
                 "output",
                 "auxiliary",
+                "operation",
                 "parameters",
                 "read_timeout",
                 "pause_sleep",
@@ -175,13 +185,30 @@ class KernelConfig:
         auxiliary_raw = data.get("auxiliary", ())
         input_name = _normalize_name(input_name, context=f"input for {name}")
         output_name = _normalize_name(output_name, context=f"output for {name}")
-        if auxiliary_raw in (None, ()):  # normalize omitted auxiliary values
+        if auxiliary_raw is None or auxiliary_raw == () or auxiliary_raw == []:
             auxiliary = ()
-        else:
-            auxiliary = _normalize_names(
-                auxiliary_raw,
-                context=f"auxiliary for {name}",
+        elif isinstance(auxiliary_raw, Mapping):
+            auxiliary = tuple(
+                AuxiliaryBinding(
+                    alias=_normalize_name(alias, context=f"auxiliary alias for {name}"),
+                    name=_normalize_name(
+                        stream_name,
+                        context=f"auxiliary stream name for {name}",
+                    ),
+                )
+                for alias, stream_name in auxiliary_raw.items()
             )
+        else:
+            auxiliary = tuple(
+                AuxiliaryBinding(alias=item, name=item)
+                for item in _normalize_names(
+                    auxiliary_raw,
+                    context=f"auxiliary for {name}",
+                )
+            )
+        operation = data.get("operation")
+        if operation is not None:
+            operation = _normalize_name(operation, context=f"operation for {name}")
         parameters = data.get("parameters", {})
         if not isinstance(parameters, dict):
             raise ConfigValidationError(
@@ -203,6 +230,7 @@ class KernelConfig:
             input=input_name,
             output=output_name,
             auxiliary=tuple(auxiliary),
+            operation=operation,
             parameters=dict(parameters),
             read_timeout=read_timeout,
             pause_sleep=pause_sleep,
@@ -215,11 +243,21 @@ class KernelConfig:
                 f"kernel {self.name!r} cannot use the same shared memory for "
                 "both input and output"
             )
-        if self.input in set(self.auxiliary):
+        auxiliary_names = set(self.auxiliary_names)
+        if len(auxiliary_names) != len(self.auxiliary_names):
+            raise ConfigValidationError(
+                f"kernel {self.name!r} cannot reuse the same auxiliary stream more than once"
+            )
+        auxiliary_aliases = [binding.alias for binding in self.auxiliary]
+        if len(set(auxiliary_aliases)) != len(auxiliary_aliases):
+            raise ConfigValidationError(
+                f"kernel {self.name!r} cannot reuse the same auxiliary alias more than once"
+            )
+        if self.input in auxiliary_names:
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot reuse the trigger input as auxiliary"
             )
-        if self.output in set(self.auxiliary):
+        if self.output in auxiliary_names:
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot reuse the output as auxiliary"
             )
@@ -227,7 +265,22 @@ class KernelConfig:
     @property
     def all_inputs(self) -> tuple[str, ...]:
         """Return the trigger input followed by ordered auxiliary streams."""
-        return (self.input, *self.auxiliary)
+        return (self.input, *self.auxiliary_names)
+
+    @property
+    def auxiliary_names(self) -> tuple[str, ...]:
+        """Return auxiliary shared-memory names in config order."""
+        return tuple(binding.name for binding in self.auxiliary)
+
+    @property
+    def auxiliary_aliases(self) -> tuple[str, ...]:
+        """Return auxiliary aliases in config order."""
+        return tuple(binding.alias for binding in self.auxiliary)
+
+    @property
+    def auxiliary_by_alias(self) -> dict[str, str]:
+        """Return auxiliary bindings keyed by expression alias."""
+        return {binding.alias: binding.name for binding in self.auxiliary}
 
 
 @dataclass(frozen=True)

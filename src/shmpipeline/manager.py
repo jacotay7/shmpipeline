@@ -89,7 +89,7 @@ class PipelineManager:
                 kernel_config.kind,
                 kernel_config.input,
                 kernel_config.output,
-                list(kernel_config.auxiliary),
+                kernel_config.auxiliary_by_alias,
             )
         for spec in self.config.shared_memory:
             create_kwargs = {

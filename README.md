@@ -19,6 +19,8 @@ The initial scaffold provides:
 - spawned worker processes for each configured kernel
 - best-effort worker distribution across CPU slots where the OS allows it
 - built-in CPU proof-of-concept kernels
+- built-in elementwise arithmetic kernels
+- fused custom arithmetic expressions with `cpu.custom_operation`
 - per-kernel modules grouped under CPU and GPU kernel folders
 - process supervision and worker error propagation
 - unit and integration tests for the scaffolded behavior
@@ -61,6 +63,62 @@ That example verifies a multi-stage CPU pipeline with:
 GPU kernels are not implemented yet, but the configuration model and base
 classes already reserve storage-specific validation for them.
 
+## Custom Operations
+
+Simple arithmetic pipelines can be fused into a single CPU worker with
+`cpu.custom_operation`.
+
+Example:
+
+```yaml
+shared_memory:
+	- name: ao_wfs_image
+		shape: [120, 120]
+		dtype: float32
+		storage: cpu
+
+	- name: ao_dark_image
+		shape: [120, 120]
+		dtype: float32
+		storage: cpu
+
+	- name: ao_flat_image
+		shape: [120, 120]
+		dtype: float32
+		storage: cpu
+
+	- name: ao_clean_image
+		shape: [120, 120]
+		dtype: float32
+		storage: cpu
+
+kernels:
+	- name: image_processing
+		kind: cpu.custom_operation
+		operation: (input - dark) / flat
+		input: ao_wfs_image
+		output: ao_clean_image
+		auxiliary:
+			dark: ao_dark_image
+			flat: ao_flat_image
+```
+
+Supported syntax is intentionally small and safe:
+
+- elementwise `+`, `-`, `*`, `/`
+- unary `+` and `-`
+- matrix multiplication with `@`
+- intrinsic functions `abs(x)`, `minimum(a, b)`, `maximum(a, b)`, `min(a, b)`, `max(a, b)`, and `clip(x, low, high)`
+- numeric constants
+- names bound through `input` and `auxiliary`
+
+For common two-input arithmetic there are also built-in kernels:
+
+- `cpu.elementwise_add`
+- `cpu.elementwise_subtract`
+- `cpu.elementwise_multiply`
+- `cpu.elementwise_divide`
+
 ## Configuration Example
 
 ```yaml
@@ -78,8 +136,8 @@ shared_memory:
 kernels:
 	- name: scale_stage
 		kind: cpu.scale
-		inputs: [input_frame]
-		outputs: [scaled_frame]
+		input: input_frame
+		output: scaled_frame
 		parameters:
 			factor: 2.0
 ```
