@@ -172,6 +172,31 @@ manager.shutdown()
 
 ## Development
 
+## GUI
+
+The repository now includes a desktop GUI for editing and running pipelines.
+
+It supports:
+
+- loading and saving YAML configs
+- add, edit, and remove operations for shared memory and kernels
+- config validation without building the pipeline
+- pipeline state-machine controls (`build`, `start`, `pause`, `resume`, `stop`, `shutdown`)
+- live worker status for configured kernels
+- passive shared-memory viewers polling at about 30 Hz
+
+Install the GUI dependencies:
+
+```bash
+pip install -e .[gui]
+```
+
+Launch it with:
+
+```bash
+shmpipeline-gui
+```
+
 Install the package and test dependencies:
 
 ```bash

@@ -51,6 +51,10 @@ class KernelRegistry:
         except KeyError as exc:
             raise ConfigValidationError(f"unknown kernel kind: {kind!r}") from exc
 
+    def kinds(self) -> tuple[str, ...]:
+        """Return registered kernel kinds in sorted order."""
+        return tuple(sorted(self._kernels))
+
     def validate(
         self,
         config: KernelConfig,
