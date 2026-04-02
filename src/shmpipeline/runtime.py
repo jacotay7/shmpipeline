@@ -14,6 +14,11 @@ from typing import Any
 import numpy as np
 import pyshmem
 
+try:
+    import torch
+except Exception:  # pragma: no cover - exercised when torch is unavailable
+    torch = None
+
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.logging_utils import get_logger
 from shmpipeline.registry import get_default_registry
@@ -89,6 +94,10 @@ def _read_locked_inputs_and_output(
     Lock acquisition can legitimately fail under load when an external writer
     is updating the trigger stream. That is treated as transient backpressure,
     not a worker failure.
+
+    GPU streams must use the consistent read path even while the lock is held.
+    The direct `safe=False` handle path can observe stale CUDA IPC contents
+    across processes because it bypasses pyshmem's synchronization/copy logic.
     """
     locked_streams = {
         kernel_config.input: trigger_stream,
@@ -102,13 +111,38 @@ def _read_locked_inputs_and_output(
             )
 
         current_count = trigger_stream.count
-        trigger_input = trigger_stream.read(safe=False)
+        trigger_input = _read_worker_input(trigger_stream)
         auxiliary_inputs = {
-            name: stream.read(safe=False)
+            name: _read_worker_input(stream)
             for name, stream in auxiliary_streams.items()
         }
         output_view = output_stream.read(safe=False)
         return current_count, trigger_input, auxiliary_inputs, output_view
+
+
+def _read_worker_input(stream: Any):
+    """Return one worker input snapshot with storage-aware consistency."""
+    if getattr(stream, "gpu_enabled", False):
+        return stream.read(safe=True)
+    return stream.read(safe=False)
+
+
+def _write_worker_output(
+    output_stream: Any, output_view: Any, value: Any
+) -> None:
+    """Publish one output buffer while keeping GPU mirrors and metadata consistent."""
+    output_stream._mark_write_started()
+    if isinstance(output_view, np.ndarray):
+        np.copyto(output_view, value)
+        output_stream._finish_write()
+        return
+
+    output_view.copy_(value)
+    if getattr(output_stream, "cpu_mirror", False):
+        np.copyto(output_stream._array, value.detach().cpu().numpy())
+    if torch is not None:
+        torch.cuda.synchronize(device=output_stream.gpu_device)
+    output_stream._finish_write()
 
 
 def run_kernel_process(
@@ -190,12 +224,11 @@ def run_kernel_process(
                 kernel.output_buffer,
                 auxiliary_inputs,
             )
-            output_stream._mark_write_started()
-            if isinstance(output_view, np.ndarray):
-                np.copyto(output_view, kernel.output_buffer)
-            else:
-                output_view.copy_(kernel.output_buffer)
-            output_stream._finish_write()
+            _write_worker_output(
+                output_stream,
+                output_view,
+                kernel.output_buffer,
+            )
             last_seen_count = current_count
             last_exec_s = time.perf_counter() - compute_started
             frames_processed += 1

@@ -49,7 +49,7 @@ from shmpipeline.gui.model import (
     validate_document,
 )
 from shmpipeline.gui.themes import apply_application_theme, resolve_theme
-from shmpipeline.gui.viewers import SharedMemoryViewer
+from shmpipeline.gui.viewers import SharedMemoryViewer, launch_viewer_process
 from shmpipeline.state import PipelineState
 from shmpipeline.synthetic import (
     SyntheticInputConfig,
@@ -260,10 +260,9 @@ class SyntheticInputDialog(QDialog):
         self.pattern_combo.addItems(list(available_synthetic_patterns()))
         self.pattern_combo.setCurrentText(initial.get("pattern", "random"))
         self.seed_edit = QLineEdit(str(initial.get("seed", 0)))
+        default_rate_hz = initial.get("rate_hz", 500.0)
         self.rate_edit = QLineEdit(
-            ""
-            if initial.get("rate_hz") is None
-            else str(initial.get("rate_hz"))
+            "" if default_rate_hz is None else str(default_rate_hz)
         )
         self.amplitude_edit = QLineEdit(str(initial.get("amplitude", 1.0)))
         self.offset_edit = QLineEdit(str(initial.get("offset", 0.0)))
@@ -277,7 +276,7 @@ class SyntheticInputDialog(QDialog):
         form.addRow("Target stream", self._stream_label)
         form.addRow("Pattern", self.pattern_combo)
         form.addRow("Seed", self.seed_edit)
-        form.addRow("Rate Hz (blank=max)", self.rate_edit)
+        form.addRow("Rate Hz (clear=max)", self.rate_edit)
         form.addRow("Amplitude", self.amplitude_edit)
         form.addRow("Offset", self.offset_edit)
         form.addRow("Period", self.period_edit)
@@ -326,6 +325,7 @@ class MainWindow(QMainWindow):
         self._manager = None
         self._manager_dirty = True
         self._viewers: list[SharedMemoryViewer] = []
+        self._viewer_processes: list[Any] = []
         self._validation_state = "idle"
 
         self._status_label = QLabel("No config loaded")
@@ -411,7 +411,7 @@ class MainWindow(QMainWindow):
             ("Edit", self.edit_shared_memory),
             ("Remove", self.remove_shared_memory),
             ("Open Viewer", self.open_viewer),
-            ("Start Test Input", self.start_synthetic_input),
+            ("Start/Reconfigure Test Input", self.start_synthetic_input),
             ("Stop Test Input", self.stop_synthetic_input),
         ]:
             button = QPushButton(label)
@@ -476,6 +476,7 @@ class MainWindow(QMainWindow):
 
     def _build_actions(self) -> None:
         file_menu = self.menuBar().addMenu("File")
+        stream_menu = self.menuBar().addMenu("Streams")
         control_menu = self.menuBar().addMenu("Pipeline")
         view_menu = self.menuBar().addMenu("View")
 
@@ -498,6 +499,15 @@ class MainWindow(QMainWindow):
             action.triggered.connect(handler)
             menu.addAction(action)
             toolbar.addAction(action)
+
+        for label, handler in [
+            ("Open Viewer", self.open_viewer),
+            ("Start/Reconfigure Test Input", self.start_synthetic_input),
+            ("Stop Test Input", self.stop_synthetic_input),
+        ]:
+            action = QAction(label, self)
+            action.triggered.connect(handler)
+            stream_menu.addAction(action)
 
         theme_menu = view_menu.addMenu("Theme")
         theme_group = QActionGroup(self)
@@ -779,6 +789,27 @@ class MainWindow(QMainWindow):
         for viewer in list(self._viewers):
             viewer.close()
         self._viewers.clear()
+        for process in list(self._viewer_processes):
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=2.0)
+            if process.is_alive() and hasattr(process, "kill"):
+                process.kill()
+                process.join(timeout=2.0)
+        self._viewer_processes.clear()
+
+    def _selected_stream_spec(
+        self, *, show_message: bool = False
+    ) -> dict[str, Any] | None:
+        row = self._selected_row(self._shared_table)
+        if row is None:
+            if show_message:
+                self._show_info(
+                    "Stream Selection",
+                    "Select a shared memory row first.",
+                )
+            return None
+        return dict(self._document["shared_memory"][row])
 
     def new_document(self) -> None:
         self._set_document(default_document())
@@ -1035,16 +1066,17 @@ class MainWindow(QMainWindow):
                 "Build the pipeline before starting a synthetic input.",
             )
             return
-        row = self._selected_row(self._shared_table)
-        if row is None:
+        spec = self._selected_stream_spec(show_message=True)
+        if spec is None:
             return
-        stream_name = self._document["shared_memory"][row].get("name", "")
-        dialog = SyntheticInputDialog(stream_name, self)
+        stream_name = spec.get("name", "")
+        initial = self._manager.synthetic_input_status().get(stream_name, {})
+        dialog = SyntheticInputDialog(stream_name, self, initial=initial)
         if dialog.exec() != QDialog.Accepted:
             return
         try:
-            spec = dialog.value()
-            self._manager.start_synthetic_input(spec)
+            synthetic_spec = dialog.value()
+            self._manager.start_synthetic_input(synthetic_spec)
         except Exception as exc:
             self._show_error("Synthetic Input Failed", exc)
             return
@@ -1056,10 +1088,10 @@ class MainWindow(QMainWindow):
     def stop_synthetic_input(self) -> None:
         if self._manager is None:
             return
-        row = self._selected_row(self._shared_table)
-        if row is None:
+        spec = self._selected_stream_spec(show_message=True)
+        if spec is None:
             return
-        stream_name = self._document["shared_memory"][row].get("name", "")
+        stream_name = spec.get("name", "")
         self._manager.stop_synthetic_input(stream_name)
         self._validation_output.setPlainText(
             f"Synthetic input stopped for {stream_name}."
@@ -1077,18 +1109,15 @@ class MainWindow(QMainWindow):
                 "Viewer", "Build the pipeline before opening viewers."
             )
             return
-        row = self._selected_row(self._shared_table)
-        if row is None:
+        spec = self._selected_stream_spec(show_message=True)
+        if spec is None:
             return
-        spec = dict(self._document["shared_memory"][row])
         try:
-            viewer = SharedMemoryViewer(spec, self)
+            process = launch_viewer_process(spec, self._theme.name)
         except Exception as exc:
             self._show_error("Viewer Failed", exc)
             return
-        viewer.apply_theme(self._theme)
-        viewer.show()
-        self._viewers.append(viewer)
+        self._viewer_processes.append(process)
 
     def closeEvent(
         self, event: QCloseEvent

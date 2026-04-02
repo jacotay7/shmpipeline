@@ -927,6 +927,103 @@ def test_manager_runs_gpu_affine_transform_kernel_end_to_end(shm_prefix):
     manager.shutdown()
 
 
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_manager_runs_gpu_affine_transform_with_cpu_mirrors(shm_prefix):
+    dimension = 256
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [dimension],
+                    "dtype": "float32",
+                    "storage": "gpu",
+                    "gpu_device": "cuda:0",
+                },
+                {
+                    "name": f"{shm_prefix}_matrix",
+                    "shape": [dimension, dimension],
+                    "dtype": "float32",
+                    "storage": "gpu",
+                    "gpu_device": "cuda:0",
+                    "cpu_mirror": True,
+                },
+                {
+                    "name": f"{shm_prefix}_offset",
+                    "shape": [dimension],
+                    "dtype": "float32",
+                    "storage": "gpu",
+                    "gpu_device": "cuda:0",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [dimension],
+                    "dtype": "float32",
+                    "storage": "gpu",
+                    "gpu_device": "cuda:0",
+                    "cpu_mirror": True,
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "affine_stage",
+                    "kind": "gpu.affine_transform",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "auxiliary": [
+                        f"{shm_prefix}_matrix",
+                        f"{shm_prefix}_offset",
+                    ],
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+    manager = PipelineManager(config)
+    rng = np.random.default_rng(7)
+    manager.build()
+    manager.start()
+
+    matrix = rng.standard_normal((dimension, dimension), dtype=np.float32)
+    offset = rng.standard_normal(dimension, dtype=np.float32)
+    vector = rng.standard_normal(dimension, dtype=np.float32)
+    expected = matrix @ vector + offset
+
+    manager.get_stream(f"{shm_prefix}_matrix").write(
+        _stream_payload(matrix, storage="gpu")
+    )
+    manager.get_stream(f"{shm_prefix}_offset").write(
+        _stream_payload(offset, storage="gpu")
+    )
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(
+        _stream_payload(vector, storage="gpu")
+    )
+
+    received_gpu = _wait_for_next_write_host(
+        output_stream,
+        baseline,
+        timeout=5.0,
+    )
+
+    mirror_stream = pyshmem.open(f"{shm_prefix}_output")
+    try:
+        received_cpu = _wait_for_next_write(
+            mirror_stream,
+            baseline,
+            timeout=5.0,
+            manager=manager,
+        )
+    finally:
+        mirror_stream.close()
+
+    np.testing.assert_allclose(received_gpu, expected, rtol=1e-4, atol=1e-4)
+    np.testing.assert_allclose(received_cpu, expected, rtol=1e-4, atol=1e-4)
+
+    manager.shutdown(force=True)
+
+
 def test_manager_build_reuses_compatible_existing_shared_memory(shm_prefix):
     input_name = f"{shm_prefix}_input"
     output_name = f"{shm_prefix}_output"

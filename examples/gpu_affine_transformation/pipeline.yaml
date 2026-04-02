@@ -12,6 +12,7 @@ shared_memory:
   dtype: float32
   storage: gpu
   gpu_device: cuda:0
+  cpu_mirror: true
 - name: affine_offset_vector
   shape:
   - 1000
@@ -24,6 +25,7 @@ shared_memory:
   dtype: float32
   storage: gpu
   gpu_device: cuda:0
+  cpu_mirror: true
 kernels:
 - name: affine_stage
   kind: gpu.affine_transform

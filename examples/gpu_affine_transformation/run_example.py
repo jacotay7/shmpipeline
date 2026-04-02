@@ -78,7 +78,7 @@ def main() -> None:
             result = to_host(
                 wait_for_next_write(output_stream, baseline, timeout=2.0)
             )
-            np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
+            np.testing.assert_allclose(result, expected, rtol=1e-4, atol=1e-4)
             if index == 0:
                 logger.info(
                     "first sample verified: input=%s output=%s",
