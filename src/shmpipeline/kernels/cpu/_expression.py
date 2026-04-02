@@ -57,7 +57,12 @@ class CompiledExpression:
     ) -> None:
         """Execute the compiled plan into the provided output buffer."""
         values = {"input": np.asarray(trigger_input)}
-        values.update({name: np.asarray(value) for name, value in auxiliary_inputs.items()})
+        values.update(
+            {
+                name: np.asarray(value)
+                for name, value in auxiliary_inputs.items()
+            }
+        )
         for instruction in self.instructions:
             destination = self._resolve_destination(
                 instruction.destination,
@@ -83,13 +88,21 @@ class CompiledExpression:
                 np.copyto(destination, operands[0], casting="unsafe")
                 continue
             if instruction.operation == "add":
-                np.add(operands[0], operands[1], out=destination, casting="unsafe")
+                np.add(
+                    operands[0], operands[1], out=destination, casting="unsafe"
+                )
             elif instruction.operation == "sub":
-                np.subtract(operands[0], operands[1], out=destination, casting="unsafe")
+                np.subtract(
+                    operands[0], operands[1], out=destination, casting="unsafe"
+                )
             elif instruction.operation == "mul":
-                np.multiply(operands[0], operands[1], out=destination, casting="unsafe")
+                np.multiply(
+                    operands[0], operands[1], out=destination, casting="unsafe"
+                )
             elif instruction.operation == "div":
-                np.divide(operands[0], operands[1], out=destination, casting="unsafe")
+                np.divide(
+                    operands[0], operands[1], out=destination, casting="unsafe"
+                )
             elif instruction.operation == "matmul":
                 np.matmul(operands[0], operands[1], out=destination)
             elif instruction.operation == "abs":
@@ -101,7 +114,9 @@ class CompiledExpression:
             elif instruction.operation == "clip":
                 np.clip(operands[0], operands[1], operands[2], out=destination)
             else:  # pragma: no cover - guarded by compilation
-                raise RuntimeError(f"unknown operation {instruction.operation!r}")
+                raise RuntimeError(
+                    f"unknown operation {instruction.operation!r}"
+                )
 
     @staticmethod
     def _resolve_destination(
@@ -114,7 +129,9 @@ class CompiledExpression:
             return output
         if operand.kind == "temp":
             return temporaries[operand.value]
-        raise RuntimeError(f"invalid destination operand kind: {operand.kind!r}")
+        raise RuntimeError(
+            f"invalid destination operand kind: {operand.kind!r}"
+        )
 
     @staticmethod
     def _resolve_operand(
@@ -194,7 +211,9 @@ class ExpressionCompiler:
             raise ConfigValidationError(
                 f"kernel {self.kernel_name!r} has invalid operation syntax: {exc.msg}"
             ) from exc
-        result = self._compile_node(tree.body, destination=OperandRef("output", None))
+        result = self._compile_node(
+            tree.body, destination=OperandRef("output", None)
+        )
         if result.operand.kind != "output":
             self._instructions.append(
                 Instruction(
@@ -332,14 +351,18 @@ class ExpressionCompiler:
             raise ConfigValidationError(
                 f"kernel {self.kernel_name!r} operation function {node.func.id!r} expects {arity} arguments"
             )
-        compiled_args = tuple(self._compile_node(argument) for argument in node.args)
+        compiled_args = tuple(
+            self._compile_node(argument) for argument in node.args
+        )
         try:
             sample = op_func(*(argument.sample for argument in compiled_args))
         except Exception as exc:
             raise ConfigValidationError(
                 f"kernel {self.kernel_name!r} operation is invalid for the configured stream shapes: {exc}"
             ) from exc
-        used_names = frozenset().union(*(argument.used_names for argument in compiled_args))
+        used_names = frozenset().union(
+            *(argument.used_names for argument in compiled_args)
+        )
         if np.ndim(sample) == 0:
             return _NodeResult(
                 operand=OperandRef("const", np.asarray(sample).item()),

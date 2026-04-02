@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import logging
 import time
+from pathlib import Path
 
 import numpy as np
 
 from shmpipeline import PipelineManager
 from shmpipeline.logging_utils import configure_colored_logging
-import logging
 
 
 def wait_for_next_write(stream, previous_count: int, *, timeout: float = 2.0):
@@ -50,7 +50,9 @@ def main() -> None:
         input_stream = manager.get_stream("affine_input_vector")
         output_stream = manager.get_stream("affine_output_vector")
 
-        logger.info("loading transform matrix and offset vector into shared memory")
+        logger.info(
+            "loading transform matrix and offset vector into shared memory"
+        )
         matrix_stream.write(transform_matrix)
         offset_stream.write(offset_vector)
 

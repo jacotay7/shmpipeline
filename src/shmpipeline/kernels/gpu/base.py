@@ -9,7 +9,6 @@ import torch
 
 from shmpipeline.kernel import Kernel
 
-
 _NUMPY_TO_TORCH_DTYPES = {
     np.dtype("bool"): torch.bool,
     np.dtype("uint8"): torch.uint8,

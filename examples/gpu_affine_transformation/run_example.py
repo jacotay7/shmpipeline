@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -64,7 +64,9 @@ def main() -> None:
         input_stream = manager.get_stream("affine_input_vector")
         output_stream = manager.get_stream("affine_output_vector")
 
-        logger.info("loading transform matrix and offset vector into GPU shared memory")
+        logger.info(
+            "loading transform matrix and offset vector into GPU shared memory"
+        )
         matrix_stream.write(to_device(transform_matrix))
         offset_stream.write(to_device(offset_vector))
 
@@ -74,7 +76,9 @@ def main() -> None:
             expected = transform_matrix @ vector + offset_vector
             baseline = output_stream.count
             input_stream.write(to_device(vector))
-            result = to_host(wait_for_next_write(output_stream, baseline, timeout=2.0))
+            result = to_host(
+                wait_for_next_write(output_stream, baseline, timeout=2.0)
+            )
             np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
             if index == 0:
                 logger.info(
@@ -92,7 +96,9 @@ def main() -> None:
             elapsed,
             sample_count / elapsed,
         )
-        print(f"Verified {sample_count} GPU affine transforms in {elapsed:.3f}s")
+        print(
+            f"Verified {sample_count} GPU affine transforms in {elapsed:.3f}s"
+        )
     finally:
         manager.shutdown(force=True)
 

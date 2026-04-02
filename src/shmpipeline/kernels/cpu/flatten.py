@@ -8,8 +8,7 @@ import numpy as np
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
-from shmpipeline.kernels.cpu._common import flatten_array
-from shmpipeline.kernels.cpu._common import validate_same_dtype
+from shmpipeline.kernels.cpu._common import flatten_array, validate_same_dtype
 from shmpipeline.kernels.cpu.base import CpuKernel
 
 

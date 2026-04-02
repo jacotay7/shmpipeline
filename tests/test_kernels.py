@@ -5,34 +5,38 @@ import pytest
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.kernel import KernelContext
-from shmpipeline.kernels.cpu import AddConstantCpuKernel
-from shmpipeline.kernels.cpu import AffineTransformCpuKernel
-from shmpipeline.kernels.cpu import CopyCpuKernel
-from shmpipeline.kernels.cpu import CustomOperationCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseAddCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseDivideCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseMultiplyCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseSubtractCpuKernel
-from shmpipeline.kernels.cpu import FlattenCpuKernel
-from shmpipeline.kernels.cpu import LeakyIntegratorCpuKernel
-from shmpipeline.kernels.cpu import RaiseErrorCpuKernel
-from shmpipeline.kernels.cpu import ScaleCpuKernel
-from shmpipeline.kernels.cpu import ScaleOffsetCpuKernel
-from shmpipeline.kernels.cpu import ShackHartmannCentroidCpuKernel
-from shmpipeline.kernels.gpu import AddConstantGpuKernel
-from shmpipeline.kernels.gpu import AffineTransformGpuKernel
-from shmpipeline.kernels.gpu import CopyGpuKernel
-from shmpipeline.kernels.gpu import CustomOperationGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseAddGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseDivideGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseMultiplyGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseSubtractGpuKernel
-from shmpipeline.kernels.gpu import FlattenGpuKernel
-from shmpipeline.kernels.gpu import LeakyIntegratorGpuKernel
-from shmpipeline.kernels.gpu import RaiseErrorGpuKernel
-from shmpipeline.kernels.gpu import ScaleGpuKernel
-from shmpipeline.kernels.gpu import ScaleOffsetGpuKernel
-from shmpipeline.kernels.gpu import ShackHartmannCentroidGpuKernel
+from shmpipeline.kernels.cpu import (
+    AddConstantCpuKernel,
+    AffineTransformCpuKernel,
+    CopyCpuKernel,
+    CustomOperationCpuKernel,
+    ElementwiseAddCpuKernel,
+    ElementwiseDivideCpuKernel,
+    ElementwiseMultiplyCpuKernel,
+    ElementwiseSubtractCpuKernel,
+    FlattenCpuKernel,
+    LeakyIntegratorCpuKernel,
+    RaiseErrorCpuKernel,
+    ScaleCpuKernel,
+    ScaleOffsetCpuKernel,
+    ShackHartmannCentroidCpuKernel,
+)
+from shmpipeline.kernels.gpu import (
+    AddConstantGpuKernel,
+    AffineTransformGpuKernel,
+    CopyGpuKernel,
+    CustomOperationGpuKernel,
+    ElementwiseAddGpuKernel,
+    ElementwiseDivideGpuKernel,
+    ElementwiseMultiplyGpuKernel,
+    ElementwiseSubtractGpuKernel,
+    FlattenGpuKernel,
+    LeakyIntegratorGpuKernel,
+    RaiseErrorGpuKernel,
+    ScaleGpuKernel,
+    ScaleOffsetGpuKernel,
+    ShackHartmannCentroidGpuKernel,
+)
 
 try:
     import torch
@@ -46,10 +50,7 @@ CUDA_AVAILABLE = torch is not None and torch.cuda.is_available()
 
 
 def _make_shared_memory(specs: list[dict]) -> dict[str, SharedMemoryConfig]:
-    return {
-        spec["name"]: SharedMemoryConfig.from_dict(spec)
-        for spec in specs
-    }
+    return {spec["name"]: SharedMemoryConfig.from_dict(spec) for spec in specs}
 
 
 def _instantiate_kernel(
@@ -117,7 +118,9 @@ def _instantiate_kernel(
         config_dict["operation"] = operation
     config = KernelConfig.from_dict(config_dict)
     kernel_cls.validate_config(config, shared_memory)
-    return kernel_cls(KernelContext(config=config, shared_memory=shared_memory))
+    return kernel_cls(
+        KernelContext(config=config, shared_memory=shared_memory)
+    )
 
 
 def _device_array(value, *, storage: str):
@@ -132,7 +135,11 @@ def _empty_output(shape, *, dtype=np.float32, storage: str):
     if storage == "gpu":
         if not CUDA_AVAILABLE:
             pytest.skip("CUDA is not available")
-        return torch.empty(shape, dtype=torch.float32 if dtype == np.float32 else None, device="cuda:0")
+        return torch.empty(
+            shape,
+            dtype=torch.float32 if dtype == np.float32 else None,
+            device="cuda:0",
+        )
     return np.empty(shape, dtype=dtype)
 
 
@@ -145,7 +152,9 @@ def _assert_allclose(observed, expected, *, rtol=1e-7, atol=0.0):
 
 
 def test_copy_kernel_copies_input():
-    kernel = _instantiate_kernel(CopyCpuKernel, input_shape=(4,), output_shape=(4,))
+    kernel = _instantiate_kernel(
+        CopyCpuKernel, input_shape=(4,), output_shape=(4,)
+    )
     output = np.empty(4, dtype=np.float32)
     payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
 
@@ -266,7 +275,9 @@ def test_scale_offset_kernel_applies_gain_and_offset():
 
 
 def test_flatten_kernel_flattens_input():
-    kernel = _instantiate_kernel(FlattenCpuKernel, input_shape=(2, 3), output_shape=(6,))
+    kernel = _instantiate_kernel(
+        FlattenCpuKernel, input_shape=(2, 3), output_shape=(6,)
+    )
     output = np.empty(6, dtype=np.float32)
     payload = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
 
@@ -394,9 +405,24 @@ def test_raise_error_kernel_raises_configured_message():
 @pytest.mark.parametrize(
     ("kernel_cls", "parameters", "payload", "expected"),
     [
-        (CopyGpuKernel, {}, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)),
-        (ScaleGpuKernel, {"factor": 2.5}, np.array([1.0, -2.0, 3.0, -4.0], dtype=np.float32), np.array([2.5, -5.0, 7.5, -10.0], dtype=np.float32)),
-        (AddConstantGpuKernel, {"constant": 3.0}, np.array([0.5, 1.5, -2.0, 4.0], dtype=np.float32), np.array([3.5, 4.5, 1.0, 7.0], dtype=np.float32)),
+        (
+            CopyGpuKernel,
+            {},
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+        ),
+        (
+            ScaleGpuKernel,
+            {"factor": 2.5},
+            np.array([1.0, -2.0, 3.0, -4.0], dtype=np.float32),
+            np.array([2.5, -5.0, 7.5, -10.0], dtype=np.float32),
+        ),
+        (
+            AddConstantGpuKernel,
+            {"constant": 3.0},
+            np.array([0.5, 1.5, -2.0, 4.0], dtype=np.float32),
+            np.array([3.5, 4.5, 1.0, 7.0], dtype=np.float32),
+        ),
     ],
 )
 def test_gpu_unary_kernels_match_expected_values(
@@ -423,13 +449,35 @@ def test_gpu_unary_kernels_match_expected_values(
 @pytest.mark.parametrize(
     ("kernel_cls", "lhs", "rhs", "expected"),
     [
-        (ElementwiseAddGpuKernel, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([0.5, -1.0, 2.0, 1.5], dtype=np.float32), np.array([1.5, 1.0, 5.0, 5.5], dtype=np.float32)),
-        (ElementwiseSubtractGpuKernel, np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32), np.array([1.0, 0.5, 2.0, 4.0], dtype=np.float32), np.array([4.0, 5.5, 5.0, 4.0], dtype=np.float32)),
-        (ElementwiseMultiplyGpuKernel, np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([2.0, 0.5, -1.0, 3.0], dtype=np.float32), np.array([2.0, 1.0, -3.0, 12.0], dtype=np.float32)),
-        (ElementwiseDivideGpuKernel, np.array([2.0, 6.0, 8.0, 9.0], dtype=np.float32), np.array([2.0, 3.0, 4.0, 1.5], dtype=np.float32), np.array([1.0, 2.0, 2.0, 6.0], dtype=np.float32)),
+        (
+            ElementwiseAddGpuKernel,
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+            np.array([0.5, -1.0, 2.0, 1.5], dtype=np.float32),
+            np.array([1.5, 1.0, 5.0, 5.5], dtype=np.float32),
+        ),
+        (
+            ElementwiseSubtractGpuKernel,
+            np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32),
+            np.array([1.0, 0.5, 2.0, 4.0], dtype=np.float32),
+            np.array([4.0, 5.5, 5.0, 4.0], dtype=np.float32),
+        ),
+        (
+            ElementwiseMultiplyGpuKernel,
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+            np.array([2.0, 0.5, -1.0, 3.0], dtype=np.float32),
+            np.array([2.0, 1.0, -3.0, 12.0], dtype=np.float32),
+        ),
+        (
+            ElementwiseDivideGpuKernel,
+            np.array([2.0, 6.0, 8.0, 9.0], dtype=np.float32),
+            np.array([2.0, 3.0, 4.0, 1.5], dtype=np.float32),
+            np.array([1.0, 2.0, 2.0, 6.0], dtype=np.float32),
+        ),
     ],
 )
-def test_gpu_binary_kernels_match_expected_values(kernel_cls, lhs, rhs, expected):
+def test_gpu_binary_kernels_match_expected_values(
+    kernel_cls, lhs, rhs, expected
+):
     kernel = _instantiate_kernel(
         kernel_cls,
         input_shape=lhs.shape,
@@ -530,8 +578,12 @@ def test_leaky_integrator_gpu_kernel_updates_state():
     first_input = np.array([2.0, -2.0, 4.0], dtype=np.float32)
     second_input = np.array([1.0, 1.0, 1.0], dtype=np.float32)
 
-    kernel.compute_into(_device_array(first_input, storage="gpu"), first_output, {})
-    kernel.compute_into(_device_array(second_input, storage="gpu"), second_output, {})
+    kernel.compute_into(
+        _device_array(first_input, storage="gpu"), first_output, {}
+    )
+    kernel.compute_into(
+        _device_array(second_input, storage="gpu"), second_output, {}
+    )
 
     expected_first = 0.5 * first_input
     expected_second = 0.9 * expected_first + 0.5 * second_input

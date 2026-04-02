@@ -32,7 +32,9 @@ class AddConstantGpuKernel(GpuKernel):
 
     def __init__(self, context: KernelContext) -> None:
         super().__init__(context)
-        self.constant = require_numeric_parameter(context.config, name="constant")
+        self.constant = require_numeric_parameter(
+            context.config, name="constant"
+        )
 
     def compute_into(
         self,
@@ -41,5 +43,9 @@ class AddConstantGpuKernel(GpuKernel):
         auxiliary_inputs: Mapping[str, Any],
     ) -> None:
         del auxiliary_inputs
-        torch.add(as_gpu_tensor(trigger_input, device=self.device), self.constant, out=output)
+        torch.add(
+            as_gpu_tensor(trigger_input, device=self.device),
+            self.constant,
+            out=output,
+        )
         torch.cuda.synchronize(output.device)

@@ -26,7 +26,9 @@ def main() -> None:
     manager.build()
     manager.start()
 
-    raw_image = (np.arange(16, dtype=np.float32).reshape(4, 4) + 20.0).astype(np.float32)
+    raw_image = (np.arange(16, dtype=np.float32).reshape(4, 4) + 20.0).astype(
+        np.float32
+    )
     dark_frame = np.full((4, 4), 2.0, dtype=np.float32)
     flat_field = np.linspace(1.0, 2.5, 16, dtype=np.float32).reshape(4, 4)
     expected = (raw_image - dark_frame) / flat_field

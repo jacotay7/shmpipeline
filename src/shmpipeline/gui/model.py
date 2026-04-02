@@ -11,6 +11,7 @@ import yaml
 
 from shmpipeline.config import PipelineConfig
 from shmpipeline.errors import ConfigValidationError
+from shmpipeline.graph import validate_pipeline_config
 from shmpipeline.manager import PipelineManager
 from shmpipeline.registry import get_default_registry
 
@@ -86,15 +87,7 @@ def validate_document(document: Mapping[str, Any]) -> list[str]:
     except ConfigValidationError as exc:
         return [str(exc)]
 
-    registry = get_default_registry()
-    shared_by_name = config.shared_memory_by_name
-    errors: list[str] = []
-    for kernel in config.kernels:
-        try:
-            registry.validate(kernel, shared_by_name)
-        except ConfigValidationError as exc:
-            errors.append(str(exc))
-    return errors
+    return validate_pipeline_config(config)
 
 
 def create_manager(document: Mapping[str, Any]) -> PipelineManager:

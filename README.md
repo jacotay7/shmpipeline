@@ -19,10 +19,14 @@ The initial scaffold provides:
 - spawned worker processes for each configured kernel
 - best-effort worker distribution across CPU slots where the OS allows it
 - built-in CPU proof-of-concept kernels
+- GPU kernel parity for the built-in kernel family
 - built-in elementwise arithmetic kernels
 - fused custom arithmetic expressions with `cpu.custom_operation`
 - per-kernel modules grouped under CPU and GPU kernel folders
 - process supervision and worker error propagation
+- pipeline graph introspection and runtime snapshots
+- a CLI for `validate`, `describe`, and `run` workflows
+- backend synthetic inputs for test and demo pipelines
 - unit and integration tests for the scaffolded behavior
 
 ## Kernel Layout
@@ -170,6 +174,100 @@ manager.stop()
 manager.shutdown()
 ```
 
+## CLI
+
+The package now includes a headless CLI entry point.
+
+Validate a config without creating shared memory:
+
+```bash
+shmpipeline validate pipeline.yaml
+```
+
+Describe the derived pipeline graph:
+
+```bash
+shmpipeline describe pipeline.yaml
+shmpipeline describe pipeline.yaml --json
+```
+
+Run a pipeline until interrupted or for a bounded duration:
+
+```bash
+shmpipeline run pipeline.yaml
+shmpipeline run pipeline.yaml --duration 5.0 --json-status
+```
+
+## Graph Introspection
+
+`shmpipeline` can derive a graph model from the config before any workers are
+spawned.
+
+That graph surface reports:
+
+- source streams that must be driven externally
+- sink streams that terminate the pipeline
+- orphaned shared-memory definitions
+- upstream and downstream kernel dependencies
+- ambiguous multiple-producer wiring as a validation error
+
+Programmatic example:
+
+```python
+from shmpipeline import PipelineConfig, PipelineGraph
+
+config = PipelineConfig.from_yaml("pipeline.yaml")
+graph = PipelineGraph.from_config(config)
+
+print(graph.source_streams())
+print(graph.describe())
+```
+
+## Synthetic Inputs
+
+The manager can start background synthetic writers for any built input stream.
+
+This is useful for:
+
+- benchmarking a pipeline without an external producer
+- demoing GUI viewers and runtime behavior
+- driving deterministic regression tests
+
+Example:
+
+```python
+from shmpipeline import PipelineConfig, PipelineManager, SyntheticInputConfig
+
+config = PipelineConfig.from_yaml("pipeline.yaml")
+manager = PipelineManager(config)
+manager.build()
+manager.start()
+
+manager.start_synthetic_input(
+	SyntheticInputConfig(
+		stream_name="input_frame",
+		pattern="random",
+		seed=7,
+		rate_hz=500.0,
+	)
+)
+
+snapshot = manager.runtime_snapshot()
+print(snapshot["synthetic_sources"])
+
+manager.stop_synthetic_input("input_frame")
+manager.shutdown()
+```
+
+Available patterns:
+
+- `constant`
+- `random`
+- `ramp`
+- `sine`
+- `impulse`
+- `checkerboard`
+
 ## Development
 
 ## GUI
@@ -181,9 +279,12 @@ It supports:
 - loading and saving YAML configs
 - add, edit, and remove operations for shared memory and kernels
 - config validation without building the pipeline
+- a graph summary tab derived from the current document
 - pipeline state-machine controls (`build`, `start`, `pause`, `resume`, `stop`, `shutdown`)
-- live worker status for configured kernels
-- passive shared-memory viewers polling at about 30 Hz
+- live worker status and runtime metrics for configured kernels
+- light and dark themes, with light as the default
+- start and stop controls for synthetic test inputs on built streams
+- live shared-memory viewers polling at about 30 Hz
 
 Install the GUI dependencies:
 
@@ -196,6 +297,9 @@ Launch it with:
 ```bash
 shmpipeline-gui
 ```
+
+The GUI can open live viewers for configured shared-memory streams and switch
+between light and dark themes from the `View` menu.
 
 Install the package and test dependencies:
 

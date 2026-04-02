@@ -38,7 +38,10 @@ class ShackHartmannCentroidGpuKernel(GpuKernel):
             raise ConfigValidationError(
                 f"kernel {config.name!r} requires output shape (rows, cols, 2)"
             )
-        if image_spec.shape[0] % tile_size != 0 or image_spec.shape[1] % tile_size != 0:
+        if (
+            image_spec.shape[0] % tile_size != 0
+            or image_spec.shape[1] % tile_size != 0
+        ):
             raise ConfigValidationError(
                 f"kernel {config.name!r} requires image dimensions divisible by tile_size"
             )

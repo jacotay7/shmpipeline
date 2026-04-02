@@ -51,6 +51,7 @@ gui = [
 ]
 
 [project.scripts]
+shmpipeline = "shmpipeline.cli:main"
 shmpipeline-gui = "shmpipeline.gui.app:main"
 
 [tool.setuptools]
@@ -66,4 +67,4 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I"]
-ignore = []
+ignore = ["E501"]

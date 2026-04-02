@@ -8,8 +8,10 @@ import torch
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
-from shmpipeline.kernels.gpu._common import require_numeric_parameter
-from shmpipeline.kernels.gpu._common import validate_unary_same_shape_and_dtype
+from shmpipeline.kernels.gpu._common import (
+    require_numeric_parameter,
+    validate_unary_same_shape_and_dtype,
+)
 from shmpipeline.kernels.gpu.base import GpuKernel, as_gpu_tensor
 
 
@@ -49,6 +51,11 @@ class LeakyIntegratorGpuKernel(GpuKernel):
     ) -> None:
         del auxiliary_inputs
         torch.mul(self.state, self.leak, out=output)
-        torch.add(output, as_gpu_tensor(trigger_input, device=self.device), alpha=self.gain, out=output)
+        torch.add(
+            output,
+            as_gpu_tensor(trigger_input, device=self.device),
+            alpha=self.gain,
+            out=output,
+        )
         self.state.copy_(output)
         torch.cuda.synchronize(output.device)

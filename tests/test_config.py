@@ -8,7 +8,6 @@ import pytest
 from shmpipeline import PipelineConfig
 from shmpipeline.errors import ConfigValidationError
 
-
 pytestmark = pytest.mark.unit
 
 

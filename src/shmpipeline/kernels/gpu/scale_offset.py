@@ -8,8 +8,10 @@ import torch
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
-from shmpipeline.kernels.gpu._common import require_numeric_parameter
-from shmpipeline.kernels.gpu._common import validate_same_dtype
+from shmpipeline.kernels.gpu._common import (
+    require_numeric_parameter,
+    validate_same_dtype,
+)
 from shmpipeline.kernels.gpu.base import GpuKernel, as_gpu_tensor
 
 
@@ -30,7 +32,10 @@ class ScaleOffsetGpuKernel(GpuKernel):
         input_spec = shared_memory[config.input]
         offset_spec = shared_memory[config.auxiliary_names[0]]
         output_spec = shared_memory[config.output]
-        if input_spec.shape != offset_spec.shape or input_spec.shape != output_spec.shape:
+        if (
+            input_spec.shape != offset_spec.shape
+            or input_spec.shape != output_spec.shape
+        ):
             raise ConfigValidationError(
                 f"kernel {config.name!r} requires matching shapes for input, offset, and output"
             )
@@ -53,6 +58,10 @@ class ScaleOffsetGpuKernel(GpuKernel):
     ) -> None:
         alias = self.context.config.auxiliary_aliases[0]
         offset = as_gpu_tensor(auxiliary_inputs[alias], device=self.device)
-        torch.mul(as_gpu_tensor(trigger_input, device=self.device), self.gain, out=output)
+        torch.mul(
+            as_gpu_tensor(trigger_input, device=self.device),
+            self.gain,
+            out=output,
+        )
         torch.sub(output, offset, out=output)
         torch.cuda.synchronize(output.device)

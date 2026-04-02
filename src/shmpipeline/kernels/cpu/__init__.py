@@ -7,9 +7,15 @@ from shmpipeline.kernels.cpu.centroid import ShackHartmannCentroidCpuKernel
 from shmpipeline.kernels.cpu.copy import CopyCpuKernel
 from shmpipeline.kernels.cpu.custom_operation import CustomOperationCpuKernel
 from shmpipeline.kernels.cpu.elementwise_add import ElementwiseAddCpuKernel
-from shmpipeline.kernels.cpu.elementwise_divide import ElementwiseDivideCpuKernel
-from shmpipeline.kernels.cpu.elementwise_multiply import ElementwiseMultiplyCpuKernel
-from shmpipeline.kernels.cpu.elementwise_subtract import ElementwiseSubtractCpuKernel
+from shmpipeline.kernels.cpu.elementwise_divide import (
+    ElementwiseDivideCpuKernel,
+)
+from shmpipeline.kernels.cpu.elementwise_multiply import (
+    ElementwiseMultiplyCpuKernel,
+)
+from shmpipeline.kernels.cpu.elementwise_subtract import (
+    ElementwiseSubtractCpuKernel,
+)
 from shmpipeline.kernels.cpu.flatten import FlattenCpuKernel
 from shmpipeline.kernels.cpu.leaky_integrator import LeakyIntegratorCpuKernel
 from shmpipeline.kernels.cpu.raise_error import RaiseErrorCpuKernel

@@ -5,6 +5,7 @@ import logging
 import time
 
 import numpy as np
+import pyshmem
 import pytest
 
 from shmpipeline import PipelineConfig, PipelineManager, PipelineState
@@ -37,8 +38,12 @@ def _to_host_array(value):
     return np.asarray(value).copy()
 
 
-def _wait_for_next_write_host(stream, previous_count: int, *, timeout: float = 2.0):
-    return _to_host_array(_wait_for_next_write(stream, previous_count, timeout=timeout))
+def _wait_for_next_write_host(
+    stream, previous_count: int, *, timeout: float = 2.0
+):
+    return _to_host_array(
+        _wait_for_next_write(stream, previous_count, timeout=timeout)
+    )
 
 
 def _stream_payload(value, *, storage: str):
@@ -124,10 +129,30 @@ def _make_affine_pipeline_config(shm_prefix: str):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [3], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_matrix", "shape": [2, 3], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_offset", "shape": [2], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_output", "shape": [2], "dtype": "float32", "storage": "cpu"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [3],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_matrix",
+                    "shape": [2, 3],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_offset",
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
             ],
             "kernels": [
                 {
@@ -135,7 +160,10 @@ def _make_affine_pipeline_config(shm_prefix: str):
                     "kind": "cpu.affine_transform",
                     "input": f"{shm_prefix}_input",
                     "output": f"{shm_prefix}_output",
-                    "auxiliary": [f"{shm_prefix}_matrix", f"{shm_prefix}_offset"],
+                    "auxiliary": [
+                        f"{shm_prefix}_matrix",
+                        f"{shm_prefix}_offset",
+                    ],
                     "parameters": {},
                     "read_timeout": 0.1,
                 }
@@ -148,10 +176,34 @@ def _make_affine_pipeline_config_for_storage(shm_prefix: str, *, storage: str):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [3], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_matrix", "shape": [2, 3], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_offset", "shape": [2], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_output", "shape": [2], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [3],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_matrix",
+                    "shape": [2, 3],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_offset",
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
             ],
             "kernels": [
                 {
@@ -159,7 +211,10 @@ def _make_affine_pipeline_config_for_storage(shm_prefix: str, *, storage: str):
                     "kind": f"{storage}.affine_transform",
                     "input": f"{shm_prefix}_input",
                     "output": f"{shm_prefix}_output",
-                    "auxiliary": [f"{shm_prefix}_matrix", f"{shm_prefix}_offset"],
+                    "auxiliary": [
+                        f"{shm_prefix}_matrix",
+                        f"{shm_prefix}_offset",
+                    ],
                     "parameters": {},
                     "read_timeout": 0.1,
                 }
@@ -172,9 +227,24 @@ def _make_elementwise_pipeline_config(shm_prefix: str, *, kind: str):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_aux", "shape": [4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_output", "shape": [4], "dtype": "float32", "storage": "cpu"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_aux",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
             ],
             "kernels": [
                 {
@@ -200,9 +270,27 @@ def _make_elementwise_pipeline_config_for_storage(
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_aux", "shape": [4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_output", "shape": [4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_aux",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
             ],
             "kernels": [
                 {
@@ -223,10 +311,30 @@ def _make_custom_operation_pipeline_config(shm_prefix: str, *, operation: str):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_dark", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_flat", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_output", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_dark",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_flat",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
             ],
             "kernels": [
                 {
@@ -256,10 +364,34 @@ def _make_custom_operation_pipeline_config_for_storage(
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_dark", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_flat", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
-                {"name": f"{shm_prefix}_output", "shape": [4, 4], "dtype": "float32", "storage": storage, **({"gpu_device": "cuda:0"} if storage == "gpu" else {})},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_dark",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_flat",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": storage,
+                    **({"gpu_device": "cuda:0"} if storage == "gpu" else {}),
+                },
             ],
             "kernels": [
                 {
@@ -284,12 +416,42 @@ def _make_custom_intrinsic_pipeline_config(shm_prefix: str, *, operation: str):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_dark", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_flat", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_low", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_high", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_output", "shape": [4, 4], "dtype": "float32", "storage": "cpu"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_dark",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_flat",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_low",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_high",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4, 4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
             ],
             "kernels": [
                 {
@@ -316,10 +478,30 @@ def _make_custom_matmul_pipeline_config(shm_prefix: str):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [3], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_matrix", "shape": [2, 3], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_bias", "shape": [2], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_output", "shape": [2], "dtype": "float32", "storage": "cpu"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [3],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_matrix",
+                    "shape": [2, 3],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_bias",
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
             ],
             "kernels": [
                 {
@@ -344,15 +526,60 @@ def _make_ao_pipeline_config(shm_prefix: str):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_image", "shape": [8, 8], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_centroids", "shape": [4, 4, 2], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_centroid_offset", "shape": [4, 4, 2], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_corrected", "shape": [4, 4, 2], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_flattened", "shape": [32], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_reconstructor", "shape": [6, 32], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_affine_offset", "shape": [6], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_open_loop", "shape": [6], "dtype": "float32", "storage": "cpu"},
-                {"name": f"{shm_prefix}_command", "shape": [6], "dtype": "float32", "storage": "cpu"},
+                {
+                    "name": f"{shm_prefix}_image",
+                    "shape": [8, 8],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_centroids",
+                    "shape": [4, 4, 2],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_centroid_offset",
+                    "shape": [4, 4, 2],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_corrected",
+                    "shape": [4, 4, 2],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_flattened",
+                    "shape": [32],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_reconstructor",
+                    "shape": [6, 32],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_affine_offset",
+                    "shape": [6],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_open_loop",
+                    "shape": [6],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_command",
+                    "shape": [6],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
             ],
             "kernels": [
                 {
@@ -385,7 +612,10 @@ def _make_ao_pipeline_config(shm_prefix: str):
                     "kind": "cpu.affine_transform",
                     "input": f"{shm_prefix}_flattened",
                     "output": f"{shm_prefix}_open_loop",
-                    "auxiliary": [f"{shm_prefix}_reconstructor", f"{shm_prefix}_affine_offset"],
+                    "auxiliary": [
+                        f"{shm_prefix}_reconstructor",
+                        f"{shm_prefix}_affine_offset",
+                    ],
                     "parameters": {},
                     "read_timeout": 0.1,
                 },
@@ -417,8 +647,12 @@ def _compute_centroids(image: np.ndarray, tile_size: int) -> np.ndarray:
             if total <= 0.0:
                 continue
             y_coords, x_coords = np.indices(patch.shape, dtype=np.float32)
-            centroids[tile_y, tile_x, 0] = np.sum(y_coords * patch) / total - center
-            centroids[tile_y, tile_x, 1] = np.sum(x_coords * patch) / total - center
+            centroids[tile_y, tile_x, 0] = (
+                np.sum(y_coords * patch) / total - center
+            )
+            centroids[tile_y, tile_x, 1] = (
+                np.sum(x_coords * patch) / total - center
+            )
     return centroids
 
 
@@ -563,7 +797,9 @@ def test_manager_surfaces_worker_failures(shm_prefix):
     )
 
     deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline and manager.state != PipelineState.FAILED:
+    while (
+        time.monotonic() < deadline and manager.state != PipelineState.FAILED
+    ):
         manager.poll_events()
         time.sleep(0.05)
 
@@ -587,11 +823,15 @@ def test_manager_surfaces_gpu_worker_failures(shm_prefix):
     manager.start()
 
     manager.get_stream(f"{shm_prefix}_input").write(
-        _stream_payload(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), storage="gpu")
+        _stream_payload(
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), storage="gpu"
+        )
     )
 
     deadline = time.monotonic() + 2.0
-    while time.monotonic() < deadline and manager.state != PipelineState.FAILED:
+    while (
+        time.monotonic() < deadline and manager.state != PipelineState.FAILED
+    ):
         manager.poll_events()
         time.sleep(0.05)
 
@@ -638,7 +878,9 @@ def test_manager_runs_affine_transform_kernel_end_to_end(shm_prefix):
 
 @pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
 def test_manager_runs_gpu_affine_transform_kernel_end_to_end(shm_prefix):
-    config = _make_affine_pipeline_config_for_storage(shm_prefix, storage="gpu")
+    config = _make_affine_pipeline_config_for_storage(
+        shm_prefix, storage="gpu"
+    )
     manager = PipelineManager(config)
     manager.build()
     manager.start()
@@ -660,7 +902,9 @@ def test_manager_runs_gpu_affine_transform_kernel_end_to_end(shm_prefix):
     )
     baseline = manager.get_stream(f"{shm_prefix}_output").count
     manager.get_stream(f"{shm_prefix}_input").write(
-        _stream_payload(np.array([4.0, 1.0, 2.0], dtype=np.float32), storage="gpu")
+        _stream_payload(
+            np.array([4.0, 1.0, 2.0], dtype=np.float32), storage="gpu"
+        )
     )
 
     received = _wait_for_next_write_host(
@@ -672,6 +916,121 @@ def test_manager_runs_gpu_affine_transform_kernel_end_to_end(shm_prefix):
     np.testing.assert_allclose(received, expected)
 
     manager.shutdown()
+
+
+def test_manager_build_reuses_compatible_existing_shared_memory(shm_prefix):
+    input_name = f"{shm_prefix}_input"
+    output_name = f"{shm_prefix}_output"
+    existing_input = pyshmem.create(
+        input_name,
+        shape=(4,),
+        dtype=np.float32,
+    )
+    existing_output = pyshmem.create(
+        output_name,
+        shape=(4,),
+        dtype=np.float32,
+    )
+    existing_input.write(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
+    existing_input.close()
+    existing_output.close()
+
+    manager = PipelineManager(
+        _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
+    )
+    try:
+        manager.build()
+
+        reused_input = manager.get_stream(input_name)
+        assert reused_input.count == 1
+        np.testing.assert_allclose(
+            reused_input.read(),
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+        )
+    finally:
+        manager.shutdown(force=True)
+
+
+def test_manager_build_replaces_incompatible_existing_shared_memory(shm_prefix):
+    input_name = f"{shm_prefix}_input"
+    stale_stream = pyshmem.create(
+        input_name,
+        shape=(3,),
+        dtype=np.float32,
+    )
+    stale_stream.close()
+
+    manager = PipelineManager(
+        _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
+    )
+    try:
+        manager.build()
+
+        rebuilt_input = manager.get_stream(input_name)
+        assert rebuilt_input.shape == (4,)
+        assert rebuilt_input.dtype == np.dtype(np.float32)
+        assert rebuilt_input.count == 0
+    finally:
+        manager.shutdown(force=True)
+
+
+def test_manager_worker_retries_after_transient_lock_contention(shm_prefix):
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "stage",
+                    "kind": "cpu.copy",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "parameters": {},
+                    "read_timeout": 0.01,
+                }
+            ],
+        }
+    )
+    manager = PipelineManager(config)
+    try:
+        manager.build()
+        manager.start()
+        input_stream = manager.get_stream(f"{shm_prefix}_input")
+        output_stream = manager.get_stream(f"{shm_prefix}_output")
+        expected = np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32)
+        baseline = output_stream.count
+
+        with input_stream.locked():
+            input_stream._mark_write_started()
+            np.copyto(input_stream.read(safe=False), expected)
+            input_stream._finish_write()
+            time.sleep(0.05)
+
+        observed = _wait_for_next_write(output_stream, baseline, timeout=2.0)
+        deadline = time.monotonic() + 0.5
+        while time.monotonic() < deadline:
+            manager.poll_events()
+            if manager.state == PipelineState.FAILED:
+                break
+            time.sleep(0.01)
+
+        np.testing.assert_allclose(observed, expected)
+        assert manager.state != PipelineState.FAILED
+        assert manager.failures == ()
+    finally:
+        manager.shutdown(force=True)
 
 
 def test_manager_logs_state_transitions_and_validation(shm_prefix, caplog):
@@ -690,9 +1049,16 @@ def test_manager_logs_state_transitions_and_validation(shm_prefix, caplog):
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("validating pipeline config" in message for message in messages)
-    assert any("state transition: initialized -> built" in message for message in messages)
-    assert any("state transition: built -> running" in message for message in messages)
-    assert any("worker started: kernel=stage" in message for message in messages)
+    assert any(
+        "state transition: initialized -> built" in message
+        for message in messages
+    )
+    assert any(
+        "state transition: built -> running" in message for message in messages
+    )
+    assert any(
+        "worker started: kernel=stage" in message for message in messages
+    )
 
 
 def test_manager_runs_many_affine_vectors(shm_prefix):
@@ -726,6 +1092,13 @@ def test_manager_runs_many_affine_vectors(shm_prefix):
         )
         np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
 
+    worker_status = manager.status()["workers"]["affine_stage"]
+    assert worker_status["frames_processed"] >= 1
+    assert worker_status["avg_exec_us"] is not None
+    assert worker_status["jitter_us_rms"] is not None
+    assert worker_status["metrics_window"] >= 1
+    assert worker_status["throughput_hz"] >= 0.0
+
     manager.shutdown()
 
 
@@ -748,7 +1121,9 @@ def test_manager_runs_custom_dark_flat_operation(shm_prefix):
     manager.get_stream(f"{shm_prefix}_input").write(input_image)
 
     received = _wait_for_next_write(output_stream, baseline, timeout=2.0)
-    np.testing.assert_allclose(received, (input_image - dark_image) / flat_image)
+    np.testing.assert_allclose(
+        received, (input_image - dark_image) / flat_image
+    )
 
     manager.shutdown()
 
@@ -767,14 +1142,22 @@ def test_manager_runs_gpu_custom_dark_flat_operation(shm_prefix):
     input_image = np.arange(16, dtype=np.float32).reshape(4, 4) + 10.0
     dark_image = np.full((4, 4), 2.0, dtype=np.float32)
     flat_image = np.full((4, 4), 4.0, dtype=np.float32)
-    manager.get_stream(f"{shm_prefix}_dark").write(_stream_payload(dark_image, storage="gpu"))
-    manager.get_stream(f"{shm_prefix}_flat").write(_stream_payload(flat_image, storage="gpu"))
+    manager.get_stream(f"{shm_prefix}_dark").write(
+        _stream_payload(dark_image, storage="gpu")
+    )
+    manager.get_stream(f"{shm_prefix}_flat").write(
+        _stream_payload(flat_image, storage="gpu")
+    )
     output_stream = manager.get_stream(f"{shm_prefix}_output")
     baseline = output_stream.count
-    manager.get_stream(f"{shm_prefix}_input").write(_stream_payload(input_image, storage="gpu"))
+    manager.get_stream(f"{shm_prefix}_input").write(
+        _stream_payload(input_image, storage="gpu")
+    )
 
     received = _wait_for_next_write_host(output_stream, baseline, timeout=2.0)
-    np.testing.assert_allclose(received, (input_image - dark_image) / flat_image)
+    np.testing.assert_allclose(
+        received, (input_image - dark_image) / flat_image
+    )
 
     manager.shutdown()
 
@@ -828,7 +1211,9 @@ def test_manager_runs_custom_intrinsic_clip_abs_operation(shm_prefix):
     low = np.full((4, 4), 1.5, dtype=np.float32)
     high = np.full((4, 4), 6.0, dtype=np.float32)
     manager.get_stream(f"{shm_prefix}_dark").write(dark_image)
-    manager.get_stream(f"{shm_prefix}_flat").write(np.ones((4, 4), dtype=np.float32))
+    manager.get_stream(f"{shm_prefix}_flat").write(
+        np.ones((4, 4), dtype=np.float32)
+    )
     manager.get_stream(f"{shm_prefix}_low").write(low)
     manager.get_stream(f"{shm_prefix}_high").write(high)
     output_stream = manager.get_stream(f"{shm_prefix}_output")
@@ -857,7 +1242,9 @@ def test_manager_runs_custom_intrinsic_minimum_maximum_operation(shm_prefix):
     high = np.full((4, 4), 5.0, dtype=np.float32)
     manager.get_stream(f"{shm_prefix}_dark").write(dark_image)
     manager.get_stream(f"{shm_prefix}_flat").write(flat)
-    manager.get_stream(f"{shm_prefix}_low").write(np.zeros((4, 4), dtype=np.float32))
+    manager.get_stream(f"{shm_prefix}_low").write(
+        np.zeros((4, 4), dtype=np.float32)
+    )
     manager.get_stream(f"{shm_prefix}_high").write(high)
     output_stream = manager.get_stream(f"{shm_prefix}_output")
     baseline = output_stream.count
@@ -873,7 +1260,9 @@ def test_manager_runs_custom_intrinsic_minimum_maximum_operation(shm_prefix):
 def test_color_formatter_emits_ansi_sequences():
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
-    handler.setFormatter(ColorFormatter("%(levelname)s %(message)s", use_color=True))
+    handler.setFormatter(
+        ColorFormatter("%(levelname)s %(message)s", use_color=True)
+    )
     logger = logging.getLogger("shmpipeline.test.color")
     logger.handlers = [handler]
     logger.setLevel(logging.INFO)

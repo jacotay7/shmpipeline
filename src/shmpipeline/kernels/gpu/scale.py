@@ -41,5 +41,9 @@ class ScaleGpuKernel(GpuKernel):
         auxiliary_inputs: Mapping[str, Any],
     ) -> None:
         del auxiliary_inputs
-        torch.mul(as_gpu_tensor(trigger_input, device=self.device), self.factor, out=output)
+        torch.mul(
+            as_gpu_tensor(trigger_input, device=self.device),
+            self.factor,
+            out=output,
+        )
         torch.cuda.synchronize(output.device)

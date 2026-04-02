@@ -8,9 +8,11 @@ import numpy as np
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
-from shmpipeline.kernels.cpu._common import require_numeric_parameter
-from shmpipeline.kernels.cpu._common import scale_offset_array
-from shmpipeline.kernels.cpu._common import validate_same_dtype
+from shmpipeline.kernels.cpu._common import (
+    require_numeric_parameter,
+    scale_offset_array,
+    validate_same_dtype,
+)
 from shmpipeline.kernels.cpu.base import CpuKernel
 
 
@@ -32,7 +34,10 @@ class ScaleOffsetCpuKernel(CpuKernel):
         input_spec = shared_memory[config.input]
         offset_spec = shared_memory[config.auxiliary_names[0]]
         output_spec = shared_memory[config.output]
-        if input_spec.shape != offset_spec.shape or input_spec.shape != output_spec.shape:
+        if (
+            input_spec.shape != offset_spec.shape
+            or input_spec.shape != output_spec.shape
+        ):
             raise ConfigValidationError(
                 f"kernel {config.name!r} requires matching shapes for input, offset, and output"
             )
@@ -55,5 +60,9 @@ class ScaleOffsetCpuKernel(CpuKernel):
         auxiliary_inputs: Mapping[str, Any],
     ) -> None:
         """Compute the scale-and-offset result into the reusable output buffer."""
-        offset = np.asarray(auxiliary_inputs[self.context.config.auxiliary_aliases[0]])
-        scale_offset_array(np.asarray(trigger_input), offset, output, self.gain)
+        offset = np.asarray(
+            auxiliary_inputs[self.context.config.auxiliary_aliases[0]]
+        )
+        scale_offset_array(
+            np.asarray(trigger_input), offset, output, self.gain
+        )

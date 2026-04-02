@@ -50,5 +50,9 @@ class FlattenGpuKernel(GpuKernel):
         auxiliary_inputs: Mapping[str, Any],
     ) -> None:
         del auxiliary_inputs
-        output.copy_(torch.reshape(as_gpu_tensor(trigger_input, device=self.device), (-1,)))
+        output.copy_(
+            torch.reshape(
+                as_gpu_tensor(trigger_input, device=self.device), (-1,)
+            )
+        )
         torch.cuda.synchronize(output.device)

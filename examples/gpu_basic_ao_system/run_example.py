@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -31,8 +31,12 @@ def compute_centroids(image: np.ndarray, tile_size: int) -> np.ndarray:
             if total <= 0.0:
                 continue
             y_coords, x_coords = np.indices(patch.shape, dtype=np.float32)
-            centroids[tile_y, tile_x, 0] = np.sum(y_coords * patch) / total - center
-            centroids[tile_y, tile_x, 1] = np.sum(x_coords * patch) / total - center
+            centroids[tile_y, tile_x, 0] = (
+                np.sum(y_coords * patch) / total - center
+            )
+            centroids[tile_y, tile_x, 1] = (
+                np.sum(x_coords * patch) / total - center
+            )
     return centroids
 
 
@@ -73,7 +77,9 @@ def main() -> None:
     control_leak = 0.92
     control_gain = 0.35
     centroid_offset = rng.normal(0.0, 0.03, size=(4, 4, 2)).astype(np.float32)
-    reconstructor_matrix = rng.normal(0.0, 0.2, size=(6, 32)).astype(np.float32)
+    reconstructor_matrix = rng.normal(0.0, 0.2, size=(6, 32)).astype(
+        np.float32
+    )
     affine_offset = rng.normal(0.0, 0.1, size=(6,)).astype(np.float32)
     controller_state = np.zeros(6, dtype=np.float32)
 
@@ -82,8 +88,12 @@ def main() -> None:
     manager.start()
 
     try:
-        manager.get_stream("ao_centroid_offset").write(to_device(centroid_offset))
-        manager.get_stream("ao_reconstructor_matrix").write(to_device(reconstructor_matrix))
+        manager.get_stream("ao_centroid_offset").write(
+            to_device(centroid_offset)
+        )
+        manager.get_stream("ao_reconstructor_matrix").write(
+            to_device(reconstructor_matrix)
+        )
         manager.get_stream("ao_affine_offset").write(to_device(affine_offset))
         logger.info("loaded static GPU AO calibration streams")
 
@@ -93,10 +103,17 @@ def main() -> None:
             image += 0.05
 
             expected_centroids = compute_centroids(image, tile_size)
-            expected_corrected = centroid_gain * expected_centroids - centroid_offset
+            expected_corrected = (
+                centroid_gain * expected_centroids - centroid_offset
+            )
             expected_flattened = expected_corrected.reshape(-1)
-            expected_open_loop = reconstructor_matrix @ expected_flattened + affine_offset
-            controller_state = control_leak * controller_state + control_gain * expected_open_loop
+            expected_open_loop = (
+                reconstructor_matrix @ expected_flattened + affine_offset
+            )
+            controller_state = (
+                control_leak * controller_state
+                + control_gain * expected_open_loop
+            )
             expected_dm_command = controller_state.copy()
 
             baseline = manager.get_stream("ao_dm_command").count
@@ -109,16 +126,34 @@ def main() -> None:
                 )
             )
 
-            observed_centroids = to_host(manager.get_stream("ao_centroids").read())
-            observed_corrected = to_host(manager.get_stream("ao_corrected_centroids").read())
-            observed_flattened = to_host(manager.get_stream("ao_flattened_slopes").read())
-            observed_open_loop = to_host(manager.get_stream("ao_open_loop_command").read())
+            observed_centroids = to_host(
+                manager.get_stream("ao_centroids").read()
+            )
+            observed_corrected = to_host(
+                manager.get_stream("ao_corrected_centroids").read()
+            )
+            observed_flattened = to_host(
+                manager.get_stream("ao_flattened_slopes").read()
+            )
+            observed_open_loop = to_host(
+                manager.get_stream("ao_open_loop_command").read()
+            )
 
-            np.testing.assert_allclose(observed_centroids, expected_centroids, rtol=1e-5, atol=1e-5)
-            np.testing.assert_allclose(observed_corrected, expected_corrected, rtol=1e-5, atol=1e-5)
-            np.testing.assert_allclose(observed_flattened, expected_flattened, rtol=1e-5, atol=1e-5)
-            np.testing.assert_allclose(observed_open_loop, expected_open_loop, rtol=1e-5, atol=1e-5)
-            np.testing.assert_allclose(dm_command, expected_dm_command, rtol=1e-5, atol=1e-5)
+            np.testing.assert_allclose(
+                observed_centroids, expected_centroids, rtol=1e-5, atol=1e-5
+            )
+            np.testing.assert_allclose(
+                observed_corrected, expected_corrected, rtol=1e-5, atol=1e-5
+            )
+            np.testing.assert_allclose(
+                observed_flattened, expected_flattened, rtol=1e-5, atol=1e-5
+            )
+            np.testing.assert_allclose(
+                observed_open_loop, expected_open_loop, rtol=1e-5, atol=1e-5
+            )
+            np.testing.assert_allclose(
+                dm_command, expected_dm_command, rtol=1e-5, atol=1e-5
+            )
 
             if index == 0:
                 logger.info(
@@ -127,7 +162,9 @@ def main() -> None:
                     dm_command.tolist(),
                 )
             elif (index + 1) % 500 == 0:
-                logger.info("verified %d/%d GPU AO frames", index + 1, frame_count)
+                logger.info(
+                    "verified %d/%d GPU AO frames", index + 1, frame_count
+                )
 
         elapsed = time.perf_counter() - start
         logger.info(

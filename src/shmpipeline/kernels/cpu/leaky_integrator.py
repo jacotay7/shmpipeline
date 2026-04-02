@@ -8,9 +8,11 @@ import numpy as np
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
-from shmpipeline.kernels.cpu._common import leaky_integrator_step
-from shmpipeline.kernels.cpu._common import require_numeric_parameter
-from shmpipeline.kernels.cpu._common import validate_unary_same_shape_and_dtype
+from shmpipeline.kernels.cpu._common import (
+    leaky_integrator_step,
+    require_numeric_parameter,
+    validate_unary_same_shape_and_dtype,
+)
 from shmpipeline.kernels.cpu.base import CpuKernel
 
 

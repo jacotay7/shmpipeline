@@ -82,6 +82,10 @@ class AffineTransformCpuKernel(CpuKernel):
     ) -> None:
         """Compute the affine transform into the reusable output buffer."""
         vector = np.asarray(trigger_input)
-        matrix = np.asarray(auxiliary_inputs[self.context.config.auxiliary_aliases[0]])
-        offset = np.asarray(auxiliary_inputs[self.context.config.auxiliary_aliases[1]])
+        matrix = np.asarray(
+            auxiliary_inputs[self.context.config.auxiliary_aliases[0]]
+        )
+        offset = np.asarray(
+            auxiliary_inputs[self.context.config.auxiliary_aliases[1]]
+        )
         affine_transform_array(matrix, vector, offset, output)

@@ -69,7 +69,10 @@ def validate_binary_same_shape_and_dtype(
     input_spec = shared_memory[config.input]
     auxiliary_spec = shared_memory[config.auxiliary_names[0]]
     output_spec = shared_memory[config.output]
-    if input_spec.shape != auxiliary_spec.shape or input_spec.shape != output_spec.shape:
+    if (
+        input_spec.shape != auxiliary_spec.shape
+        or input_spec.shape != output_spec.shape
+    ):
         raise ConfigValidationError(
             f"kernel {config.name!r} requires matching shapes for input, auxiliary, and output"
         )
@@ -89,13 +92,11 @@ if njit is not None:
         for index in range(source.size):
             destination.flat[index] = source.flat[index] * factor
 
-
     @njit(cache=True)
     def add_constant_array(source, destination, constant):
         """Add a scalar constant into the destination buffer."""
         for index in range(source.size):
             destination.flat[index] = source.flat[index] + constant
-
 
     @njit(cache=True)
     def affine_transform_array(matrix, vector, offset, destination):
@@ -112,11 +113,9 @@ else:
         """Scale a flat array into the destination buffer."""
         np.multiply(source, factor, out=destination, casting="unsafe")
 
-
     def add_constant_array(source, destination, constant):
         """Add a scalar constant into the destination buffer."""
         np.add(source, constant, out=destination, casting="unsafe")
-
 
     def affine_transform_array(matrix, vector, offset, destination):
         """Apply y = A x + b for one dense matrix and vector."""
@@ -129,15 +128,15 @@ if njit is not None:
     def scale_offset_array(source, offset, destination, gain):
         """Apply destination = gain * source - offset."""
         for index in range(source.size):
-            destination.flat[index] = gain * source.flat[index] - offset.flat[index]
-
+            destination.flat[index] = (
+                gain * source.flat[index] - offset.flat[index]
+            )
 
     @njit(cache=True)
     def flatten_array(source, destination):
         """Flatten an array into a contiguous output vector."""
         for index in range(source.size):
             destination[index] = source.flat[index]
-
 
     @njit(cache=True)
     def leaky_integrator_step(input_vector, state, destination, leak, gain):
@@ -146,7 +145,6 @@ if njit is not None:
             value = leak * state[index] + gain * input_vector[index]
             state[index] = value
             destination[index] = value
-
 
     @njit(cache=True)
     def centroid_tiles(image, destination, tile_size):
@@ -171,8 +169,12 @@ if njit is not None:
                     destination[tile_y, tile_x, 0] = 0.0
                     destination[tile_y, tile_x, 1] = 0.0
                 else:
-                    destination[tile_y, tile_x, 0] = (y_weighted / total) - center
-                    destination[tile_y, tile_x, 1] = (x_weighted / total) - center
+                    destination[tile_y, tile_x, 0] = (
+                        y_weighted / total
+                    ) - center
+                    destination[tile_y, tile_x, 1] = (
+                        x_weighted / total
+                    ) - center
 
 else:
 
@@ -180,17 +182,14 @@ else:
         """Apply destination = gain * source - offset."""
         destination[...] = gain * source - offset
 
-
     def flatten_array(source, destination):
         """Flatten an array into a contiguous output vector."""
         destination[...] = np.ravel(source)
-
 
     def leaky_integrator_step(input_vector, state, destination, leak, gain):
         """Advance one leaky-integrator state update."""
         destination[...] = leak * state + gain * input_vector
         state[...] = destination
-
 
     def centroid_tiles(image, destination, tile_size):
         """Compute local centroids for contiguous Shack-Hartmann tiles."""
@@ -211,5 +210,9 @@ else:
                     destination[tile_y, tile_x, 1] = 0.0
                     continue
                 y_coords, x_coords = np.indices(patch.shape, dtype=np.float32)
-                destination[tile_y, tile_x, 0] = np.sum(y_coords * patch) / total - center
-                destination[tile_y, tile_x, 1] = np.sum(x_coords * patch) / total - center
+                destination[tile_y, tile_x, 0] = (
+                    np.sum(y_coords * patch) / total - center
+                )
+                destination[tile_y, tile_x, 1] = (
+                    np.sum(x_coords * patch) / total - center
+                )

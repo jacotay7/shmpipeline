@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -33,7 +33,9 @@ def main() -> None:
     warmup_frames = 200
     benchmark_frames = 2000
 
-    centroid_offset = rng.normal(0.0, 0.01, size=(15, 15, 2)).astype(np.float32)
+    centroid_offset = rng.normal(0.0, 0.01, size=(15, 15, 2)).astype(
+        np.float32
+    )
     reconstructor = rng.normal(0.0, 0.03, size=(128, 450)).astype(np.float32)
     affine_offset = rng.normal(0.0, 0.01, size=(128,)).astype(np.float32)
 
@@ -41,7 +43,9 @@ def main() -> None:
     manager.start()
     try:
         manager.get_stream("ao_bench_centroid_offset").write(centroid_offset)
-        manager.get_stream("ao_bench_reconstructor_matrix").write(reconstructor)
+        manager.get_stream("ao_bench_reconstructor_matrix").write(
+            reconstructor
+        )
         manager.get_stream("ao_bench_affine_offset").write(affine_offset)
 
         input_stream = manager.get_stream("ao_bench_sensor_image")
@@ -79,7 +83,9 @@ def main() -> None:
         if rate_hz >= target_hz:
             logger.info("target met: %.1f Hz >= %.1f Hz", rate_hz, target_hz)
         else:
-            logger.warning("target not met yet: %.1f Hz < %.1f Hz", rate_hz, target_hz)
+            logger.warning(
+                "target not met yet: %.1f Hz < %.1f Hz", rate_hz, target_hz
+            )
 
         print(f"AO benchmark rate: {rate_hz:.1f} Hz")
     finally:

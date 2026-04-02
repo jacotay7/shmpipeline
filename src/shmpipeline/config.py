@@ -60,7 +60,9 @@ def _normalize_storage(value: Any) -> str:
 
 def _normalize_names(value: Any, *, context: str) -> tuple[str, ...]:
     if not isinstance(value, (list, tuple)) or not value:
-        raise ConfigValidationError(f"{context} must contain at least one item")
+        raise ConfigValidationError(
+            f"{context} must contain at least one item"
+        )
     return tuple(_normalize_name(item, context=context) for item in value)
 
 
@@ -92,7 +94,9 @@ class SharedMemoryConfig:
             },
         )
         name = _normalize_name(data.get("name"), context="shared memory name")
-        shape = _normalize_shape(data.get("shape"), context=f"shape for {name}")
+        shape = _normalize_shape(
+            data.get("shape"), context=f"shape for {name}"
+        )
         try:
             dtype = np.dtype(data.get("dtype"))
         except Exception as exc:
@@ -179,18 +183,24 @@ class KernelConfig:
             },
         )
         name = _normalize_name(data.get("name"), context="kernel name")
-        kind = _normalize_name(data.get("kind"), context=f"kind for kernel {name}")
+        kind = _normalize_name(
+            data.get("kind"), context=f"kind for kernel {name}"
+        )
         input_name = data.get("input")
         output_name = data.get("output")
         auxiliary_raw = data.get("auxiliary", ())
         input_name = _normalize_name(input_name, context=f"input for {name}")
-        output_name = _normalize_name(output_name, context=f"output for {name}")
+        output_name = _normalize_name(
+            output_name, context=f"output for {name}"
+        )
         if auxiliary_raw is None or auxiliary_raw == () or auxiliary_raw == []:
             auxiliary = ()
         elif isinstance(auxiliary_raw, Mapping):
             auxiliary = tuple(
                 AuxiliaryBinding(
-                    alias=_normalize_name(alias, context=f"auxiliary alias for {name}"),
+                    alias=_normalize_name(
+                        alias, context=f"auxiliary alias for {name}"
+                    ),
                     name=_normalize_name(
                         stream_name,
                         context=f"auxiliary stream name for {name}",
@@ -208,7 +218,9 @@ class KernelConfig:
             )
         operation = data.get("operation")
         if operation is not None:
-            operation = _normalize_name(operation, context=f"operation for {name}")
+            operation = _normalize_name(
+                operation, context=f"operation for {name}"
+            )
         parameters = data.get("parameters", {})
         if not isinstance(parameters, dict):
             raise ConfigValidationError(
@@ -311,9 +323,12 @@ class PipelineConfig:
             )
         return cls(
             shared_memory=tuple(
-                SharedMemoryConfig.from_dict(item) for item in shared_memory_raw
+                SharedMemoryConfig.from_dict(item)
+                for item in shared_memory_raw
             ),
-            kernels=tuple(KernelConfig.from_dict(item) for item in kernels_raw),
+            kernels=tuple(
+                KernelConfig.from_dict(item) for item in kernels_raw
+            ),
         )
 
     @classmethod

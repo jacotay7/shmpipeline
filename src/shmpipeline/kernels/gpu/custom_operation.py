@@ -10,7 +10,11 @@ from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
 from shmpipeline.kernel import KernelContext
 from shmpipeline.kernels.cpu._expression import compile_custom_operation
-from shmpipeline.kernels.gpu.base import GpuKernel, as_gpu_tensor, torch_dtype_from_numpy
+from shmpipeline.kernels.gpu.base import (
+    GpuKernel,
+    as_gpu_tensor,
+    torch_dtype_from_numpy,
+)
 
 
 class CustomOperationGpuKernel(GpuKernel):
@@ -72,8 +76,12 @@ class CustomOperationGpuKernel(GpuKernel):
             kernel_name=context.config.name,
         )
         self.temporaries = tuple(
-            torch.empty(shape, dtype=torch_dtype_from_numpy(dtype), device=self.device)
-            for shape, dtype in zip(self.plan.temp_shapes, self.plan.temp_dtypes)
+            torch.empty(
+                shape, dtype=torch_dtype_from_numpy(dtype), device=self.device
+            )
+            for shape, dtype in zip(
+                self.plan.temp_shapes, self.plan.temp_dtypes
+            )
         )
 
     def compute_into(
@@ -90,8 +98,13 @@ class CustomOperationGpuKernel(GpuKernel):
             }
         )
         for instruction in self.plan.instructions:
-            destination = self._resolve_destination(instruction.destination, output)
-            operands = [self._resolve_operand(operand, values, output) for operand in instruction.operands]
+            destination = self._resolve_destination(
+                instruction.destination, output
+            )
+            operands = [
+                self._resolve_operand(operand, values, output)
+                for operand in instruction.operands
+            ]
             if instruction.operation == "copy":
                 destination.copy_(operands[0])
             elif instruction.operation == "neg":
@@ -115,17 +128,28 @@ class CustomOperationGpuKernel(GpuKernel):
             elif instruction.operation == "maximum":
                 torch.maximum(operands[0], operands[1], out=destination)
             elif instruction.operation == "clip":
-                torch.clamp(operands[0], min=operands[1], max=operands[2], out=destination)
+                torch.clamp(
+                    operands[0],
+                    min=operands[1],
+                    max=operands[2],
+                    out=destination,
+                )
             else:
-                raise RuntimeError(f"unknown operation {instruction.operation!r}")
+                raise RuntimeError(
+                    f"unknown operation {instruction.operation!r}"
+                )
         torch.cuda.synchronize(output.device)
 
-    def _resolve_destination(self, operand, output: torch.Tensor) -> torch.Tensor:
+    def _resolve_destination(
+        self, operand, output: torch.Tensor
+    ) -> torch.Tensor:
         if operand.kind == "output":
             return output
         if operand.kind == "temp":
             return self.temporaries[operand.value]
-        raise RuntimeError(f"invalid destination operand kind: {operand.kind!r}")
+        raise RuntimeError(
+            f"invalid destination operand kind: {operand.kind!r}"
+        )
 
     def _resolve_operand(self, operand, values, output: torch.Tensor):
         if operand.kind == "value":

@@ -7,34 +7,38 @@ from typing import Mapping
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
 from shmpipeline.kernel import Kernel, KernelContext
-from shmpipeline.kernels.cpu import AddConstantCpuKernel
-from shmpipeline.kernels.cpu import AffineTransformCpuKernel
-from shmpipeline.kernels.cpu import CopyCpuKernel
-from shmpipeline.kernels.cpu import CustomOperationCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseAddCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseDivideCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseMultiplyCpuKernel
-from shmpipeline.kernels.cpu import ElementwiseSubtractCpuKernel
-from shmpipeline.kernels.cpu import FlattenCpuKernel
-from shmpipeline.kernels.cpu import LeakyIntegratorCpuKernel
-from shmpipeline.kernels.cpu import RaiseErrorCpuKernel
-from shmpipeline.kernels.cpu import ScaleCpuKernel
-from shmpipeline.kernels.cpu import ScaleOffsetCpuKernel
-from shmpipeline.kernels.cpu import ShackHartmannCentroidCpuKernel
-from shmpipeline.kernels.gpu import AddConstantGpuKernel
-from shmpipeline.kernels.gpu import AffineTransformGpuKernel
-from shmpipeline.kernels.gpu import CopyGpuKernel
-from shmpipeline.kernels.gpu import CustomOperationGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseAddGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseDivideGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseMultiplyGpuKernel
-from shmpipeline.kernels.gpu import ElementwiseSubtractGpuKernel
-from shmpipeline.kernels.gpu import FlattenGpuKernel
-from shmpipeline.kernels.gpu import LeakyIntegratorGpuKernel
-from shmpipeline.kernels.gpu import RaiseErrorGpuKernel
-from shmpipeline.kernels.gpu import ScaleGpuKernel
-from shmpipeline.kernels.gpu import ScaleOffsetGpuKernel
-from shmpipeline.kernels.gpu import ShackHartmannCentroidGpuKernel
+from shmpipeline.kernels.cpu import (
+    AddConstantCpuKernel,
+    AffineTransformCpuKernel,
+    CopyCpuKernel,
+    CustomOperationCpuKernel,
+    ElementwiseAddCpuKernel,
+    ElementwiseDivideCpuKernel,
+    ElementwiseMultiplyCpuKernel,
+    ElementwiseSubtractCpuKernel,
+    FlattenCpuKernel,
+    LeakyIntegratorCpuKernel,
+    RaiseErrorCpuKernel,
+    ScaleCpuKernel,
+    ScaleOffsetCpuKernel,
+    ShackHartmannCentroidCpuKernel,
+)
+from shmpipeline.kernels.gpu import (
+    AddConstantGpuKernel,
+    AffineTransformGpuKernel,
+    CopyGpuKernel,
+    CustomOperationGpuKernel,
+    ElementwiseAddGpuKernel,
+    ElementwiseDivideGpuKernel,
+    ElementwiseMultiplyGpuKernel,
+    ElementwiseSubtractGpuKernel,
+    FlattenGpuKernel,
+    LeakyIntegratorGpuKernel,
+    RaiseErrorGpuKernel,
+    ScaleGpuKernel,
+    ScaleOffsetGpuKernel,
+    ShackHartmannCentroidGpuKernel,
+)
 
 
 class KernelRegistry:
@@ -49,7 +53,9 @@ class KernelRegistry:
         try:
             return self._kernels[kind]
         except KeyError as exc:
-            raise ConfigValidationError(f"unknown kernel kind: {kind!r}") from exc
+            raise ConfigValidationError(
+                f"unknown kernel kind: {kind!r}"
+            ) from exc
 
     def kinds(self) -> tuple[str, ...]:
         """Return registered kernel kinds in sorted order."""
@@ -71,7 +77,9 @@ class KernelRegistry:
         """Instantiate a kernel after validation."""
         kernel_cls = self.get(config.kind)
         kernel_cls.validate_config(config, shared_memory)
-        return kernel_cls(KernelContext(config=config, shared_memory=shared_memory))
+        return kernel_cls(
+            KernelContext(config=config, shared_memory=shared_memory)
+        )
 
 
 _DEFAULT_REGISTRY = KernelRegistry(

@@ -7,7 +7,9 @@ from typing import Any, Mapping
 import numpy as np
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
-from shmpipeline.kernels.cpu._common import validate_binary_same_shape_and_dtype
+from shmpipeline.kernels.cpu._common import (
+    validate_binary_same_shape_and_dtype,
+)
 from shmpipeline.kernels.cpu.base import CpuKernel
 
 
@@ -32,5 +34,7 @@ class ElementwiseDivideCpuKernel(CpuKernel):
         output: Any,
         auxiliary_inputs: Mapping[str, Any],
     ) -> None:
-        rhs = np.asarray(auxiliary_inputs[self.context.config.auxiliary_aliases[0]])
+        rhs = np.asarray(
+            auxiliary_inputs[self.context.config.auxiliary_aliases[0]]
+        )
         np.divide(np.asarray(trigger_input), rhs, out=output)
