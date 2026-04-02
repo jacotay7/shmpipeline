@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.util import find_spec
 from typing import Mapping
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
@@ -23,22 +24,26 @@ from shmpipeline.kernels.cpu import (
     ScaleOffsetCpuKernel,
     ShackHartmannCentroidCpuKernel,
 )
-from shmpipeline.kernels.gpu import (
-    AddConstantGpuKernel,
-    AffineTransformGpuKernel,
-    CopyGpuKernel,
-    CustomOperationGpuKernel,
-    ElementwiseAddGpuKernel,
-    ElementwiseDivideGpuKernel,
-    ElementwiseMultiplyGpuKernel,
-    ElementwiseSubtractGpuKernel,
-    FlattenGpuKernel,
-    LeakyIntegratorGpuKernel,
-    RaiseErrorGpuKernel,
-    ScaleGpuKernel,
-    ScaleOffsetGpuKernel,
-    ShackHartmannCentroidGpuKernel,
-)
+
+_TORCH_AVAILABLE = find_spec("torch") is not None
+
+if _TORCH_AVAILABLE:
+    from shmpipeline.kernels.gpu import (
+        AddConstantGpuKernel,
+        AffineTransformGpuKernel,
+        CopyGpuKernel,
+        CustomOperationGpuKernel,
+        ElementwiseAddGpuKernel,
+        ElementwiseDivideGpuKernel,
+        ElementwiseMultiplyGpuKernel,
+        ElementwiseSubtractGpuKernel,
+        FlattenGpuKernel,
+        LeakyIntegratorGpuKernel,
+        RaiseErrorGpuKernel,
+        ScaleGpuKernel,
+        ScaleOffsetGpuKernel,
+        ShackHartmannCentroidGpuKernel,
+    )
 
 
 class KernelRegistry:
@@ -82,38 +87,44 @@ class KernelRegistry:
         )
 
 
-_DEFAULT_REGISTRY = KernelRegistry(
-    {
-        AddConstantCpuKernel.kind: AddConstantCpuKernel,
-        AffineTransformCpuKernel.kind: AffineTransformCpuKernel,
-        CopyCpuKernel.kind: CopyCpuKernel,
-        CustomOperationCpuKernel.kind: CustomOperationCpuKernel,
-        ElementwiseAddCpuKernel.kind: ElementwiseAddCpuKernel,
-        ElementwiseDivideCpuKernel.kind: ElementwiseDivideCpuKernel,
-        ElementwiseMultiplyCpuKernel.kind: ElementwiseMultiplyCpuKernel,
-        ElementwiseSubtractCpuKernel.kind: ElementwiseSubtractCpuKernel,
-        FlattenCpuKernel.kind: FlattenCpuKernel,
-        LeakyIntegratorCpuKernel.kind: LeakyIntegratorCpuKernel,
-        RaiseErrorCpuKernel.kind: RaiseErrorCpuKernel,
-        ScaleCpuKernel.kind: ScaleCpuKernel,
-        ScaleOffsetCpuKernel.kind: ScaleOffsetCpuKernel,
-        ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
-        AddConstantGpuKernel.kind: AddConstantGpuKernel,
-        AffineTransformGpuKernel.kind: AffineTransformGpuKernel,
-        CopyGpuKernel.kind: CopyGpuKernel,
-        CustomOperationGpuKernel.kind: CustomOperationGpuKernel,
-        ElementwiseAddGpuKernel.kind: ElementwiseAddGpuKernel,
-        ElementwiseDivideGpuKernel.kind: ElementwiseDivideGpuKernel,
-        ElementwiseMultiplyGpuKernel.kind: ElementwiseMultiplyGpuKernel,
-        ElementwiseSubtractGpuKernel.kind: ElementwiseSubtractGpuKernel,
-        FlattenGpuKernel.kind: FlattenGpuKernel,
-        LeakyIntegratorGpuKernel.kind: LeakyIntegratorGpuKernel,
-        RaiseErrorGpuKernel.kind: RaiseErrorGpuKernel,
-        ScaleGpuKernel.kind: ScaleGpuKernel,
-        ScaleOffsetGpuKernel.kind: ScaleOffsetGpuKernel,
-        ShackHartmannCentroidGpuKernel.kind: ShackHartmannCentroidGpuKernel,
-    }
-)
+_DEFAULT_KERNELS: dict[str, type[Kernel]] = {
+    AddConstantCpuKernel.kind: AddConstantCpuKernel,
+    AffineTransformCpuKernel.kind: AffineTransformCpuKernel,
+    CopyCpuKernel.kind: CopyCpuKernel,
+    CustomOperationCpuKernel.kind: CustomOperationCpuKernel,
+    ElementwiseAddCpuKernel.kind: ElementwiseAddCpuKernel,
+    ElementwiseDivideCpuKernel.kind: ElementwiseDivideCpuKernel,
+    ElementwiseMultiplyCpuKernel.kind: ElementwiseMultiplyCpuKernel,
+    ElementwiseSubtractCpuKernel.kind: ElementwiseSubtractCpuKernel,
+    FlattenCpuKernel.kind: FlattenCpuKernel,
+    LeakyIntegratorCpuKernel.kind: LeakyIntegratorCpuKernel,
+    RaiseErrorCpuKernel.kind: RaiseErrorCpuKernel,
+    ScaleCpuKernel.kind: ScaleCpuKernel,
+    ScaleOffsetCpuKernel.kind: ScaleOffsetCpuKernel,
+    ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
+}
+
+if _TORCH_AVAILABLE:
+    _DEFAULT_KERNELS.update(
+        {
+            AddConstantGpuKernel.kind: AddConstantGpuKernel,
+            AffineTransformGpuKernel.kind: AffineTransformGpuKernel,
+            CopyGpuKernel.kind: CopyGpuKernel,
+            CustomOperationGpuKernel.kind: CustomOperationGpuKernel,
+            ElementwiseAddGpuKernel.kind: ElementwiseAddGpuKernel,
+            ElementwiseDivideGpuKernel.kind: ElementwiseDivideGpuKernel,
+            ElementwiseMultiplyGpuKernel.kind: ElementwiseMultiplyGpuKernel,
+            ElementwiseSubtractGpuKernel.kind: ElementwiseSubtractGpuKernel,
+            FlattenGpuKernel.kind: FlattenGpuKernel,
+            LeakyIntegratorGpuKernel.kind: LeakyIntegratorGpuKernel,
+            RaiseErrorGpuKernel.kind: RaiseErrorGpuKernel,
+            ScaleGpuKernel.kind: ScaleGpuKernel,
+            ScaleOffsetGpuKernel.kind: ScaleOffsetGpuKernel,
+            ShackHartmannCentroidGpuKernel.kind: ShackHartmannCentroidGpuKernel,
+        }
+    )
+
+_DEFAULT_REGISTRY = KernelRegistry(_DEFAULT_KERNELS)
 
 
 def get_default_registry() -> KernelRegistry:

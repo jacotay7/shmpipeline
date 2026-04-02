@@ -3,6 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+try:
+    import torch
+except Exception:  # pragma: no cover - exercised when torch is unavailable
+    torch = None
+
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.kernel import KernelContext
 from shmpipeline.kernels.cpu import (
@@ -21,27 +26,39 @@ from shmpipeline.kernels.cpu import (
     ScaleOffsetCpuKernel,
     ShackHartmannCentroidCpuKernel,
 )
-from shmpipeline.kernels.gpu import (
-    AddConstantGpuKernel,
-    AffineTransformGpuKernel,
-    CopyGpuKernel,
-    CustomOperationGpuKernel,
-    ElementwiseAddGpuKernel,
-    ElementwiseDivideGpuKernel,
-    ElementwiseMultiplyGpuKernel,
-    ElementwiseSubtractGpuKernel,
-    FlattenGpuKernel,
-    LeakyIntegratorGpuKernel,
-    RaiseErrorGpuKernel,
-    ScaleGpuKernel,
-    ScaleOffsetGpuKernel,
-    ShackHartmannCentroidGpuKernel,
-)
 
-try:
-    import torch
-except Exception:  # pragma: no cover - exercised when torch is unavailable
-    torch = None
+if torch is not None:
+    from shmpipeline.kernels.gpu import (
+        AddConstantGpuKernel,
+        AffineTransformGpuKernel,
+        CopyGpuKernel,
+        CustomOperationGpuKernel,
+        ElementwiseAddGpuKernel,
+        ElementwiseDivideGpuKernel,
+        ElementwiseMultiplyGpuKernel,
+        ElementwiseSubtractGpuKernel,
+        FlattenGpuKernel,
+        LeakyIntegratorGpuKernel,
+        RaiseErrorGpuKernel,
+        ScaleGpuKernel,
+        ScaleOffsetGpuKernel,
+        ShackHartmannCentroidGpuKernel,
+    )
+else:  # pragma: no cover - exercised only when torch is unavailable
+    AddConstantGpuKernel = None
+    AffineTransformGpuKernel = None
+    CopyGpuKernel = None
+    CustomOperationGpuKernel = None
+    ElementwiseAddGpuKernel = None
+    ElementwiseDivideGpuKernel = None
+    ElementwiseMultiplyGpuKernel = None
+    ElementwiseSubtractGpuKernel = None
+    FlattenGpuKernel = None
+    LeakyIntegratorGpuKernel = None
+    RaiseErrorGpuKernel = None
+    ScaleGpuKernel = None
+    ScaleOffsetGpuKernel = None
+    ShackHartmannCentroidGpuKernel = None
 
 
 pytestmark = pytest.mark.unit
