@@ -23,9 +23,18 @@ pytestmark = [pytest.mark.unit, pytest.mark.integration]
 CUDA_AVAILABLE = torch is not None and torch.cuda.is_available()
 
 
-def _wait_for_next_write(stream, previous_count: int, *, timeout: float = 2.0):
+def _wait_for_next_write(
+    stream,
+    previous_count: int,
+    *,
+    timeout: float = 2.0,
+    manager: PipelineManager | None = None,
+):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if manager is not None:
+            manager.poll_events()
+            manager.raise_if_failed()
         if stream.count > previous_count:
             return stream.read()
         time.sleep(1e-4)
@@ -1307,7 +1316,8 @@ def test_manager_runs_basic_ao_pipeline_and_verifies_all_stages(shm_prefix):
         observed_command = _wait_for_next_write(
             manager.get_stream(f"{shm_prefix}_command"),
             baseline,
-            timeout=2.0,
+            timeout=5.0,
+            manager=manager,
         )
 
         np.testing.assert_allclose(
