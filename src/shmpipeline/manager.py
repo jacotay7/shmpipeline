@@ -137,7 +137,8 @@ class PipelineManager:
         if existing_stream is not None:
             if self._stream_matches_spec(existing_stream, spec):
                 self._logger.info(
-                    "reusing shared memory: name=%s storage=%s shape=%s dtype=%s",
+                    "reusing shared memory: name=%s storage=%s shape=%s "
+                    "dtype=%s",
                     spec.name,
                     spec.storage,
                     spec.shape,
@@ -178,36 +179,28 @@ class PipelineManager:
         return stream
 
     def _open_existing_stream(self, spec) -> Any | None:
-        """Open an existing stream if present."""
-        open_kwargs: dict[str, Any] = {}
-        if spec.storage == "gpu":
-            open_kwargs["gpu_device"] = spec.gpu_device
+        """Open an existing stream if present.
+
+        GPU streams are probed without a CUDA attachment so build can inspect
+        and replace stale streams without reopening their IPC handles.
+        """
         try:
-            return pyshmem.open(spec.name, **open_kwargs)
+            return pyshmem.open(spec.name)
         except FileNotFoundError:
             return None
         except ValueError:
-            try:
-                return pyshmem.open(spec.name)
-            except FileNotFoundError:
-                return None
+            return None
 
     def _stream_matches_spec(self, stream: Any, spec) -> bool:
         """Return whether an existing stream matches the requested config."""
+        if spec.storage == "gpu":
+            return False
         if tuple(stream.shape) != tuple(spec.shape):
             return False
         if stream.dtype != spec.dtype:
             return False
         if stream.gpu_enabled != (spec.storage == "gpu"):
             return False
-        if spec.storage == "gpu":
-            if bool(stream.cpu_mirror) != bool(spec.cpu_mirror):
-                return False
-            if (
-                spec.gpu_device is not None
-                and stream.gpu_device != spec.gpu_device
-            ):
-                return False
         return True
 
     def start(self) -> None:

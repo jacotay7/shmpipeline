@@ -45,15 +45,6 @@ def main() -> None:
     rng = np.random.default_rng(7)
     sample_count = 5000
 
-    transform_matrix = np.array(
-        [
-            [1.0, 2.0, 0.0],
-            [0.0, -1.0, 3.0],
-        ],
-        dtype=np.float32,
-    )
-    offset_vector = np.array([0.5, -2.0], dtype=np.float32)
-
     logger.info("building GPU affine example pipeline from %s", config_path)
     manager.build()
     manager.start()
@@ -64,6 +55,14 @@ def main() -> None:
         input_stream = manager.get_stream("affine_input_vector")
         output_stream = manager.get_stream("affine_output_vector")
 
+        vector_length = input_stream.shape[0]
+        output_length = output_stream.shape[0]
+        transform_matrix = rng.standard_normal(
+            (output_length, vector_length),
+            dtype=np.float32,
+        )
+        offset_vector = rng.standard_normal(output_length, dtype=np.float32)
+
         logger.info(
             "loading transform matrix and offset vector into GPU shared memory"
         )
@@ -72,7 +71,7 @@ def main() -> None:
 
         start = time.perf_counter()
         for index in range(sample_count):
-            vector = rng.standard_normal(3, dtype=np.float32)
+            vector = rng.standard_normal(vector_length, dtype=np.float32)
             expected = transform_matrix @ vector + offset_vector
             baseline = output_stream.count
             input_stream.write(to_device(vector))

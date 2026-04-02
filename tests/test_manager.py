@@ -985,6 +985,55 @@ def test_manager_build_replaces_incompatible_existing_shared_memory(
         manager.shutdown(force=True)
 
 
+def test_manager_does_not_reuse_compatible_gpu_shared_memory(shm_prefix):
+    config = _make_pipeline_config_for_storage(
+        shm_prefix,
+        kind="gpu.copy",
+        parameters={},
+        storage="gpu",
+    )
+    manager = PipelineManager(config)
+
+    class _FakeGpuStream:
+        shape = (4,)
+        dtype = np.dtype(np.float32)
+        gpu_enabled = True
+        cpu_mirror = False
+        gpu_device = "cuda:0"
+
+    assert (
+        manager._stream_matches_spec(
+            _FakeGpuStream(),
+            config.shared_memory_by_name[f"{shm_prefix}_input"],
+        )
+        is False
+    )
+
+
+def test_manager_opens_existing_gpu_streams_without_cuda_attachment(
+    shm_prefix,
+    monkeypatch,
+):
+    config = _make_pipeline_config_for_storage(
+        shm_prefix,
+        kind="gpu.copy",
+        parameters={},
+        storage="gpu",
+    )
+    manager = PipelineManager(config)
+    spec = config.shared_memory_by_name[f"{shm_prefix}_input"]
+    open_calls: list[tuple[str, dict]] = []
+
+    def _fake_open(name, **kwargs):
+        open_calls.append((name, kwargs))
+        raise FileNotFoundError(name)
+
+    monkeypatch.setattr(pyshmem, "open", _fake_open)
+
+    assert manager._open_existing_stream(spec) is None
+    assert open_calls == [(spec.name, {})]
+
+
 def test_manager_worker_retries_after_transient_lock_contention(shm_prefix):
     config = PipelineConfig.from_dict(
         {
