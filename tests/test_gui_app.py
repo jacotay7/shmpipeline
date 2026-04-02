@@ -14,8 +14,15 @@ except Exception:  # pragma: no cover - exercised when Qt is unavailable
     Qt = None
     QApplication = None
 
-from shmpipeline.gui import viewers as viewers_module
-from shmpipeline.gui.app import MainWindow
+GUI_IMPORT_ERROR: Exception | None = None
+
+try:
+    from shmpipeline.gui import viewers as viewers_module
+    from shmpipeline.gui.app import MainWindow
+except Exception as exc:  # pragma: no cover - GUI stack unavailable
+    viewers_module = None
+    MainWindow = None
+    GUI_IMPORT_ERROR = exc
 
 pytestmark = pytest.mark.unit
 
@@ -40,6 +47,8 @@ class _FakeStream:
 def qapp():
     if QApplication is None:
         pytest.skip("PySide6 is not available")
+    if GUI_IMPORT_ERROR is not None:
+        pytest.skip(f"GUI stack is unavailable: {GUI_IMPORT_ERROR}")
     app = QApplication.instance() or QApplication([])
     yield app
 

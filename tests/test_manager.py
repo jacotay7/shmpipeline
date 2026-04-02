@@ -932,8 +932,6 @@ def test_manager_build_reuses_compatible_existing_shared_memory(shm_prefix):
         dtype=np.float32,
     )
     existing_input.write(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
-    existing_input.close()
-    existing_output.close()
 
     manager = PipelineManager(
         _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
@@ -948,10 +946,14 @@ def test_manager_build_reuses_compatible_existing_shared_memory(shm_prefix):
             np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
         )
     finally:
+        existing_input.close()
+        existing_output.close()
         manager.shutdown(force=True)
 
 
-def test_manager_build_replaces_incompatible_existing_shared_memory(shm_prefix):
+def test_manager_build_replaces_incompatible_existing_shared_memory(
+    shm_prefix,
+):
     input_name = f"{shm_prefix}_input"
     stale_stream = pyshmem.create(
         input_name,

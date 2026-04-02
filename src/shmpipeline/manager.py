@@ -203,7 +203,10 @@ class PipelineManager:
         if spec.storage == "gpu":
             if bool(stream.cpu_mirror) != bool(spec.cpu_mirror):
                 return False
-            if spec.gpu_device is not None and stream.gpu_device != spec.gpu_device:
+            if (
+                spec.gpu_device is not None
+                and stream.gpu_device != spec.gpu_device
+            ):
                 return False
         return True
 
@@ -395,6 +398,8 @@ class PipelineManager:
                         "last_output_count": event.get("last_output_count"),
                         "metrics_window": event.get("metrics_window"),
                     }
+                elif event.get("type") == "worker_failed":
+                    self._record_worker_failure(event)
         for worker in self._workers.values():
             if worker.process.exitcode not in (None, 0):
                 already_recorded = any(
@@ -402,7 +407,7 @@ class PipelineManager:
                     for failure in self._failures
                 )
                 if not already_recorded:
-                    self._failures.append(
+                    self._record_worker_failure(
                         {
                             "type": "worker_failed",
                             "kernel": worker.name,
@@ -413,15 +418,6 @@ class PipelineManager:
                             ),
                         }
                     )
-        for event in events:
-            if event.get("type") == "worker_failed":
-                already_recorded = any(
-                    failure.get("kernel") == event.get("kernel")
-                    and failure.get("error") == event.get("error")
-                    for failure in self._failures
-                )
-                if not already_recorded:
-                    self._failures.append(event)
         if self._failures and self.state in {
             PipelineState.RUNNING,
             PipelineState.PAUSED,
@@ -471,6 +467,49 @@ class PipelineManager:
             )
             return
         self._logger.debug("worker event: %s", event)
+
+    def _record_worker_failure(self, failure: dict[str, Any]) -> None:
+        """Record one worker failure, preferring detailed failures."""
+        kernel_name = failure.get("kernel")
+        if kernel_name is None:
+            self._failures.append(failure)
+            return
+
+        existing_index: int | None = None
+        for index, existing_failure in enumerate(self._failures):
+            if existing_failure.get("kernel") == kernel_name:
+                existing_index = index
+                break
+
+        if existing_index is None:
+            self._failures.append(failure)
+            return
+
+        existing_failure = self._failures[existing_index]
+        if self._failure_is_more_specific(failure, existing_failure):
+            self._failures[existing_index] = failure
+
+    @staticmethod
+    def _failure_is_more_specific(
+        candidate: dict[str, Any], existing: dict[str, Any]
+    ) -> bool:
+        """Return whether a candidate failure is more useful than existing."""
+        candidate_has_traceback = bool(candidate.get("traceback"))
+        existing_has_traceback = bool(existing.get("traceback"))
+        if candidate_has_traceback != existing_has_traceback:
+            return candidate_has_traceback
+
+        candidate_error = str(candidate.get("error", ""))
+        existing_error = str(existing.get("error", ""))
+        candidate_is_generic = candidate_error.startswith(
+            "worker exited with code"
+        )
+        existing_is_generic = existing_error.startswith(
+            "worker exited with code"
+        )
+        if candidate_is_generic != existing_is_generic:
+            return not candidate_is_generic
+        return False
 
     def status(self) -> dict[str, Any]:
         """Return a snapshot of manager state, workers, and failures."""
