@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+import importlib
 import io
 import logging
+import sys
+import textwrap
 import time
 
 import numpy as np
 import pyshmem
 import pytest
 
-from shmpipeline import PipelineConfig, PipelineManager, PipelineState
+from shmpipeline import (
+    PipelineConfig,
+    PipelineManager,
+    PipelineState,
+    get_default_registry,
+)
 from shmpipeline.errors import WorkerProcessError
 from shmpipeline.logging_utils import ColorFormatter
+from shmpipeline.shm_cleanup import close_stream
 
 try:
     import torch
@@ -1082,6 +1091,132 @@ def test_manager_build_replaces_incompatible_existing_shared_memory(
         manager.shutdown(force=True)
 
 
+def test_manager_build_reuses_stream_when_create_detects_existing_name(
+    shm_prefix, monkeypatch
+):
+    manager = PipelineManager(
+        _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
+    )
+    spec = manager.config.shared_memory_by_name[f"{shm_prefix}_input"]
+
+    class _FakeStream:
+        name = spec.name
+        shape = (4,)
+        dtype = np.dtype(np.float32)
+        gpu_enabled = False
+
+        def close(self) -> None:
+            raise AssertionError("close should not be called")
+
+    fake_stream = _FakeStream()
+    open_calls = {"count": 0}
+
+    def _fake_open_existing(_spec):
+        open_calls["count"] += 1
+        if open_calls["count"] == 1:
+            return None
+        return fake_stream
+
+    monkeypatch.setattr(manager, "_open_existing_stream", _fake_open_existing)
+    monkeypatch.setattr(
+        pyshmem,
+        "create",
+        lambda *args, **kwargs: (_ for _ in ()).throw(FileExistsError(spec.name)),
+    )
+
+    stream = manager._build_stream(spec)
+
+    assert stream is fake_stream
+    assert open_calls["count"] == 2
+
+
+def test_manager_build_recreates_stale_stream_after_duplicate_name(
+    shm_prefix, monkeypatch
+):
+    manager = PipelineManager(
+        _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
+    )
+    spec = manager.config.shared_memory_by_name[f"{shm_prefix}_input"]
+    created_stream = object()
+    create_calls: list[tuple[str, dict]] = []
+    unlinked: list[str] = []
+
+    monkeypatch.setattr(manager, "_open_existing_stream", lambda _spec: None)
+
+    def _fake_create(name, **kwargs):
+        create_calls.append((name, kwargs))
+        if len(create_calls) == 1:
+            raise FileExistsError(name)
+        return created_stream
+
+    monkeypatch.setattr(pyshmem, "create", _fake_create)
+    monkeypatch.setattr(
+        "shmpipeline.manager.unlink_stream_name",
+        lambda name: unlinked.append(name),
+    )
+
+    stream = manager._build_stream(spec)
+
+    assert stream is created_stream
+    assert unlinked == [spec.name]
+    assert len(create_calls) == 2
+
+
+def test_close_stream_uses_direct_posix_unlink_when_available(monkeypatch):
+    class _FakeSegment:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+    class _FakeLockState:
+        path = "/tmp/shmpipeline-fake.lock"
+
+    class _FakeStream:
+        def __init__(self) -> None:
+            self.name = "demo"
+            self.gpu_enabled = True
+            self._data_shm = _FakeSegment("/ps_demo")
+            self._metadata_shm = _FakeSegment("/ps_demo_meta")
+            self._gpu_handle_shm = _FakeSegment("/ps_demo_gpu")
+            self._lock_state = _FakeLockState()
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    import shmpipeline.shm_cleanup as shm_cleanup
+
+    fake_stream = _FakeStream()
+    unlinked: list[str] = []
+    removed: list[str] = []
+    dropped: list[str] = []
+
+    monkeypatch.setattr(
+        shm_cleanup,
+        "_can_directly_unlink_posix_segments",
+        lambda: True,
+    )
+    monkeypatch.setattr(shm_cleanup, "pyshmem_shared", None)
+    monkeypatch.setattr(
+        shm_cleanup.shared_memory._posixshmem,
+        "shm_unlink",
+        lambda name: unlinked.append(name),
+    )
+    monkeypatch.setattr(shm_cleanup, "_safe_remove", removed.append)
+    monkeypatch.setattr(shm_cleanup, "_drop_local_gpu_cache", dropped.append)
+    monkeypatch.setattr(
+        shm_cleanup.pyshmem,
+        "unlink",
+        lambda name: (_ for _ in ()).throw(AssertionError(name)),
+    )
+
+    close_stream(fake_stream, unlink=True)
+
+    assert fake_stream.closed is True
+    assert unlinked == ["/ps_demo", "/ps_demo_meta", "/ps_demo_gpu"]
+    assert removed == ["/tmp/shmpipeline-fake.lock"]
+    assert dropped == ["demo"]
+
+
 def test_manager_does_not_reuse_compatible_gpu_shared_memory(shm_prefix):
     config = _make_pipeline_config_for_storage(
         shm_prefix,
@@ -1255,6 +1390,112 @@ def test_manager_runs_many_affine_vectors(shm_prefix):
     assert worker_status["jitter_us_rms"] is not None
     assert worker_status["metrics_window"] >= 1
     assert worker_status["throughput_hz"] >= 0.0
+    assert worker_status["health"] == "active"
+    assert worker_status["idle_s"] is not None
+
+    manager.shutdown()
+
+
+def test_manager_status_reports_waiting_input_health(shm_prefix):
+    manager = PipelineManager(
+        _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
+    )
+    manager.build()
+    manager.start()
+
+    status = manager.status()
+    worker_status = status["workers"]["stage"]
+    assert worker_status["health"] == "waiting-input"
+    assert worker_status["idle_s"] is not None
+    assert status["summary"]["waiting_workers"] == 1
+
+    manager.shutdown()
+
+
+def test_manager_can_run_with_extended_registry(
+    tmp_path, shm_prefix, monkeypatch
+):
+    module_name = f"custom_bias_kernel_{shm_prefix}"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            import numpy as np
+
+            from shmpipeline.errors import ConfigValidationError
+            from shmpipeline.kernel import Kernel
+
+
+            class BiasCpuKernel(Kernel):
+                kind = \"test.bias\"
+                storage = \"cpu\"
+
+                @classmethod
+                def validate_config(cls, config, shared_memory):
+                    super().validate_config(config, shared_memory)
+                    if \"bias\" not in config.parameters:
+                        raise ConfigValidationError(
+                            \"test.bias requires a 'bias' parameter\"
+                        )
+
+                def compute_into(self, trigger_input, output, auxiliary_inputs):
+                    output[...] = np.asarray(trigger_input) + float(
+                        self.context.config.parameters[\"bias\"]
+                    )
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    sys.modules.pop(module_name, None)
+    module = importlib.import_module(module_name)
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "bias_stage",
+                    "kind": "test.bias",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "parameters": {"bias": 1.5},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+    registry = get_default_registry().extended(module.BiasCpuKernel)
+    manager = PipelineManager(config, registry=registry)
+    manager.build()
+    manager.start()
+
+    payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(payload)
+    received = _wait_for_next_write(
+        output_stream,
+        baseline,
+        timeout=2.0,
+        manager=manager,
+    )
+
+    np.testing.assert_allclose(received, payload + 1.5)
 
     manager.shutdown()
 

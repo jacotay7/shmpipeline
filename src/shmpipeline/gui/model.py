@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import multiprocessing as mp
+import sys
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Mapping
@@ -90,10 +92,27 @@ def validate_document(document: Mapping[str, Any]) -> list[str]:
     return validate_pipeline_config(config)
 
 
+def recommended_spawn_method(config: PipelineConfig) -> str:
+    """Return the preferred worker start method for GUI-launched pipelines."""
+    if not sys.platform.startswith("linux"):
+        return "spawn"
+    if any(spec.storage == "gpu" for spec in config.shared_memory):
+        return "spawn"
+    available_methods = set(mp.get_all_start_methods())
+    if "forkserver" in available_methods:
+        return "forkserver"
+    if "fork" in available_methods:
+        return "fork"
+    return "spawn"
+
+
 def create_manager(document: Mapping[str, Any]) -> PipelineManager:
     """Instantiate a pipeline manager from the current GUI document."""
     config = PipelineConfig.from_dict(normalize_document(document))
-    return PipelineManager(config)
+    return PipelineManager(
+        config,
+        spawn_method=recommended_spawn_method(config),
+    )
 
 
 def available_kernel_kinds() -> tuple[str, ...]:

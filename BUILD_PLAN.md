@@ -24,234 +24,198 @@ baseline for the repository.
 - Added a desktop GUI for editing, validating, and running pipeline
   definitions.
 
+## Completed Operability Work
+
+What used to be planned as Phase 2 is now mostly shipped.
+
+- Added first-class CLI entry points for `validate`, `describe`, and `run`
+  workflows.
+- Exposed pipeline graph introspection through `PipelineGraph`, CLI output,
+  and GUI previews.
+- Added graph-level validation for producer/consumer wiring and related config
+  errors before worker startup.
+- Added runtime snapshots, rolling worker metrics, structured failure
+  reporting, and GUI runtime status panes.
+- Refactored worker placement into an explicit scheduling policy surface with
+  a default round-robin implementation.
+- Added light and dark GUI themes with light as the default startup theme.
+- Added backend synthetic input generation plus GUI controls for starting,
+  stopping, and reconfiguring test inputs.
+- Rebuilt the shared-memory viewer path so vector and image streams can be
+  inspected from the GUI again.
+- Moved viewer windows into separate spawned Python processes and surfaced
+  stream-rate metadata in the viewer status.
+- Expanded test coverage for CLI flows, graph derivation, synthetic inputs,
+  GUI behavior, and GPU regressions.
+- Added repo automation including Ruff checks and GitHub Actions coverage for
+  supported Python versions.
+- Updated README examples and operational documentation to cover the shipped
+  headless and introspection workflows.
+
 ## Current Baseline
 
-Today the project already provides:
+Today the repository already provides:
 
-- a stable config, runtime, and manager core
-- CPU and GPU built-in kernels with example pipelines
-- worker supervision and structured failure propagation
-- a GUI for pipeline editing and runtime control
-- automated tests for the shipped scaffold
+- YAML-only pipeline authoring with validated CPU and GPU stream definitions
+- a package-installable CLI and desktop GUI
+- graph introspection before process startup
+- runtime snapshots and rolling worker metrics for GUI and CLI consumers
+- synthetic input generation for tests, demos, and live GUI operation
+- CPU and GPU example pipelines with parity across the built-in kernel family
+- automated tests, Ruff checks, and CI workflows
 
-That changes the planning problem. The next phase should focus less on proving
-the architecture and more on making the system easier to operate, inspect, and
-extend.
+That changes the planning problem again. The next phase is no longer about
+adding the first operability surface. It is about hardening the shipped system,
+closing the rough edges that appear under sustained GPU workloads, and making
+extension workflows clearer.
 
 ## Next Phase Theme
 
-Phase 2 is about operability and introspection.
+The next phase is about hardening, polish, and extension points.
 
-The repository has a working execution engine, but it still lacks the tooling
-that makes the engine easy to run headlessly, reason about from the outside,
-and tune under real workloads. The next phase should turn the current scaffold
-into a more complete developer tool and runtime platform.
+The project now has real headless and GUI workflows, but there are still a few
+practical gaps: GPU lifecycle cleanup needs to be quieter and more predictable,
+viewer and runtime observability can still be refined, and the extension story
+for larger deployments is still mostly implicit.
 
-## Phase 2 Goals
+## Remaining Goals
 
-1. Add a first-class command-line interface for headless workflows.
-2. Expose pipeline graph and configuration introspection APIs.
-3. Add runtime metrics and diagnostics that are useful in both CLI and GUI
-   flows.
-4. Improve worker placement and runtime policy beyond the current basic
-   round-robin CPU slot assignment.
-5. Improve the GUI so it is theme-aware, operationally useful, and reliable
-  for live data inspection.
-6. Harden packaging, documentation, and tests around the new operational
-  surface area.
+1. Harden GPU shared-memory lifecycle and shutdown behavior.
+2. Refine runtime observability and viewer ergonomics for long-running
+   pipelines.
+3. Close the remaining documentation and examples gaps for advanced workflows.
+4. Make the extension and deployment surface more explicit.
+5. Keep a focused backlog for advanced scheduling and visualization without
+   destabilizing the current core.
 
-## Phase 2 Workstreams
+## Remaining Workstreams
 
-### 1. CLI And Headless Operation
+### 1. GPU Lifecycle And Cleanup
 
-Deliver a supported command-line entry point for working with YAML pipelines
-without opening the GUI.
+The runtime now works correctly under realistic GPU examples, but shutdown and
+resource cleanup still need another pass.
 
 Scope:
 
-- Add a `shmpipeline` CLI with subcommands such as `validate`, `describe`,
-  and `run`.
-- Support loading a pipeline from YAML, validating it, building it, starting
-  it, and shutting it down cleanly from a terminal session.
-- Return meaningful exit codes for config errors, runtime failures, and user
-  interrupts.
-- Expose runtime options such as logging level, startup timeout, and shutdown
-  behavior.
-- Ensure the CLI reuses the same config and manager APIs as the GUI rather than
-  introducing a second execution path.
+- Eliminate or substantially reduce the current GPU shared-memory teardown
+  noise, especially `multiprocessing.resource_tracker` warnings.
+- Audit the full create/open/close/unlink lifecycle for CUDA-backed streams so
+  long-running sessions and repeated rebuilds are predictable.
+- Tighten manager shutdown behavior around viewer processes, worker teardown,
+  and remaining local stream handles.
+- Add regression coverage for repeated build/start/stop/shutdown cycles on GPU
+  pipelines.
 
 Why this matters:
 
-- It unlocks automation, CI smoke tests, remote execution, and scripted
-  demonstrations.
-- It gives the project a user-facing interface that matches the maturity of
-  the existing runtime.
+- It removes operator confusion around successful runs that still end with
+  noisy warnings.
+- It makes GPU workflows feel production-ready rather than merely functional.
 
-### 2. Pipeline Graph Introspection
+### 2. Observability And Viewer Polish
 
-Make pipeline structure visible as data instead of leaving it implicit inside
-`PipelineConfig` and the manager.
+The current metrics surface is useful, but it can be made more operationally
+complete.
 
 Scope:
 
-- Add a graph model that derives nodes, edges, stream producers, and stream
-  consumers from the loaded config.
-- Provide a programmatic API for graph queries such as upstream/downstream
-  dependencies and orphaned resources.
-- Add static validation for graph-level issues where appropriate, including
-  ambiguous bindings and configuration patterns that should be rejected before
-  process startup.
-- Support human-readable CLI output for `describe` and a machine-readable form
-  such as JSON for tooling integration.
-- Reuse this graph model in the GUI so the editor and runtime surface reflect
-  the same structure.
+- Continue refining the relationship between worker metrics, shared-memory
+  metadata, and viewer status so rates and timing remain easy to interpret.
+- Keep passive-viewer behavior explicit for CPU, GPU, and CPU-mirror-backed
+  GPU streams.
+- Improve how runtime status communicates stalled inputs, inactive sources, and
+  degraded workers.
+- Add a small amount of additional operator-facing troubleshooting context
+  where it helps, without turning the runtime into a full telemetry stack.
 
 Why this matters:
 
-- It gives users a way to reason about larger pipelines before they run.
-- It creates a shared foundation for later visualization, metrics overlays, and
-  debugging tools.
+- The project is now usable enough that debugging quality matters more than raw
+  feature count.
+- Better operational feedback reduces the need to inspect shared memory by
+  hand.
 
-### 3. Metrics And Diagnostics
+### 3. Documentation And Advanced Examples
 
-Add lightweight observability so runtime behavior can be inspected without
-attaching a debugger.
+The core workflows are documented, but the operational guidance is still thin
+in places.
 
 Scope:
 
-- Record per-worker lifecycle state, processed-frame counts, last successful
-  execution time, and failure metadata.
-- Capture basic latency and throughput metrics at the worker level.
-- Add manager APIs for retrieving a runtime snapshot suitable for GUI polling
-  and CLI reporting.
-- Surface worker exceptions and restart/stop outcomes in a more structured,
-  user-facing form.
-- Keep the design minimal: start with in-process aggregation through the
-  existing event channel before considering external metrics backends.
+- Expand the README and example documentation for mixed CPU/GPU pipelines,
+  synthetic input strategies, CPU mirrors, and viewer behavior.
+- Add an operator-oriented troubleshooting section for common runtime and GPU
+  issues.
+- Document lifecycle expectations for build/rebuild/shutdown in both CLI and
+  GUI flows.
+- Add one or two more realistic example pipelines that demonstrate the current
+  best practices rather than only the kernel primitives.
 
 Why this matters:
 
-- It reduces time-to-diagnosis when pipelines stall or underperform.
-- It gives the GUI and future CLI commands concrete runtime state to display.
+- The project now has enough surface area that users need guidance on how to
+  use it well, not just how to call the API.
 
-### 4. Scheduling And Runtime Policy
+### 4. Extension And Packaging Surface
 
-The current CPU placement logic is a reasonable baseline, but it should become
-an explicit policy surface rather than a hidden implementation detail.
+The package is installable and automated, but the extension story is still
+mostly inferred from the codebase.
 
 Scope:
 
-- Refactor worker placement into a strategy or policy abstraction.
-- Preserve the current best-effort behavior as the default fallback.
-- Add config-level or manager-level hooks for affinity preferences where the
-  platform supports them.
-- Improve backend-aware startup checks, especially around GPU device
-  availability and resource mismatches.
-- Define how future policy decisions interact with mixed CPU/GPU pipelines.
+- Clarify how third-party kernels should be packaged, registered, and tested.
+- Decide whether plugin discovery belongs in the next phase or stays a manual
+  integration story for now.
+- Review packaging metadata and optional dependency guidance so CPU-only, GPU,
+  GUI, and test installs are clearly documented.
+- Keep the public API surface small and explicit as these extension points are
+  documented.
 
 Why this matters:
 
-- It keeps the current implementation simple while making room for better
-  workload placement later.
-- It avoids baking future scheduling limits into the current manager API.
+- A clearer extension story makes the project easier to adopt in real systems
+  without forcing premature plugin infrastructure.
 
-### 5. GUI Usability, Test Inputs, And Live Viewers
+### 5. Deferred Advanced Work
 
-The GUI should move from basic control surface to practical operator tool.
+These are real follow-on items, but they should stay behind hardening work.
 
 Scope:
 
-- Add explicit light and dark theme support with light as the default startup
-  theme rather than forcing a default-dark presentation.
-- Make theme choice a first-class setting in the GUI so users can switch
-  without restarting the app.
-- Keep theme implementation deliberate and limited in scope: shared color
-  tokens, widget styling that matches the current Qt surface, and no forked UI
-  logic per theme.
-- Add backend support for synthetic input sources that can drive pipelines at
-  the maximum sustainable rate for testing and demos.
-- Start the synthetic input work in the backend so the same mechanism can be
-  used from tests, future CLI flows, and the GUI.
-- Support deterministic random generation with a fixed seed, ramp patterns,
-  and a small initial set of other common patterns such as constant, impulse,
-  and sine.
-- Define synthetic-source controls in terms of target input stream, pattern,
-  rate policy, dtype, shape, and reproducibility so they integrate cleanly with
-  existing config and manager APIs.
-- Add GUI controls for starting and stopping these test injectors once the
-  backend API exists.
-- Repair the shared-memory viewer path so launching a live viewer from the GUI
-  is reliable again.
-- Treat the current `pyqtgraph` viewer failure as a compatibility bug to be
-  fixed at the root, not worked around by requiring a default-dark UI or a
-  fragile import chain.
-- Avoid viewer startup paths that implicitly drag in optional matplotlib
-  integrations when they are not needed for image display.
-- Add dedicated live views for image-like and vector-like shared memory with
-  frame-rate-oriented refresh behavior suitable for active pipelines.
-- Make viewer launch available for any shared-memory resource from inside the
-  GUI, with clear handling for unsupported shapes or unavailable streams.
+- richer graph visualization in the GUI or CLI
+- historical metrics export or external telemetry integration
+- more advanced scheduling strategies beyond local affinity hints
+- plugin or third-party kernel discovery workflows
+- remote control or multi-host orchestration
 
 Why this matters:
 
-- Theme support makes the GUI usable in more environments without baking in a
-  default-dark assumption.
-- Synthetic test inputs make it much easier to benchmark, debug, and validate
-  full pipeline chains without external producers.
-- Reliable live viewers are essential if the GUI is going to be used to
-  inspect running pipelines rather than only configure them.
+- These are attractive expansions, but they should not compete with stability
+  and clarity in the current single-host runtime.
 
-### 6. Documentation, Examples, And Test Expansion
+## Proposed Exit Criteria For The Next Phase
 
-The next phase introduces new operational surfaces, so the supporting material
-needs to grow with it.
+The next phase is complete when the repository can support the following story
+cleanly:
 
-Scope:
-
-- Add CLI-focused documentation and examples that cover validate/describe/run
-  workflows.
-- Add tests for graph derivation, metrics reporting, CLI behavior, synthetic
-  input generation, theme selection, and viewer launch behavior.
-- Keep multiprocessing tests aligned with `spawn` semantics and real
-  `pyshmem` resources.
-- Add failure-path coverage for CLI exit codes and headless shutdown handling.
-- Add regression coverage for the current viewer initialization failure so the
-  GUI does not silently regress on dependency interactions.
-- Document expected behavior for mixed CPU/GPU pipelines and runtime
-  observability fields.
-- Document the supported synthetic patterns and the semantics of fixed-seed
-  reproducibility.
-
-Why this matters:
-
-- The project already has a strong testing culture; the new work should extend
-  that discipline instead of bypassing it.
-
-## Proposed Phase 2 Exit Criteria
-
-Phase 2 is complete when the repository can support the following end-to-end
-story:
-
-- A user can validate and run a YAML pipeline from the command line.
-- A user can inspect the pipeline graph without starting worker processes.
-- The manager can report a structured runtime snapshot for active pipelines.
-- The GUI and CLI consume the same underlying introspection and runtime-status
-  APIs.
-- A user can switch between light and dark themes, with light as the default.
-- A user can inject deterministic synthetic test patterns into pipeline inputs
-  from shared backend APIs and from the GUI.
-- A user can open live shared-memory viewers from the GUI without triggering
-  the current viewer startup failure.
-- The new features are covered by tests and documented in the README and
-  examples.
+- GPU example pipelines can be built, run, and shut down repeatedly without the
+  current cleanup noise or stale-handle confusion.
+- Runtime status and viewer surfaces communicate pipeline health and stream
+  rates clearly enough for day-to-day debugging.
+- The README and examples document the supported CPU/GPU, synthetic-input, and
+  viewer workflows well enough that users do not need to reverse-engineer the
+  intended patterns from tests.
+- The project has an explicit documented path for extending the built-in kernel
+  set.
+- The remaining advanced work is clearly separated into backlog rather than
+  being mixed into near-term execution work.
 
 ## Later Backlog
 
-These items remain good follow-on work, but they do not need to be in the next
-phase unless the scope expands:
+These remain good follow-on items after the next hardening phase:
 
 - richer visualization of pipeline graphs
 - historical metrics export or external telemetry integration
-- plugin or third-party kernel packaging workflows
+- plugin discovery or third-party kernel packaging workflows
 - remote control or multi-host orchestration
 - more advanced scheduling strategies beyond local affinity hints

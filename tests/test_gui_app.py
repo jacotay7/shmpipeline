@@ -157,3 +157,39 @@ def test_gpu_viewer_can_open_without_cpu_mirror(qapp, monkeypatch):
         assert "Mode: passive-gpu" in viewer._status_label.text()
     finally:
         viewer.close()
+
+
+def test_main_window_runtime_status_text_includes_worker_health(qapp):
+    window = MainWindow(theme_name="light")
+    try:
+        text = window._format_runtime_status_text(
+            {
+                "placement_policy": "round-robin",
+                "summary": {
+                    "active_workers": 1,
+                    "idle_workers": 1,
+                    "waiting_workers": 0,
+                    "paused_workers": 0,
+                    "failed_workers": 0,
+                },
+                "workers": {
+                    "stage": {
+                        "health": "active",
+                        "idle_s": 0.12,
+                        "last_metric_age_s": 0.05,
+                        "avg_exec_us": 123.4,
+                        "jitter_us_rms": 12.5,
+                        "throughput_hz": 456.7,
+                        "metrics_window": 42,
+                    }
+                },
+                "failures": [],
+                "synthetic_sources": {},
+            }
+        )
+        assert "Workers: active=1 idle=1 waiting=0 paused=0 failed=0" in text
+        assert "stage health=active" in text
+        assert "idle_s=0.12" in text
+        assert "metric_age_s=0.05" in text
+    finally:
+        window.close()

@@ -710,10 +710,17 @@ class MainWindow(QMainWindow):
         dirty = "dirty" if self._manager_dirty else "synced"
         placement = (status or {}).get("placement_policy", "n/a")
         synthetic_count = len(synthetic_sources)
+        summary = (status or {}).get("summary", {})
+        active_workers = summary.get("active_workers", 0)
+        idle_workers = summary.get("idle_workers", 0)
+        waiting_workers = summary.get("waiting_workers", 0)
+        failed_workers = summary.get("failed_workers", 0)
         self._status_label.setText(
             "State: "
             f"{state} | Config: {dirty} | Placement: {placement} | "
-            f"Synthetic: {synthetic_count}"
+            f"Synthetic: {synthetic_count} | Active: {active_workers} | "
+            f"Idle: {idle_workers} | Waiting: {waiting_workers} | "
+            f"Failed: {failed_workers}"
         )
 
         self._runtime_output.setPlainText(
@@ -726,17 +733,32 @@ class MainWindow(QMainWindow):
         if status is None:
             return "Runtime: manager not built"
         lines = [f"Placement policy: {status.get('placement_policy', 'n/a')}"]
-        metrics = status.get("metrics", {})
-        if metrics:
+        summary = status.get("summary", {})
+        if summary:
+            lines.append(
+                "Workers: "
+                f"active={summary.get('active_workers', 0)} "
+                f"idle={summary.get('idle_workers', 0)} "
+                f"waiting={summary.get('waiting_workers', 0)} "
+                f"paused={summary.get('paused_workers', 0)} "
+                f"failed={summary.get('failed_workers', 0)}"
+            )
+        workers = status.get("workers", {})
+        if workers:
             lines.append("Worker timing:")
-            for kernel_name, worker_metrics in sorted(metrics.items()):
+            for kernel_name, worker_metrics in sorted(workers.items()):
                 lines.append(
                     "- "
-                    f"{kernel_name} avg_us={self._format_microseconds(worker_metrics.get('avg_exec_us'))} "
+                    f"{kernel_name} health={worker_metrics.get('health', 'n/a')} "
+                    f"idle_s={self._format_float(worker_metrics.get('idle_s'))} "
+                    f"metric_age_s={self._format_float(worker_metrics.get('last_metric_age_s'))} "
+                    f"avg_us={self._format_microseconds(worker_metrics.get('avg_exec_us'))} "
                     f"jitter_us_rms={self._format_microseconds(worker_metrics.get('jitter_us_rms'))} "
                     f"hz={self._format_float(worker_metrics.get('throughput_hz'))} "
                     f"window={worker_metrics.get('metrics_window', '')}"
                 )
+        else:
+            lines.append("Workers: none")
         failures = status.get("failures", [])
         if failures:
             lines.append("Failures:")

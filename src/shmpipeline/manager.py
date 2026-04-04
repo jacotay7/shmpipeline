@@ -8,7 +8,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pyshmem
 
@@ -20,17 +20,17 @@ from shmpipeline.errors import (
 )
 from shmpipeline.graph import PipelineGraph
 from shmpipeline.logging_utils import get_logger
-from shmpipeline.registry import get_default_registry
+from shmpipeline.registry import KernelRegistry, get_default_registry
 from shmpipeline.runtime import drain_events, run_kernel_process
 from shmpipeline.scheduling import (
     WorkerPlacementPolicy,
     normalize_placement_policy,
 )
+from shmpipeline.shm_cleanup import close_stream, unlink_stream_name
 from shmpipeline.state import PipelineState
-from shmpipeline.synthetic import (
-    SyntheticInputConfig,
-    SyntheticSourceController,
-)
+
+if TYPE_CHECKING:
+    from shmpipeline.synthetic import SyntheticInputConfig
 
 
 @dataclass
@@ -40,6 +40,7 @@ class _WorkerHandle:
     name: str
     process: Any
     stop_event: Any
+    event_reader: Any | None
     cpu_slot: int | None
 
 
@@ -52,24 +53,29 @@ class PipelineManager:
         *,
         spawn_method: str = "spawn",
         placement_policy: WorkerPlacementPolicy | None = None,
+        registry: KernelRegistry | None = None,
     ) -> None:
         """Initialize a manager from a config object or YAML path."""
         if isinstance(config, (str, Path)):
             config = PipelineConfig.from_yaml(config)
         self.config = config
-        self.registry = get_default_registry()
+        self.registry = registry or get_default_registry()
+        self._runtime_registry = registry
         self.context = mp.get_context(spawn_method)
         self.placement_policy = normalize_placement_policy(placement_policy)
         self._logger = get_logger("manager")
         self.state = PipelineState.INITIALIZED
         self._streams: dict[str, Any] = {}
         self._pause_event: Any | None = None
-        self._event_queue: Any = self.context.Queue()
         self._workers: dict[str, _WorkerHandle] = {}
         self._failures: list[dict[str, Any]] = []
         self._events: deque[dict[str, Any]] = deque(maxlen=256)
         self._worker_metrics: dict[str, dict[str, Any]] = {}
-        self._synthetic_sources: dict[str, SyntheticSourceController] = {}
+        self._worker_runtime: dict[str, dict[str, Any]] = {}
+        self._synthetic_sources: dict[str, Any] = {}
+        self._kernel_configs = {
+            kernel.name: kernel for kernel in self.config.kernels
+        }
         self._logger.info(
             "manager initialized: spawn_method=%s placement_policy=%s "
             "kernels=%d streams=%d",
@@ -107,10 +113,11 @@ class PipelineManager:
                 f"cannot build pipeline while state is {self.state.value!r}"
             )
         self._logger.info("build started")
-        self._event_queue = self.context.Queue()
+        self._close_event_readers()
         self._events.clear()
         self._failures.clear()
         self._worker_metrics.clear()
+        self._worker_runtime.clear()
         shared_by_name = self.config.shared_memory_by_name
         self._logger.info("validating pipeline config")
         graph_errors = self.graph.validation_errors()
@@ -135,31 +142,12 @@ class PipelineManager:
         """Create, reuse, or replace one shared-memory stream."""
         existing_stream = self._open_existing_stream(spec)
         if existing_stream is not None:
-            if self._stream_matches_spec(existing_stream, spec):
-                self._logger.info(
-                    "reusing shared memory: name=%s storage=%s shape=%s "
-                    "dtype=%s",
-                    spec.name,
-                    spec.storage,
-                    spec.shape,
-                    spec.dtype,
-                )
-                return existing_stream
-
-            self._logger.info(
-                "replacing incompatible shared memory: name=%s expected_storage=%s "
-                "expected_shape=%s expected_dtype=%s existing_storage=%s "
-                "existing_shape=%s existing_dtype=%s",
-                spec.name,
-                spec.storage,
-                spec.shape,
-                spec.dtype,
-                "gpu" if existing_stream.gpu_enabled else "cpu",
-                existing_stream.shape,
-                existing_stream.dtype,
+            reused_stream = self._reuse_or_replace_existing_stream(
+                spec,
+                existing_stream,
             )
-            existing_stream.close()
-            pyshmem.unlink(spec.name)
+            if reused_stream is not None:
+                return reused_stream
 
         create_kwargs = {
             "shape": spec.shape,
@@ -168,7 +156,30 @@ class PipelineManager:
         if spec.storage == "gpu":
             create_kwargs["gpu_device"] = spec.gpu_device
             create_kwargs["cpu_mirror"] = spec.cpu_mirror
-        stream = pyshmem.create(spec.name, **create_kwargs)
+
+        try:
+            stream = pyshmem.create(spec.name, **create_kwargs)
+        except FileExistsError:
+            self._logger.info(
+                "shared memory already exists during create; retrying attach: name=%s",
+                spec.name,
+            )
+            existing_stream = self._open_existing_stream(spec)
+            if existing_stream is not None:
+                reused_stream = self._reuse_or_replace_existing_stream(
+                    spec,
+                    existing_stream,
+                )
+                if reused_stream is not None:
+                    return reused_stream
+            else:
+                self._logger.warning(
+                    "shared memory exists but is not attachable; recreating stale stream: name=%s",
+                    spec.name,
+                )
+                unlink_stream_name(spec.name)
+            stream = pyshmem.create(spec.name, **create_kwargs)
+
         self._logger.info(
             "created shared memory: name=%s storage=%s shape=%s dtype=%s",
             spec.name,
@@ -177,6 +188,33 @@ class PipelineManager:
             spec.dtype,
         )
         return stream
+
+    def _reuse_or_replace_existing_stream(self, spec, existing_stream) -> Any | None:
+        """Return a reusable existing stream or replace it when incompatible."""
+        if self._stream_matches_spec(existing_stream, spec):
+            self._logger.info(
+                "reusing shared memory: name=%s storage=%s shape=%s dtype=%s",
+                spec.name,
+                spec.storage,
+                spec.shape,
+                spec.dtype,
+            )
+            return existing_stream
+
+        self._logger.info(
+            "replacing incompatible shared memory: name=%s expected_storage=%s "
+            "expected_shape=%s expected_dtype=%s existing_storage=%s "
+            "existing_shape=%s existing_dtype=%s",
+            spec.name,
+            spec.storage,
+            spec.shape,
+            spec.dtype,
+            "gpu" if existing_stream.gpu_enabled else "cpu",
+            existing_stream.shape,
+            existing_stream.dtype,
+        )
+        close_stream(existing_stream, unlink=True)
+        return None
 
     def _open_existing_stream(self, spec) -> Any | None:
         """Open an existing stream if present.
@@ -213,9 +251,13 @@ class PipelineManager:
         self._logger.info("start requested")
         self._pause_event = self.context.Event()
         self._failures.clear()
+        self._worker_metrics.clear()
+        self._worker_runtime.clear()
+        self._close_event_readers()
         cpu_count = max(1, os.cpu_count() or 1)
         for index, kernel_config in enumerate(self.config.kernels):
             stop_event = self.context.Event()
+            event_reader, event_writer = self.context.Pipe(duplex=False)
             cpu_slot = self.placement_policy.cpu_slot_for(
                 kernel=kernel_config,
                 index=index,
@@ -228,12 +270,19 @@ class PipelineManager:
                     self.config.shared_memory,
                     self._pause_event,
                     stop_event,
-                    self._event_queue,
+                    event_writer,
                     cpu_slot,
+                    self._runtime_registry,
                 ),
                 name=f"shmpipeline-{kernel_config.name}",
             )
-            process.start()
+            try:
+                process.start()
+            except BaseException:
+                event_reader.close()
+                event_writer.close()
+                raise
+            event_writer.close()
             self._logger.info(
                 "spawned worker: kernel=%s pid=%s cpu_slot=%s",
                 kernel_config.name,
@@ -244,6 +293,7 @@ class PipelineManager:
                 name=kernel_config.name,
                 process=process,
                 stop_event=stop_event,
+                event_reader=event_reader,
                 cpu_slot=cpu_slot,
             )
         self._wait_for_workers_started()
@@ -336,6 +386,8 @@ class PipelineManager:
                 worker.process.pid,
                 worker.process.exitcode,
             )
+        self.poll_events()
+        self._close_event_readers()
         self._workers.clear()
         self._pause_event = None
         self._transition_state(PipelineState.BUILT, reason="workers stopped")
@@ -354,16 +406,13 @@ class PipelineManager:
             self.stop(force=force)
         for name, stream in list(self._streams.items()):
             try:
-                stream.close()
+                close_stream(stream, unlink=unlink)
             finally:
-                if unlink:
-                    try:
-                        pyshmem.unlink(name)
-                    except FileNotFoundError:
-                        pass
-            self._logger.info(
-                "released shared memory: name=%s unlink=%s", name, unlink
-            )
+                self._logger.info(
+                    "released shared memory: name=%s unlink=%s",
+                    name,
+                    unlink,
+                )
         self._streams.clear()
         self._transition_state(
             PipelineState.STOPPED, reason="shutdown complete"
@@ -371,12 +420,20 @@ class PipelineManager:
 
     def poll_events(self) -> list[dict[str, Any]]:
         """Drain worker events and update manager failure state."""
-        events = drain_events(self._event_queue)
+        events = drain_events(
+            [
+                worker.event_reader
+                for worker in self._workers.values()
+                if worker.event_reader is not None
+            ]
+        )
         if events:
             for event in events:
                 self._events.append(event)
                 self._log_event(event)
+                kernel_name = event.get("kernel")
                 if event.get("type") == "worker_metrics":
+                    observed_at = time.time()
                     self._worker_metrics[event["kernel"]] = {
                         "pid": event.get("pid"),
                         "cpu_slot": event.get("cpu_slot"),
@@ -391,6 +448,31 @@ class PipelineManager:
                         "last_output_count": event.get("last_output_count"),
                         "metrics_window": event.get("metrics_window"),
                     }
+                    runtime = self._worker_runtime.setdefault(
+                        event["kernel"],
+                        {},
+                    )
+                    runtime.setdefault(
+                        "started_at",
+                        observed_at - float(event.get("runtime_s") or 0.0),
+                    )
+                    runtime["last_metric_at"] = observed_at
+                    previous_frames = int(runtime.get("frames_processed") or 0)
+                    previous_output_count = runtime.get("last_output_count")
+                    current_frames = int(event.get("frames_processed") or 0)
+                    current_output_count = event.get("last_output_count")
+                    if (
+                        current_frames > previous_frames
+                        or previous_output_count is None
+                        or current_output_count is None
+                        or current_output_count > previous_output_count
+                    ):
+                        runtime["last_progress_at"] = observed_at
+                    runtime["frames_processed"] = current_frames
+                    runtime["last_output_count"] = current_output_count
+                elif event.get("type") == "worker_started" and kernel_name:
+                    runtime = self._worker_runtime.setdefault(kernel_name, {})
+                    runtime["started_at"] = time.time()
                 elif event.get("type") == "worker_failed":
                     self._record_worker_failure(event)
         for worker in self._workers.values():
@@ -420,6 +502,18 @@ class PipelineManager:
                 reason="worker failure recorded",
             )
         return events
+
+    def _close_event_readers(self) -> None:
+        """Close any open manager-side worker event readers."""
+        for worker in self._workers.values():
+            event_reader = worker.event_reader
+            if event_reader is None:
+                continue
+            try:
+                event_reader.close()
+            except OSError:
+                pass
+            worker.event_reader = None
 
     def _log_event(self, event: dict[str, Any]) -> None:
         """Write manager-readable logs for worker lifecycle events."""
@@ -507,18 +601,13 @@ class PipelineManager:
     def status(self) -> dict[str, Any]:
         """Return a snapshot of manager state, workers, and failures."""
         self.poll_events()
+        workers_status = {
+            name: self._status_for_worker(name, worker)
+            for name, worker in self._workers.items()
+        }
         return {
             "state": self.state.value,
-            "workers": {
-                name: {
-                    "pid": worker.process.pid,
-                    "alive": worker.process.is_alive(),
-                    "exitcode": worker.process.exitcode,
-                    "cpu_slot": worker.cpu_slot,
-                    **self._worker_metrics.get(name, {}),
-                }
-                for name, worker in self._workers.items()
-            },
+            "workers": workers_status,
             "failures": list(self._failures),
             "metrics": {
                 name: dict(metrics)
@@ -526,7 +615,106 @@ class PipelineManager:
             },
             "synthetic_sources": self.synthetic_input_status(),
             "placement_policy": self.placement_policy.describe(),
+            "summary": self._status_summary(workers_status),
         }
+
+    def _status_for_worker(
+        self, name: str, worker: _WorkerHandle
+    ) -> dict[str, Any]:
+        metrics = dict(self._worker_metrics.get(name, {}))
+        health, idle_s, last_metric_age_s = self._worker_health(name, worker)
+        status = {
+            "pid": worker.process.pid,
+            "alive": worker.process.is_alive(),
+            "exitcode": worker.process.exitcode,
+            "cpu_slot": worker.cpu_slot,
+            "health": health,
+            "idle_s": idle_s,
+            "last_metric_age_s": last_metric_age_s,
+            **metrics,
+        }
+        return status
+
+    def _worker_health(
+        self, name: str, worker: _WorkerHandle
+    ) -> tuple[str, float | None, float | None]:
+        now = time.time()
+        runtime = self._worker_runtime.get(name, {})
+        started_at = runtime.get("started_at")
+        last_progress_at = runtime.get("last_progress_at")
+        last_metric_at = runtime.get("last_metric_at")
+        frames_processed = int(
+            self._worker_metrics.get(name, {}).get("frames_processed") or 0
+        )
+
+        if any(failure.get("kernel") == name for failure in self._failures):
+            idle_s = None
+            if last_progress_at is not None:
+                idle_s = max(0.0, now - float(last_progress_at))
+            last_metric_age_s = None
+            if last_metric_at is not None:
+                last_metric_age_s = max(0.0, now - float(last_metric_at))
+            return "failed", idle_s, last_metric_age_s
+
+        if not worker.process.is_alive():
+            return "stopped", None, None
+
+        if self.state == PipelineState.PAUSED:
+            idle_s = None
+            if last_progress_at is not None:
+                idle_s = max(0.0, now - float(last_progress_at))
+            last_metric_age_s = None
+            if last_metric_at is not None:
+                last_metric_age_s = max(0.0, now - float(last_metric_at))
+            return "paused", idle_s, last_metric_age_s
+
+        if started_at is None:
+            return "starting", None, None
+
+        reference_at = last_progress_at or started_at
+        idle_s = max(0.0, now - float(reference_at))
+        last_metric_age_s = None
+        if last_metric_at is not None:
+            last_metric_age_s = max(0.0, now - float(last_metric_at))
+
+        if frames_processed <= 0:
+            return "waiting-input", idle_s, last_metric_age_s
+
+        kernel_config = self._kernel_configs.get(name)
+        idle_threshold_s = 1.0
+        if kernel_config is not None:
+            idle_threshold_s = max(1.0, 4.0 * kernel_config.read_timeout)
+        if self.state == PipelineState.RUNNING and idle_s > idle_threshold_s:
+            return "idle", idle_s, last_metric_age_s
+        return "active", idle_s, last_metric_age_s
+
+    def _status_summary(
+        self, workers_status: dict[str, dict[str, Any]]
+    ) -> dict[str, int]:
+        summary = {
+            "workers_total": len(workers_status),
+            "active_workers": 0,
+            "idle_workers": 0,
+            "waiting_workers": 0,
+            "paused_workers": 0,
+            "failed_workers": 0,
+            "stopped_workers": 0,
+        }
+        for worker in workers_status.values():
+            health = worker.get("health")
+            if health == "active":
+                summary["active_workers"] += 1
+            elif health == "idle":
+                summary["idle_workers"] += 1
+            elif health in {"waiting-input", "starting"}:
+                summary["waiting_workers"] += 1
+            elif health == "paused":
+                summary["paused_workers"] += 1
+            elif health == "failed":
+                summary["failed_workers"] += 1
+            elif health == "stopped":
+                summary["stopped_workers"] += 1
+        return summary
 
     def runtime_snapshot(self) -> dict[str, Any]:
         """Return a richer status snapshot for CLI and GUI consumers."""
@@ -552,9 +740,14 @@ class PipelineManager:
 
     def start_synthetic_input(
         self,
-        spec: SyntheticInputConfig | dict[str, Any],
+        spec: "SyntheticInputConfig | dict[str, Any]",
     ) -> dict[str, Any]:
         """Start a synthetic input writer for one built stream."""
+        from shmpipeline.synthetic import (
+            SyntheticInputConfig,
+            SyntheticSourceController,
+        )
+
         if self.state not in {
             PipelineState.BUILT,
             PipelineState.RUNNING,

@@ -1,0 +1,95 @@
+shared_memory:
+  - name: obs_wfs_image
+    shape: [256, 256]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_measured_centroids
+    shape: [32, 32, 2]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_flattened_slopes
+    shape: [2048]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_control_matrix
+    shape: [1024, 2048]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_modal_bias
+    shape: [1024]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_open_loop_command
+    shape: [1024]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_integrated_command
+    shape: [1024]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_command_low_limit
+    shape: [1024]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_command_high_limit
+    shape: [1024]
+    dtype: float32
+    storage: cpu
+
+  - name: obs_dm_command
+    shape: [1024]
+    dtype: float32
+    storage: cpu
+
+kernels:
+  - name: centroid_stage
+    kind: cpu.shack_hartmann_centroid
+    input: obs_wfs_image
+    output: obs_measured_centroids
+    parameters:
+      tile_size: 8
+    read_timeout: 0.1
+
+  - name: flatten_stage
+    kind: cpu.flatten
+    input: obs_measured_centroids
+    output: obs_flattened_slopes
+    parameters: {}
+    read_timeout: 0.1
+
+  - name: reconstructor_stage
+    kind: cpu.affine_transform
+    input: obs_flattened_slopes
+    output: obs_open_loop_command
+    auxiliary:
+      - obs_control_matrix
+      - obs_modal_bias
+    parameters: {}
+    read_timeout: 0.1
+
+  - name: controller_stage
+    kind: cpu.leaky_integrator
+    input: obs_open_loop_command
+    output: obs_integrated_command
+    parameters:
+      leak: 0.985
+      gain: 0.28
+    read_timeout: 0.1
+
+  - name: saturation_stage
+    kind: cpu.custom_operation
+    operation: clip(input, low, high)
+    input: obs_integrated_command
+    output: obs_dm_command
+    auxiliary:
+      low: obs_command_low_limit
+      high: obs_command_high_limit
+    read_timeout: 0.1

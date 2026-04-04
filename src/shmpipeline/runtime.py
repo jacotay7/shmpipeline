@@ -8,22 +8,33 @@ import time
 import traceback
 from collections import deque
 from contextlib import ExitStack
+from importlib import import_module
 from queue import Empty
 from typing import Any
 
 import numpy as np
 import pyshmem
 
-try:
-    import torch
-except Exception:  # pragma: no cover - exercised when torch is unavailable
-    torch = None
-
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.logging_utils import get_logger
 from shmpipeline.registry import get_default_registry
 
 ROLLING_METRICS_WINDOW = 1000
+_TORCH_UNINITIALIZED = object()
+_TORCH_MODULE: Any = _TORCH_UNINITIALIZED
+
+
+def _get_torch_module() -> Any | None:
+    """Import torch on first use so CPU-only workers stay lightweight."""
+    global _TORCH_MODULE
+    if _TORCH_MODULE is _TORCH_UNINITIALIZED:
+        try:
+            _TORCH_MODULE = import_module("torch")
+        except (
+            Exception
+        ):  # pragma: no cover - exercised when torch is unavailable
+            _TORCH_MODULE = None
+    return _TORCH_MODULE
 
 
 def _compute_rolling_throughput_hz(
@@ -140,9 +151,23 @@ def _write_worker_output(
     output_view.copy_(value)
     if getattr(output_stream, "cpu_mirror", False):
         np.copyto(output_stream._array, value.detach().cpu().numpy())
-    if torch is not None:
-        torch.cuda.synchronize(device=output_stream.gpu_device)
+    torch_module = _get_torch_module()
+    if torch_module is not None:
+        torch_module.cuda.synchronize(device=output_stream.gpu_device)
     output_stream._finish_write()
+
+
+def _send_worker_event(event_sink: Any, event: dict[str, Any]) -> None:
+    """Send one worker event through either a queue or a pipe endpoint."""
+    put = getattr(event_sink, "put", None)
+    if callable(put):
+        put(event)
+        return
+    send = getattr(event_sink, "send", None)
+    if callable(send):
+        send(event)
+        return
+    raise TypeError("unsupported worker event sink")
 
 
 def run_kernel_process(
@@ -150,14 +175,16 @@ def run_kernel_process(
     shared_memory: tuple[SharedMemoryConfig, ...],
     pause_event: Any,
     stop_event: Any,
-    event_queue: Any,
+    event_sink: Any,
     cpu_slot: int | None = None,
+    registry: Any | None = None,
 ) -> None:
     """Entry point executed in each worker subprocess."""
     logger = get_logger(f"worker.{kernel_config.name}")
     _pin_current_process(cpu_slot)
     shared_by_name = {item.name: item for item in shared_memory}
-    registry = get_default_registry()
+    if registry is None:
+        registry = get_default_registry()
     kernel = registry.create(kernel_config, shared_by_name)
     trigger_stream = _open_stream(shared_by_name[kernel_config.input])
     auxiliary_streams = {
@@ -165,13 +192,14 @@ def run_kernel_process(
         for binding in kernel_config.auxiliary
     }
     output_stream = _open_stream(shared_by_name[kernel_config.output])
-    event_queue.put(
+    _send_worker_event(
+        event_sink,
         {
             "type": "worker_started",
             "kernel": kernel_config.name,
             "pid": os.getpid(),
             "cpu_slot": cpu_slot,
-        }
+        },
     )
     logger.info(
         "worker runtime started: kernel=%s pid=%s cpu_slot=%s",
@@ -240,7 +268,8 @@ def run_kernel_process(
                 avg_exec_ms, avg_exec_us, jitter_us_rms = (
                     _compute_rolling_exec_metrics(exec_samples_s)
                 )
-                event_queue.put(
+                _send_worker_event(
+                    event_sink,
                     {
                         "type": "worker_metrics",
                         "kernel": kernel_config.name,
@@ -258,14 +287,15 @@ def run_kernel_process(
                         "runtime_s": runtime_s,
                         "last_output_count": output_stream.count,
                         "metrics_window": len(exec_samples_s),
-                    }
+                    },
                 )
                 next_metrics_emit = now + 0.25
     except BaseException as exc:
         logger.exception(
             "worker runtime failed: kernel=%s", kernel_config.name
         )
-        event_queue.put(
+        _send_worker_event(
+            event_sink,
             {
                 "type": "worker_failed",
                 "kernel": kernel_config.name,
@@ -273,7 +303,7 @@ def run_kernel_process(
                 "cpu_slot": cpu_slot,
                 "error": str(exc),
                 "traceback": traceback.format_exc(),
-            }
+            },
         )
         raise
     finally:
@@ -286,19 +316,41 @@ def run_kernel_process(
             kernel_config.name,
             os.getpid(),
         )
-        event_queue.put(
+        _send_worker_event(
+            event_sink,
             {
                 "type": "worker_stopped",
                 "kernel": kernel_config.name,
                 "pid": os.getpid(),
                 "cpu_slot": cpu_slot,
-            }
+            },
         )
+        close = getattr(event_sink, "close", None)
+        if callable(close):
+            close()
 
 
 def drain_events(event_queue: Any) -> list[dict[str, Any]]:
-    """Drain all currently pending worker events from the queue."""
+    """Drain all currently pending worker events from queues or pipes."""
     events: list[dict[str, Any]] = []
+    if event_queue is None:
+        return events
+    if isinstance(event_queue, (list, tuple, set)):
+        for event_source in event_queue:
+            events.extend(drain_events(event_source))
+        return events
+
+    poll = getattr(event_queue, "poll", None)
+    recv = getattr(event_queue, "recv", None)
+    if callable(poll) and callable(recv):
+        while True:
+            try:
+                if not event_queue.poll():
+                    return events
+                events.append(event_queue.recv())
+            except (EOFError, OSError):
+                return events
+
     while True:
         try:
             events.append(event_queue.get_nowait())

@@ -62,6 +62,9 @@ The repository also includes a basic adaptive-optics style example in
 There is also a GPU-backed variant in
 `examples/gpu_basic_ao_system/`.
 
+For a more representative high-order single-conjugate AO control loop, see
+`examples/observatory_ao_system/`.
+
 That example verifies a multi-stage CPU pipeline with:
 
 - Shack-Hartmann centroid extraction
@@ -69,6 +72,13 @@ That example verifies a multi-stage CPU pipeline with:
 - flattening into slope vectors
 - affine reconstruction
 - leaky-integrator control
+
+The observatory-scale example expands that into a more RTC-like chain with:
+
+- a pre-calibrated 256x256 Shack-Hartmann image with 32x32 subapertures
+- reference slopes folded into the affine bias term for a compact process graph
+- a 2048-slope to 1024-actuator synthetic reconstructor
+- actuator saturation after the control integrator
 
 GPU kernels now mirror the built-in CPU kernels using CUDA-backed PyTorch
 tensors underneath `pyshmem` GPU streams.
@@ -173,6 +183,16 @@ result = manager.get_stream("scaled_frame").read_new(timeout=2.0)
 manager.stop()
 manager.shutdown()
 ```
+
+## Installation Profiles
+
+Choose the smallest install that matches how you plan to use the package.
+
+- Base runtime and CLI: `pip install -e .`
+- GPU support: `pip install -e .[gpu]`
+- Desktop GUI: `pip install -e .[gui]`
+- Test tooling: `pip install -e .[test]`
+- Combined local development setup: `pip install -e .[gpu,gui,test]`
 
 ## CLI
 
@@ -300,6 +320,82 @@ shmpipeline-gui
 
 The GUI can open live viewers for configured shared-memory streams and switch
 between light and dark themes from the `View` menu.
+
+## Runtime Health And Viewers
+
+Runtime snapshots now report worker health in addition to raw timing metrics.
+
+Per-worker status includes:
+
+- `health`: one of `starting`, `waiting-input`, `active`, `idle`, `paused`, `failed`, or `stopped`
+- `idle_s`: seconds since the worker last made output progress
+- `last_metric_age_s`: age of the most recent worker metrics update
+- rolling execution timing and throughput fields such as `avg_exec_us`, `jitter_us_rms`, and `throughput_hz`
+
+Viewer windows run in separate spawned Python processes. Their status text now
+distinguishes between:
+
+- stream rate derived from shared-memory metadata
+- viewer refresh rate derived from the local GUI timer
+
+For GPU streams:
+
+- CPU-only readers need `cpu_mirror: true`
+- GPU viewers can fall back to direct CUDA attachment when no CPU mirror is present
+
+## Troubleshooting
+
+- Repeated GPU build/start/stop/shutdown cycles should now complete without the
+	Linux `resource_tracker` traceback noise that came from shared-memory unlink
+	bookkeeping.
+- If a GPU viewer should be readable from CPU code, create that stream with
+	`cpu_mirror: true`.
+- If a worker shows `waiting-input`, the process is alive but has not yet seen
+	its first trigger input.
+- If a worker shows `idle`, it has processed frames before but has not made
+	recent output progress.
+
+## Custom Kernel Extensions
+
+Third-party kernels can now be integrated programmatically by extending the
+default registry and passing the result into `PipelineManager`.
+
+Example:
+
+```python
+import numpy as np
+
+from shmpipeline import (
+		Kernel,
+		PipelineConfig,
+		PipelineManager,
+		get_default_registry,
+)
+
+
+class BiasCpuKernel(Kernel):
+		kind = "example.bias"
+		storage = "cpu"
+
+		@classmethod
+		def validate_config(cls, config, shared_memory):
+				super().validate_config(config, shared_memory)
+				if "bias" not in config.parameters:
+						raise ValueError("example.bias requires a 'bias' parameter")
+
+		def compute_into(self, trigger_input, output, auxiliary_inputs):
+				output[...] = np.asarray(trigger_input) + float(
+						self.context.config.parameters["bias"]
+				)
+
+
+config = PipelineConfig.from_yaml("pipeline.yaml")
+registry = get_default_registry().extended(BiasCpuKernel)
+manager = PipelineManager(config, registry=registry)
+```
+
+This extension path is currently programmatic. CLI and GUI plugin discovery is
+still a manual integration story rather than an automatic entry-point system.
 
 Install the package and test dependencies:
 
