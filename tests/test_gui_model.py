@@ -67,7 +67,9 @@ def test_validate_document_accepts_valid_config():
     assert errors == []
 
 
-def test_recommended_spawn_method_prefers_forkserver_for_linux_cpu(monkeypatch):
+def test_recommended_spawn_method_prefers_forkserver_for_linux_cpu(
+    monkeypatch,
+):
     config = PipelineConfig.from_dict(
         {
             "shared_memory": [
@@ -112,12 +114,14 @@ def test_recommended_spawn_method_keeps_spawn_for_gpu(monkeypatch):
                     "shape": [4],
                     "dtype": "float32",
                     "storage": "gpu",
+                    "gpu_device": "cuda:0",
                 },
                 {
                     "name": "output_frame",
                     "shape": [4],
                     "dtype": "float32",
                     "storage": "gpu",
+                    "gpu_device": "cuda:0",
                 },
             ],
             "kernels": [

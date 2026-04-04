@@ -1121,7 +1121,9 @@ def test_manager_build_reuses_stream_when_create_detects_existing_name(
     monkeypatch.setattr(
         pyshmem,
         "create",
-        lambda *args, **kwargs: (_ for _ in ()).throw(FileExistsError(spec.name)),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            FileExistsError(spec.name)
+        ),
     )
 
     stream = manager._build_stream(spec)

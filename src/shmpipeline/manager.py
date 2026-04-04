@@ -189,7 +189,9 @@ class PipelineManager:
         )
         return stream
 
-    def _reuse_or_replace_existing_stream(self, spec, existing_stream) -> Any | None:
+    def _reuse_or_replace_existing_stream(
+        self, spec, existing_stream
+    ) -> Any | None:
         """Return a reusable existing stream or replace it when incompatible."""
         if self._stream_matches_spec(existing_stream, spec):
             self._logger.info(
