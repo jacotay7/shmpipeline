@@ -1198,11 +1198,7 @@ def test_close_stream_uses_direct_posix_unlink_when_available(monkeypatch):
         lambda: True,
     )
     monkeypatch.setattr(shm_cleanup, "pyshmem_shared", None)
-    monkeypatch.setattr(
-        shm_cleanup.shared_memory._posixshmem,
-        "shm_unlink",
-        lambda name: unlinked.append(name),
-    )
+    monkeypatch.setattr(shm_cleanup, "_safe_posix_shm_unlink", unlinked.append)
     monkeypatch.setattr(shm_cleanup, "_safe_remove", removed.append)
     monkeypatch.setattr(shm_cleanup, "_drop_local_gpu_cache", dropped.append)
     monkeypatch.setattr(
