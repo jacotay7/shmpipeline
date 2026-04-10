@@ -41,6 +41,23 @@ The script synthesizes moving Shack-Hartmann spot images, loads the static
 reconstruction and actuator-limit streams, verifies every stage numerically,
 and reports achieved frame rate plus how often actuator saturation occurred.
 
+For sustained reconstructor timing on the same observatory workload at a
+target 500 Hz input rate, run:
+
+```bash
+python examples/observatory_ao_system/benchmark_affine_reconstructor.py --rate-hz 500 --warmup 1 --duration 4
+```
+
+That benchmark precomputes a bank of the same 256x256 synthetic WFS frames,
+drives the full observatory pipeline at a stable cadence, and reports the
+worker-runtime `avg_exec_us` values for each stage so you can compare the
+affine reconstructor directly against the rest of the loop.
+
+The CPU affine kernel now caps OpenBLAS to one thread per worker by default to
+reduce latency jitter in process-per-kernel pipelines. If you want to override
+that for a specific pipeline, set `parameters.blas_threads` on the
+`cpu.affine_transform` stage.
+
 You can also inspect the config directly with the CLI or GUI:
 
 ```bash

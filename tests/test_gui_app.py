@@ -18,9 +18,11 @@ GUI_IMPORT_ERROR: Exception | None = None
 
 try:
     from shmpipeline.gui import viewers as viewers_module
+    from shmpipeline.gui import themes as themes_module
     from shmpipeline.gui.app import MainWindow, SyntheticInputDialog
 except Exception as exc:  # pragma: no cover - GUI stack unavailable
     viewers_module = None
+    themes_module = None
     MainWindow = None
     SyntheticInputDialog = None
     GUI_IMPORT_ERROR = exc
@@ -108,6 +110,16 @@ def test_main_window_exposes_stream_actions_menu(qapp):
         assert "Streams" in labels
     finally:
         window.close()
+
+
+def test_light_theme_styles_toolbar_explicitly(qapp):
+    theme = themes_module.resolve_theme("light")
+    stylesheet = themes_module.build_stylesheet(theme)
+
+    assert "QToolBar" in stylesheet
+    assert "QToolButton:pressed, QToolButton:checked" in stylesheet
+    assert theme.alternate_base in stylesheet
+    assert theme.highlight in stylesheet
 
 
 def test_synthetic_input_dialog_defaults_to_500_hz(qapp):

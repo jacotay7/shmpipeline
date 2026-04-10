@@ -80,6 +80,13 @@ The observatory-scale example expands that into a more RTC-like chain with:
 - a 2048-slope to 1024-actuator synthetic reconstructor
 - actuator saturation after the control integrator
 
+To benchmark the observatory reconstructor under sustained 500 Hz WFS input,
+run:
+
+```bash
+python examples/observatory_ao_system/benchmark_affine_reconstructor.py --rate-hz 500 --warmup 1 --duration 4
+```
+
 GPU kernels now mirror the built-in CPU kernels using CUDA-backed PyTorch
 tensors underneath `pyshmem` GPU streams.
 

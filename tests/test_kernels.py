@@ -8,6 +8,7 @@ try:
 except Exception:  # pragma: no cover - exercised when torch is unavailable
     torch = None
 
+from shmpipeline.errors import ConfigValidationError
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.kernel import KernelContext
 from shmpipeline.kernels.cpu import (
@@ -321,6 +322,68 @@ def test_affine_transform_kernel_applies_matrix_and_offset():
     kernel.compute_into(vector, output, {"matrix": matrix, "offset": offset})
 
     np.testing.assert_allclose(output, matrix @ vector + offset)
+
+
+def test_affine_transform_kernel_accepts_blas_threads_override():
+    kernel = _instantiate_kernel(
+        AffineTransformCpuKernel,
+        input_shape=(3,),
+        output_shape=(2,),
+        auxiliary=[
+            {"name": "matrix", "shape": (2, 3)},
+            {"name": "offset", "shape": (2,)},
+        ],
+        parameters={"blas_threads": 2},
+    )
+
+    assert kernel._resolve_blas_threads() == 2
+
+
+def test_affine_transform_kernel_rejects_invalid_blas_threads():
+    shared_memory = _make_shared_memory(
+        [
+            {
+                "name": "input",
+                "shape": [3],
+                "dtype": "float32",
+                "storage": "cpu",
+            },
+            {
+                "name": "output",
+                "shape": [2],
+                "dtype": "float32",
+                "storage": "cpu",
+            },
+            {
+                "name": "matrix",
+                "shape": [2, 3],
+                "dtype": "float32",
+                "storage": "cpu",
+            },
+            {
+                "name": "offset",
+                "shape": [2],
+                "dtype": "float32",
+                "storage": "cpu",
+            },
+        ]
+    )
+    config = KernelConfig.from_dict(
+        {
+            "name": "kernel_under_test",
+            "kind": AffineTransformCpuKernel.kind,
+            "input": "input",
+            "output": "output",
+            "auxiliary": ["matrix", "offset"],
+            "parameters": {"blas_threads": 0},
+        }
+    )
+
+    with pytest.raises(
+        ConfigValidationError,
+        match="'blas_threads' to be a positive integer",
+    ):
+        AffineTransformCpuKernel.validate_config(config, shared_memory)
 
 
 def test_leaky_integrator_kernel_updates_state():

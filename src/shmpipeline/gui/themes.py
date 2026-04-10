@@ -104,11 +104,9 @@ def build_palette(theme: ThemeDefinition) -> QPalette:
     return palette
 
 
-def apply_application_theme(app, theme_name: str | None) -> ThemeDefinition:
-    """Apply a theme to Qt and pyqtgraph surfaces."""
-    theme = resolve_theme(theme_name)
-    app.setPalette(build_palette(theme))
-    app.setStyleSheet(
+def build_stylesheet(theme: ThemeDefinition) -> str:
+    """Build the application stylesheet for one theme."""
+    return (
         "QGroupBox {"
         f" border: 1px solid {theme.border};"
         " border-radius: 6px;"
@@ -120,7 +118,87 @@ def apply_application_theme(app, theme_name: str | None) -> ThemeDefinition:
         " left: 10px;"
         " padding: 0 4px;"
         "}"
+        "QMenuBar {"
+        f" background-color: {theme.alternate_base};"
+        f" color: {theme.text};"
+        f" border-bottom: 1px solid {theme.border};"
+        " spacing: 4px;"
+        "}"
+        "QMenuBar::item {"
+        " padding: 6px 10px;"
+        " margin: 2px 4px;"
+        " border-radius: 4px;"
+        " background: transparent;"
+        f" color: {theme.text};"
+        "}"
+        "QMenuBar::item:selected {"
+        f" background-color: {theme.button};"
+        f" color: {theme.text};"
+        "}"
+        "QMenuBar::item:pressed {"
+        f" background-color: {theme.highlight};"
+        f" color: {theme.highlight_text};"
+        "}"
+        "QMenu {"
+        f" background-color: {theme.base};"
+        f" color: {theme.text};"
+        f" border: 1px solid {theme.border};"
+        " padding: 6px;"
+        "}"
+        "QMenu::item {"
+        " padding: 6px 24px;"
+        " border-radius: 4px;"
+        " background-color: transparent;"
+        f" color: {theme.text};"
+        "}"
+        "QMenu::item:selected {"
+        f" background-color: {theme.highlight};"
+        f" color: {theme.highlight_text};"
+        "}"
+        "QMenu::separator {"
+        f" background: {theme.border};"
+        " height: 1px;"
+        " margin: 6px 10px;"
+        "}"
+        "QToolBar {"
+        f" background-color: {theme.alternate_base};"
+        f" border: 1px solid {theme.border};"
+        " spacing: 6px;"
+        " padding: 4px;"
+        "}"
+        "QToolBar::separator {"
+        f" background: {theme.border};"
+        " width: 1px;"
+        " margin: 6px 4px;"
+        "}"
+        "QToolButton {"
+        f" background-color: {theme.button};"
+        f" color: {theme.button_text};"
+        f" border: 1px solid {theme.border};"
+        " border-radius: 5px;"
+        " padding: 6px 10px;"
+        " margin: 2px;"
+        "}"
+        "QToolButton:hover {"
+        f" background-color: {theme.alternate_base};"
+        f" color: {theme.text};"
+        "}"
+        "QToolButton:pressed, QToolButton:checked {"
+        f" background-color: {theme.highlight};"
+        f" color: {theme.highlight_text};"
+        f" border-color: {theme.highlight};"
+        "}"
+        "QToolButton:disabled {"
+        f" color: {theme.muted_text};"
+        "}"
     )
+
+
+def apply_application_theme(app, theme_name: str | None) -> ThemeDefinition:
+    """Apply a theme to Qt and pyqtgraph surfaces."""
+    theme = resolve_theme(theme_name)
+    app.setPalette(build_palette(theme))
+    app.setStyleSheet(build_stylesheet(theme))
     pg.setConfigOption("background", theme.plot_background)
     pg.setConfigOption("foreground", theme.plot_foreground)
     return theme

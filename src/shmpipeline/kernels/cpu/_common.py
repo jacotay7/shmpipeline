@@ -98,14 +98,10 @@ if njit is not None:
         for index in range(source.size):
             destination.flat[index] = source.flat[index] + constant
 
-    @njit(cache=True)
     def affine_transform_array(matrix, vector, offset, destination):
-        """Apply y = A x + b for one dense matrix and vector."""
-        for row in range(matrix.shape[0]):
-            total = offset[row]
-            for column in range(matrix.shape[1]):
-                total += matrix[row, column] * vector[column]
-            destination[row] = total
+        """Apply y = A x + b without allocating intermediate vectors."""
+        np.dot(matrix, vector, out=destination)
+        np.add(destination, offset, out=destination)
 
 else:
 
@@ -118,8 +114,9 @@ else:
         np.add(source, constant, out=destination, casting="unsafe")
 
     def affine_transform_array(matrix, vector, offset, destination):
-        """Apply y = A x + b for one dense matrix and vector."""
-        destination[...] = matrix @ vector + offset
+        """Apply y = A x + b without allocating intermediate vectors."""
+        np.dot(matrix, vector, out=destination)
+        np.add(destination, offset, out=destination)
 
 
 if njit is not None:
