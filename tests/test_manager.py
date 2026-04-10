@@ -1498,6 +1498,91 @@ def test_manager_can_run_with_extended_registry(
     manager.shutdown()
 
 
+def test_manager_cpu_workers_can_compute_directly_into_shared_output(
+    tmp_path, shm_prefix, monkeypatch
+):
+    module_name = f"direct_output_kernel_{shm_prefix}"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            import numpy as np
+
+            from shmpipeline.kernel import Kernel
+
+
+            class DirectOutputProbeCpuKernel(Kernel):
+                kind = \"test.direct_output\"
+                storage = \"cpu\"
+
+                def compute_into(self, trigger_input, output, auxiliary_inputs):
+                    del auxiliary_inputs
+                    if output is self.output_buffer:
+                        raise RuntimeError(\"expected shared-memory output view\")
+                    np.add(np.asarray(trigger_input), 1.0, out=output)
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    sys.modules.pop(module_name, None)
+    module = importlib.import_module(module_name)
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "direct_output_stage",
+                    "kind": "test.direct_output",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+    registry = get_default_registry().extended(
+        module.DirectOutputProbeCpuKernel
+    )
+    manager = PipelineManager(config, registry=registry)
+    manager.build()
+    manager.start()
+
+    output_stream = manager.get_stream(f"{shm_prefix}_output")
+    baseline = output_stream.count
+    manager.get_stream(f"{shm_prefix}_input").write(
+        np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    )
+    received = _wait_for_next_write(
+        output_stream,
+        baseline,
+        timeout=2.0,
+        manager=manager,
+    )
+
+    np.testing.assert_allclose(
+        received,
+        np.array([2.0, 3.0, 4.0, 5.0], dtype=np.float32),
+    )
+
+    manager.shutdown()
+
+
 def test_manager_runs_custom_dark_flat_operation(shm_prefix):
     config = _make_custom_operation_pipeline_config(
         shm_prefix,

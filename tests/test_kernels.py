@@ -3,13 +3,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-try:
-    import torch
-except Exception:  # pragma: no cover - exercised when torch is unavailable
-    torch = None
-
-from shmpipeline.errors import ConfigValidationError
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
+from shmpipeline.errors import ConfigValidationError
 from shmpipeline.kernel import KernelContext
 from shmpipeline.kernels.cpu import (
     AddConstantCpuKernel,
@@ -27,6 +22,11 @@ from shmpipeline.kernels.cpu import (
     ScaleOffsetCpuKernel,
     ShackHartmannCentroidCpuKernel,
 )
+
+try:
+    import torch
+except Exception:  # pragma: no cover - exercised when torch is unavailable
+    torch = None
 
 if torch is not None:
     from shmpipeline.kernels.gpu import (

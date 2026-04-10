@@ -10,7 +10,7 @@ from collections import deque
 from contextlib import ExitStack
 from importlib import import_module
 from queue import Empty
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 import pyshmem
@@ -157,6 +157,26 @@ def _write_worker_output(
     output_stream._finish_write()
 
 
+def _compute_and_publish_output(
+    kernel: Any,
+    trigger_input: Any,
+    auxiliary_inputs: Mapping[str, Any],
+    output_stream: Any,
+    output_view: Any,
+) -> None:
+    """Compute one kernel result and publish it to the output stream."""
+    if getattr(kernel, "storage", None) == "cpu" and isinstance(
+        output_view, np.ndarray
+    ):
+        output_stream._mark_write_started()
+        kernel.compute_into(trigger_input, output_view, auxiliary_inputs)
+        output_stream._finish_write()
+        return
+
+    kernel.compute_into(trigger_input, kernel.output_buffer, auxiliary_inputs)
+    _write_worker_output(output_stream, output_view, kernel.output_buffer)
+
+
 def _send_worker_event(event_sink: Any, event: dict[str, Any]) -> None:
     """Send one worker event through either a queue or a pipe endpoint."""
     put = getattr(event_sink, "put", None)
@@ -247,15 +267,12 @@ def run_kernel_process(
                 continue
 
             compute_started = time.perf_counter()
-            kernel.compute_into(
+            _compute_and_publish_output(
+                kernel,
                 trigger_input,
-                kernel.output_buffer,
                 auxiliary_inputs,
-            )
-            _write_worker_output(
                 output_stream,
                 output_view,
-                kernel.output_buffer,
             )
             last_seen_count = current_count
             last_exec_s = time.perf_counter() - compute_started

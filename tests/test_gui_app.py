@@ -17,8 +17,8 @@ except Exception:  # pragma: no cover - exercised when Qt is unavailable
 GUI_IMPORT_ERROR: Exception | None = None
 
 try:
-    from shmpipeline.gui import viewers as viewers_module
     from shmpipeline.gui import themes as themes_module
+    from shmpipeline.gui import viewers as viewers_module
     from shmpipeline.gui.app import MainWindow, SyntheticInputDialog
 except Exception as exc:  # pragma: no cover - GUI stack unavailable
     viewers_module = None
