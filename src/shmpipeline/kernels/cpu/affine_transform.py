@@ -156,4 +156,3 @@ class AffineTransformCpuKernel(CpuKernel):
         matrix = np.asarray(auxiliary_inputs[self._matrix_alias])
         offset = np.asarray(auxiliary_inputs[self._offset_alias])
         affine_transform_array(matrix, vector, offset, output)
-

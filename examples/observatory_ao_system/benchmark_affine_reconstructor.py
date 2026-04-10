@@ -30,13 +30,17 @@ def _load_observatory_example_module():
         module_path,
     )
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"unable to load observatory example from {module_path}")
+        raise RuntimeError(
+            f"unable to load observatory example from {module_path}"
+        )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-def _wait_for_next_write(stream, previous_count: int, *, timeout: float) -> Any:
+def _wait_for_next_write(
+    stream, previous_count: int, *, timeout: float
+) -> Any:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if stream.count > previous_count:
@@ -174,9 +178,8 @@ def _drive_wfs_stream(
         image_stream.write(frames[frame_index % len(frames)])
         next_deadline += interval_s
         if (
-            (frame_index + 1) % poll_interval_frames == 0
-            or frame_index + 1 == frame_count
-        ):
+            frame_index + 1
+        ) % poll_interval_frames == 0 or frame_index + 1 == frame_count:
             last_snapshot = _runtime_snapshot(manager)
 
     elapsed_s = time.perf_counter() - started_at
@@ -356,7 +359,9 @@ def _print_text_report(result: dict[str, Any]) -> None:
         f"jitter_us_rms={slowest.get('jitter_us_rms', 0.0):.1f} "
         f"throughput_hz={slowest.get('throughput_hz', 0.0):.1f}"
     )
-    print("Stage metrics (runtime avg_exec_us includes compute plus output publish):")
+    print(
+        "Stage metrics (runtime avg_exec_us includes compute plus output publish):"
+    )
     for name, metrics in sorted(
         result["stages"].items(),
         key=lambda item: float(item[1].get("avg_exec_us") or 0.0),
