@@ -84,7 +84,12 @@ def _load_default_gpu_kernel(kind: str) -> type[Kernel]:
 
 
 class KernelRegistry:
-    """Resolve kernel kinds to implementation classes."""
+    """Resolve kernel kinds to implementation classes.
+
+    Registries are the extension point for third-party kernels. The default
+    registry contains the built-in CPU kernels and lazily loads GPU kernels when
+    the optional torch dependency is available.
+    """
 
     def __init__(
         self,

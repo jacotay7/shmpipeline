@@ -31,6 +31,49 @@ jobs:
       - name: Ruff format check
         run: ruff format --check .
 
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and validate distributions
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          twine check dist/*
+
+      - name: Smoke test built wheel
+        run: |
+          python -m venv /tmp/shmpipeline-wheel-test
+          /tmp/shmpipeline-wheel-test/bin/python -m pip install --upgrade pip
+          /tmp/shmpipeline-wheel-test/bin/pip install dist/*.whl
+          /tmp/shmpipeline-wheel-test/bin/shmpipeline --help
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r docs/requirements.txt
+
+      - name: Build documentation
+        run: sphinx-build -W -b html docs docs/_build/html
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:

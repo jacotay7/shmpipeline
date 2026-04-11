@@ -22,8 +22,9 @@ jobs:
 
       - name: Build distributions
         run: |
-          python -m pip install --upgrade pip build
+          python -m pip install --upgrade pip build twine
           python -m build
+          twine check dist/*
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
@@ -36,6 +37,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
+    # This environment must exist in GitHub repository settings if you want
+    # environment protection rules or a PyPI trusted publisher scoped to it.
     environment:
       name: pypi
       url: https://pypi.org/p/shmpipeline

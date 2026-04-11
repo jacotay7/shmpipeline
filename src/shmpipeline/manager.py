@@ -45,7 +45,12 @@ class _WorkerHandle:
 
 
 class PipelineManager:
-    """Create shared memory, spawn workers, and supervise pipeline state."""
+    """Create shared memory, spawn workers, and supervise pipeline state.
+
+    The manager owns the pipeline lifecycle from validated config through
+    runtime monitoring and teardown. It is the primary user-facing runtime API
+    for Python callers.
+    """
 
     def __init__(
         self,
@@ -104,7 +109,11 @@ class PipelineManager:
         )
 
     def build(self) -> None:
-        """Validate configuration and create shared-memory resources."""
+        """Validate configuration and create shared-memory resources.
+
+        This step prepares the pipeline graph and opens or creates the named
+        streams without starting any worker processes.
+        """
         if self.state not in {
             PipelineState.INITIALIZED,
             PipelineState.STOPPED,
@@ -244,7 +253,11 @@ class PipelineManager:
         return True
 
     def start(self) -> None:
-        """Start worker processes for every configured kernel."""
+        """Start worker processes for every configured kernel.
+
+        The manager must already be in the built state before workers can be
+        spawned.
+        """
         self.poll_events()
         if self.state != PipelineState.BUILT:
             raise StateTransitionError(
@@ -357,7 +370,11 @@ class PipelineManager:
         )
 
     def stop(self, *, timeout: float = 5.0, force: bool = False) -> None:
-        """Stop worker processes but keep shared-memory resources built."""
+        """Stop worker processes but keep shared-memory resources built.
+
+        After a stop, callers may inspect stream contents, restart workers, or
+        proceed to a final shutdown.
+        """
         self.poll_events()
         if self.state not in {
             PipelineState.RUNNING,
@@ -395,7 +412,10 @@ class PipelineManager:
         self._transition_state(PipelineState.BUILT, reason="workers stopped")
 
     def shutdown(self, *, unlink: bool = True, force: bool = False) -> None:
-        """Stop workers, close local handles, and optionally unlink streams."""
+        """Stop workers, close local handles, and optionally unlink streams.
+
+        This is the terminal cleanup step for a manager instance.
+        """
         self._logger.info(
             "shutdown requested: unlink=%s force=%s", unlink, force
         )
@@ -601,7 +621,11 @@ class PipelineManager:
         return False
 
     def status(self) -> dict[str, Any]:
-        """Return a snapshot of manager state, workers, and failures."""
+        """Return a snapshot of manager state, workers, and failures.
+
+        The result is intentionally JSON-friendly so CLI, GUI, and external
+        tooling can consume the same structure.
+        """
         self.poll_events()
         workers_status = {
             name: self._status_for_worker(name, worker)
@@ -719,7 +743,11 @@ class PipelineManager:
         return summary
 
     def runtime_snapshot(self) -> dict[str, Any]:
-        """Return a richer status snapshot for CLI and GUI consumers."""
+        """Return a richer status snapshot for CLI and GUI consumers.
+
+        This extends :meth:`status` with a timestamp and the derived graph
+        description.
+        """
         status = self.status()
         return {
             "timestamp": time.time(),
@@ -744,7 +772,11 @@ class PipelineManager:
         self,
         spec: "SyntheticInputConfig | dict[str, Any]",
     ) -> dict[str, Any]:
-        """Start a synthetic input writer for one built stream."""
+        """Start a synthetic input writer for one built stream.
+
+        Synthetic writers are useful for demos, viewer testing, smoke tests,
+        and deterministic regression scenarios.
+        """
         from shmpipeline.synthetic import (
             SyntheticInputConfig,
             SyntheticSourceController,

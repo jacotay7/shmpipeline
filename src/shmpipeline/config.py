@@ -68,7 +68,12 @@ def _normalize_names(value: Any, *, context: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class SharedMemoryConfig:
-    """Configuration for one named shared-memory resource."""
+    """Configuration for one named shared-memory resource.
+
+    A shared-memory record defines the storage backend, tensor shape, and dtype
+    for one named stream in the pipeline graph. GPU streams may additionally
+    declare a CUDA device and an optional CPU mirror for host-side readers.
+    """
 
     name: str
     shape: tuple[int, ...]
@@ -146,7 +151,12 @@ class AuxiliaryBinding:
 
 @dataclass(frozen=True)
 class KernelConfig:
-    """Configuration for one compute kernel in the pipeline."""
+    """Configuration for one compute kernel in the pipeline.
+
+    Each kernel consumes one trigger input stream, may read zero or more
+    auxiliary streams, and writes one output stream. The `kind` field resolves
+    through the active :class:`shmpipeline.registry.KernelRegistry`.
+    """
 
     name: str
     kind: str
@@ -297,7 +307,12 @@ class KernelConfig:
 
 @dataclass(frozen=True)
 class PipelineConfig:
-    """Complete pipeline configuration loaded from YAML or a mapping."""
+    """Complete pipeline configuration loaded from YAML or a mapping.
+
+    This is the primary configuration object used by the CLI, GUI, and
+    :class:`shmpipeline.manager.PipelineManager`. It groups the named stream
+    definitions and the ordered kernel stages that consume them.
+    """
 
     shared_memory: tuple[SharedMemoryConfig, ...]
     kernels: tuple[KernelConfig, ...]

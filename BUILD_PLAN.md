@@ -1,221 +1,173 @@
 # Build Plan
 
-## Completed Foundation
+## Purpose
 
-The original proof-of-concept scope is no longer a plan item. It is now the
-baseline for the repository.
+This document now tracks the work required to take the current repository to a
+public `1.0.0` release. Earlier foundation and operability milestones are
+already shipped. The remaining work is release polish, packaging verification,
+and final QA.
 
-- Built the pipeline manager on top of `pyshmem` rather than reimplementing
-  shared-memory transport.
-- Shipped YAML-driven configuration via immutable dataclass models with
-  validation for shared-memory definitions, kernel bindings, storage backends,
-  and required parameters.
-- Implemented a process-per-kernel runtime with child-process stream reopen,
-  worker lifecycle events, surfaced failures, and pause/resume/stop/shutdown
-  control.
-- Landed a coherent manager state machine covering `build`, `start`, `pause`,
-  `resume`, `stop`, and `shutdown`.
-- Split built-in kernels cleanly by backend and expanded beyond the initial
-  proof-of-concept set to include both CPU and GPU kernel families.
-- Added GPU support with CUDA-backed streams and GPU examples that mirror the
-  CPU examples.
-- Established a real test suite across config validation, kernel behavior,
-  manager supervision, and GUI document modeling.
-- Added a desktop GUI for editing, validating, and running pipeline
-  definitions.
+## Current Repository State
 
-## Completed Operability Work
+The repository already provides:
 
-What used to be planned as Phase 2 is now mostly shipped.
+- an installable Python package with CLI and GUI entry points
+- validated YAML pipeline configuration with graph introspection before startup
+- process-supervised CPU and GPU kernel families built on `pyshmem`
+- runtime snapshots, worker health metrics, synthetic inputs, and stream
+  viewers
+- example pipelines ranging from simple affine transforms to observatory-scale
+  adaptive optics flows
+- automated tests across config loading, graph validation, kernels, manager
+  behavior, CLI flows, GUI flows, and examples
+- GitHub Actions CI across Linux, macOS, and Windows, plus a PyPI publish
+  workflow
 
-- Added first-class CLI entry points for `validate`, `describe`, and `run`
-  workflows.
-- Exposed pipeline graph introspection through `PipelineGraph`, CLI output,
-  and GUI previews.
-- Added graph-level validation for producer/consumer wiring and related config
-  errors before worker startup.
-- Added runtime snapshots, rolling worker metrics, structured failure
-  reporting, and GUI runtime status panes.
-- Refactored worker placement into an explicit scheduling policy surface with
-  a default round-robin implementation.
-- Added light and dark GUI themes with light as the default startup theme.
-- Added backend synthetic input generation plus GUI controls for starting,
-  stopping, and reconfiguring test inputs.
-- Rebuilt the shared-memory viewer path so vector and image streams can be
-  inspected from the GUI again.
-- Moved viewer windows into separate spawned Python processes and surfaced
-  stream-rate metadata in the viewer status.
-- Expanded test coverage for CLI flows, graph derivation, synthetic inputs,
-  GUI behavior, and GPU regressions.
-- Added repo automation including Ruff checks and GitHub Actions coverage for
-  supported Python versions.
-- Updated README examples and operational documentation to cover the shipped
-  headless and introspection workflows.
+The remaining work is no longer core implementation or package metadata.
+Release-facing documentation, packaging metadata, distribution validation, and
+final automated QA are now complete. What remains is the release execution
+sequence itself and any optional external-service follow-up.
 
-## Current Baseline
+## 1.0.0 Release Goal
 
-Today the repository already provides:
+Release `shmpipeline` as a stable user-facing package for local shared-memory
+CPU and GPU pipelines, with clear installation guidance, verified
+distributions, and documented release steps.
 
-- YAML-only pipeline authoring with validated CPU and GPU stream definitions
-- a package-installable CLI and desktop GUI
-- graph introspection before process startup
-- runtime snapshots and rolling worker metrics for GUI and CLI consumers
-- synthetic input generation for tests, demos, and live GUI operation
-- CPU and GPU example pipelines with parity across the built-in kernel family
-- automated tests, Ruff checks, and CI workflows
+## 1.0.0 Exit Criteria
 
-That changes the planning problem again. The next phase is no longer about
-adding the first operability surface. It is about hardening the shipped system,
-closing the rough edges that appear under sustained GPU workloads, and making
-extension workflows clearer.
+The `1.0.0` release is ready when all of the following are true:
 
-## Next Phase Theme
+- package metadata and the public package version are aligned on `1.0.0`
+- the README and changelog describe the current capabilities without
+  scaffold-only or alpha positioning
+- CI builds both the source distribution and wheel and validates the generated
+  package metadata before publish
+- the core user flows are smoke-tested: install, `shmpipeline validate`,
+  `shmpipeline describe`, `shmpipeline run`, GUI startup, and example configs
+- release notes and the manual release checklist are explicit enough that the
+  publish step is routine rather than ad hoc
 
-The next phase is about hardening, polish, and extension points.
+## Already Shipped
 
-The project now has real headless and GUI workflows, but there are still a few
-practical gaps: GPU lifecycle cleanup needs to be quieter and more predictable,
-viewer and runtime observability can still be refined, and the extension story
-for larger deployments is still mostly implicit.
+These are no longer release blockers:
 
-## Remaining Goals
-
-1. Harden GPU shared-memory lifecycle and shutdown behavior.
-2. Refine runtime observability and viewer ergonomics for long-running
-   pipelines.
-3. Close the remaining documentation and examples gaps for advanced workflows.
-4. Make the extension and deployment surface more explicit.
-5. Keep a focused backlog for advanced scheduling and visualization without
-   destabilizing the current core.
+- pipeline build/start/pause/resume/stop/shutdown lifecycle management
+- CPU and GPU built-in kernel parity for the current kernel family
+- graph validation and description workflows for CLI and GUI consumers
+- runtime snapshots, rolling worker metrics, and structured failure surfacing
+- synthetic input generation for testing, demos, and live GUI use
+- desktop GUI editing, validation, and shared-memory viewers
+- programmatic third-party kernel extension through the registry
+- multi-platform CI and a trusted-publisher-style PyPI workflow
 
 ## Remaining Workstreams
 
-### 1. GPU Lifecycle And Cleanup
+### 1. Packaging And Version Metadata
 
-The runtime now works correctly under realistic GPU examples, but shutdown and
-resource cleanup still need another pass.
+Status: Completed
 
 Scope:
 
-- Eliminate or substantially reduce the current GPU shared-memory teardown
-  noise, especially `multiprocessing.resource_tracker` warnings.
-- Audit the full create/open/close/unlink lifecycle for CUDA-backed streams so
-  long-running sessions and repeated rebuilds are predictable.
-- Tighten manager shutdown behavior around viewer processes, worker teardown,
-  and remaining local stream handles.
-- Add regression coverage for repeated build/start/stop/shutdown cycles on GPU
-  pipelines.
+- bump `pyproject.toml` and `src/shmpipeline/__init__.py` to `1.0.0`
+- replace the alpha classifier with stable release metadata
+- add project URLs and other PyPI-facing metadata that users expect
+- keep optional dependency guidance explicit for base, GPU, GUI, and test
+  installs
 
 Why this matters:
 
-- It removes operator confusion around successful runs that still end with
-  noisy warnings.
-- It makes GPU workflows feel production-ready rather than merely functional.
+- this is the minimum metadata work required for a credible `1.0.0` release
+- the package page needs to reflect the actual maturity of the repository
 
-### 2. Observability And Viewer Polish
+### 2. Release-Facing Documentation
 
-The current metrics surface is useful, but it can be made more operationally
-complete.
+Status: Completed
 
 Scope:
 
-- Continue refining the relationship between worker metrics, shared-memory
-  metadata, and viewer status so rates and timing remain easy to interpret.
-- Keep passive-viewer behavior explicit for CPU, GPU, and CPU-mirror-backed
-  GPU streams.
-- Improve how runtime status communicates stalled inputs, inactive sources, and
-  degraded workers.
-- Add a small amount of additional operator-facing troubleshooting context
-  where it helps, without turning the runtime into a full telemetry stack.
+- rewrite README sections that still describe the project as a scaffold or
+  development-only install
+- add a changelog for the `1.0.0` release
+- keep extension guidance explicit: registry-based programmatic extension is
+  supported now, automatic plugin discovery is not part of `1.0.0`
+- document user installs separately from editable source installs
 
 Why this matters:
 
-- The project is now usable enough that debugging quality matters more than raw
-  feature count.
-- Better operational feedback reduces the need to inspect shared memory by
-  hand.
+- users should be able to understand how to install and use the package without
+  reverse-engineering the repo layout
+- a stable release needs a clear record of what is in scope today
 
-### 3. Documentation And Advanced Examples
+### 3. Distribution Validation
 
-The core workflows are documented, but the operational guidance is still thin
-in places.
+Status: Completed
 
 Scope:
 
-- Expand the README and example documentation for mixed CPU/GPU pipelines,
-  synthetic input strategies, CPU mirrors, and viewer behavior.
-- Add an operator-oriented troubleshooting section for common runtime and GPU
-  issues.
-- Document lifecycle expectations for build/rebuild/shutdown in both CLI and
-  GUI flows.
-- Add one or two more realistic example pipelines that demonstrate the current
-  best practices rather than only the kernel primitives.
+- build the source distribution and wheel in CI
+- run `twine check` against generated artifacts
+- smoke-test the built wheel in a clean environment and verify the CLI entry
+  point starts
+- keep the publish workflow aligned with the same build assumptions as CI
 
 Why this matters:
 
-- The project now has enough surface area that users need guidance on how to
-  use it well, not just how to call the API.
+- it prevents packaging regressions from being discovered only at release time
+- it verifies the install path users will actually consume
 
-### 4. Extension And Packaging Surface
+### 4. Final QA Before Publish
 
-The package is installable and automated, but the extension story is still
-mostly inferred from the codebase.
+Status: Completed
 
 Scope:
 
-- Clarify how third-party kernels should be packaged, registered, and tested.
-- Decide whether plugin discovery belongs in the next phase or stays a manual
-  integration story for now.
-- Review packaging metadata and optional dependency guidance so CPU-only, GPU,
-  GUI, and test installs are clearly documented.
-- Keep the public API surface small and explicit as these extension points are
-  documented.
+- run the full automated test suite on the current release branch state
+- smoke-test the CLI against checked-in example configs
+- verify GUI behavior in a supported desktop environment
+- keep GPU validation explicitly environment-gated when CUDA is unavailable
+
+Completed checks:
+
+- full pytest suite passed locally
+- source distribution and wheel built successfully
+- package metadata passed `twine check`
+- strict Sphinx build passed in a docs-enabled environment
+- CLI smoke tests passed against checked-in example configs
+- GUI screenshots were captured from the live application and wired into the
+  docs
+
+### 5. Release Execution
+
+Status: Pending
+
+Scope:
+
+- cut the GitHub release notes from the changelog
+- tag `v1.0.0`
+- publish to PyPI through the existing release workflow
+- verify install and entry points from the published package
 
 Why this matters:
 
-- A clearer extension story makes the project easier to adopt in real systems
-  without forcing premature plugin infrastructure.
+- publishing should be scripted and repeatable
+- the post-publish verification closes the loop on the user installation path
 
-### 5. Deferred Advanced Work
+## Remaining Checklist Before Publishing 1.0.0
 
-These are real follow-on items, but they should stay behind hardening work.
+1. Create the changelog-backed GitHub release notes.
+2. Tag and publish `v1.0.0`.
+3. Verify installation from PyPI after publish.
+4. If you want hosted docs on day one, connect the repository to Read the Docs
+  and confirm the first hosted build succeeds.
 
-Scope:
+## Post-1.0 Backlog
 
-- richer graph visualization in the GUI or CLI
+These remain good follow-on items after `1.0.0` ships:
+
+- richer pipeline graph visualization
 - historical metrics export or external telemetry integration
-- more advanced scheduling strategies beyond local affinity hints
-- plugin or third-party kernel discovery workflows
-- remote control or multi-host orchestration
-
-Why this matters:
-
-- These are attractive expansions, but they should not compete with stability
-  and clarity in the current single-host runtime.
-
-## Proposed Exit Criteria For The Next Phase
-
-The next phase is complete when the repository can support the following story
-cleanly:
-
-- GPU example pipelines can be built, run, and shut down repeatedly without the
-  current cleanup noise or stale-handle confusion.
-- Runtime status and viewer surfaces communicate pipeline health and stream
-  rates clearly enough for day-to-day debugging.
-- The README and examples document the supported CPU/GPU, synthetic-input, and
-  viewer workflows well enough that users do not need to reverse-engineer the
-  intended patterns from tests.
-- The project has an explicit documented path for extending the built-in kernel
-  set.
-- The remaining advanced work is clearly separated into backlog rather than
-  being mixed into near-term execution work.
-
-## Later Backlog
-
-These remain good follow-on items after the next hardening phase:
-
-- richer visualization of pipeline graphs
-- historical metrics export or external telemetry integration
-- plugin discovery or third-party kernel packaging workflows
-- remote control or multi-host orchestration
-- more advanced scheduling strategies beyond local affinity hints
+- automatic plugin discovery for third-party kernels
+- more advanced scheduling policies beyond the current local placement surface
+- remote or multi-host orchestration
+- extra GUI polish such as deeper macOS-native theming work

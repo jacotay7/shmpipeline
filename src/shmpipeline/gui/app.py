@@ -310,7 +310,12 @@ class SyntheticInputDialog(QDialog):
 
 
 class MainWindow(QMainWindow):
-    """Main GUI window for configuration editing and pipeline control."""
+    """Main GUI window for configuration editing and pipeline control.
+
+    The window combines document editing, validation, runtime controls,
+    synthetic-input management, and viewer launch actions for one pipeline
+    document.
+    """
 
     def __init__(self, *, theme_name: str | None = None) -> None:
         super().__init__()

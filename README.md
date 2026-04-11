@@ -3,22 +3,22 @@
 `shmpipeline` builds process-based compute pipelines on top of the
 named shared-memory streams provided by `pyshmem`.
 
-The repository is scaffolded around three priorities:
+The package is built around three priorities:
 
 - a small and explicit user-facing API
 - a robust validation and testing story
 - a clear separation between config loading, pipeline supervision, and
 	kernel implementations
 
-## Current Scope
+## Current Capabilities
 
-The initial scaffold provides:
+The current release provides:
 
 - YAML-driven pipeline configuration
 - a pipeline manager with a simple state machine
 - spawned worker processes for each configured kernel
 - best-effort worker distribution across CPU slots where the OS allows it
-- built-in CPU proof-of-concept kernels
+- built-in CPU kernels
 - GPU kernel parity for the built-in kernel family
 - built-in elementwise arithmetic kernels
 - fused custom arithmetic expressions with `cpu.custom_operation`
@@ -27,7 +27,7 @@ The initial scaffold provides:
 - pipeline graph introspection and runtime snapshots
 - a CLI for `validate`, `describe`, and `run` workflows
 - backend synthetic inputs for test and demo pipelines
-- unit and integration tests for the scaffolded behavior
+- unit and integration tests for the supported behavior
 
 ## Kernel Layout
 
@@ -195,15 +195,15 @@ manager.shutdown()
 
 Choose the smallest install that matches how you plan to use the package.
 
-- Base runtime and CLI: `pip install -e .`
-- GPU support: `pip install -e .[gpu]`
-- Desktop GUI: `pip install -e .[gui]`
-- Test tooling: `pip install -e .[test]`
-- Combined local development setup: `pip install -e .[gpu,gui,test]`
+- Base runtime and CLI from PyPI: `pip install shmpipeline`
+- GPU support from PyPI: `pip install "shmpipeline[gpu]"`
+- Desktop GUI from PyPI: `pip install "shmpipeline[gui]"`
+- Local source install: `pip install -e .`
+- Combined local development setup: `pip install -e ".[gpu,gui,test,docs]"`
 
 ## CLI
 
-The package now includes a headless CLI entry point.
+The package includes a headless CLI entry point.
 
 Validate a config without creating shared memory:
 
@@ -295,11 +295,9 @@ Available patterns:
 - `impulse`
 - `checkerboard`
 
-## Development
-
 ## GUI
 
-The repository now includes a desktop GUI for editing and running pipelines.
+The package includes a desktop GUI for editing and running pipelines.
 
 It supports:
 
@@ -313,10 +311,10 @@ It supports:
 - start and stop controls for synthetic test inputs on built streams
 - live shared-memory viewers polling at about 30 Hz
 
-Install the GUI dependencies:
+Install the GUI dependencies from PyPI:
 
 ```bash
-pip install -e .[gui]
+pip install "shmpipeline[gui]"
 ```
 
 Launch it with:
@@ -352,9 +350,9 @@ For GPU streams:
 
 ## Troubleshooting
 
-- Repeated GPU build/start/stop/shutdown cycles should now complete without the
-	Linux `resource_tracker` traceback noise that came from shared-memory unlink
-	bookkeeping.
+- Recent GPU lifecycle fixes removed the earlier Linux `resource_tracker`
+	traceback noise caused by shared-memory unlink bookkeeping during repeated
+	build/start/stop/shutdown cycles.
 - If a GPU viewer should be readable from CPU code, create that stream with
 	`cpu_mirror: true`.
 - If a worker shows `waiting-input`, the process is alive but has not yet seen
@@ -381,19 +379,19 @@ from shmpipeline import (
 
 
 class BiasCpuKernel(Kernel):
-		kind = "example.bias"
-		storage = "cpu"
+    kind = "example.bias"
+    storage = "cpu"
 
-		@classmethod
-		def validate_config(cls, config, shared_memory):
-				super().validate_config(config, shared_memory)
-				if "bias" not in config.parameters:
-						raise ValueError("example.bias requires a 'bias' parameter")
+    @classmethod
+    def validate_config(cls, config, shared_memory):
+        super().validate_config(config, shared_memory)
+        if "bias" not in config.parameters:
+            raise ValueError("example.bias requires a 'bias' parameter")
 
-		def compute_into(self, trigger_input, output, auxiliary_inputs):
-				output[...] = np.asarray(trigger_input) + float(
-						self.context.config.parameters["bias"]
-				)
+    def compute_into(self, trigger_input, output, auxiliary_inputs):
+        output[...] = np.asarray(trigger_input) + float(
+            self.context.config.parameters["bias"]
+        )
 
 
 config = PipelineConfig.from_yaml("pipeline.yaml")
@@ -404,10 +402,19 @@ manager = PipelineManager(config, registry=registry)
 This extension path is currently programmatic. CLI and GUI plugin discovery is
 still a manual integration story rather than an automatic entry-point system.
 
-Install the package and test dependencies:
+## Development
+
+For source development, install the package with the test extra:
 
 ```bash
 pip install -e .[test]
+```
+
+Build the documentation locally:
+
+```bash
+pip install -e .[docs]
+sphinx-build -W -b html docs docs/_build/html
 ```
 
 Run the test suite:

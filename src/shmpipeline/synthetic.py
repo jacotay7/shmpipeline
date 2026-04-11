@@ -36,7 +36,11 @@ def available_synthetic_patterns() -> tuple[str, ...]:
 
 @dataclass(frozen=True)
 class SyntheticInputConfig:
-    """Configuration for one synthetic input writer."""
+    """Configuration for one synthetic input writer.
+
+    Synthetic writers can drive source streams without an external producer,
+    which makes them useful for demos, GUI exploration, and automated tests.
+    """
 
     stream_name: str
     pattern: str = "random"
@@ -255,7 +259,11 @@ class SyntheticPatternGenerator:
 
 
 class SyntheticSourceController:
-    """Background writer that feeds a stream with synthetic test frames."""
+    """Background writer that feeds a stream with synthetic test frames.
+
+    The controller owns the worker thread and the timing loop for one active
+    synthetic input source.
+    """
 
     def __init__(self, stream: Any, spec: SyntheticInputConfig) -> None:
         self.stream = stream

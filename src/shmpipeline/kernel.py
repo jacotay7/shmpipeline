@@ -14,7 +14,12 @@ from shmpipeline.errors import ConfigValidationError
 
 @dataclass(frozen=True)
 class KernelContext:
-    """Static information available to a kernel instance."""
+    """Static information available to a kernel instance.
+
+    The runtime constructs one context per worker so kernels can inspect their
+    validated configuration and the shared-memory specifications for the
+    streams they read and write.
+    """
 
     config: KernelConfig
     shared_memory: Mapping[str, SharedMemoryConfig]
@@ -45,7 +50,12 @@ class KernelContext:
 
 
 class Kernel(ABC):
-    """Base class for compute kernels executed by the runtime."""
+    """Base class for compute kernels executed by the runtime.
+
+    Custom kernels normally override :meth:`validate_config` when they need
+    stage-specific parameter checks and implement :meth:`compute_into` to write
+    results into the provided output buffer.
+    """
 
     kind = "kernel.base"
     storage = "cpu"
