@@ -785,6 +785,7 @@ class ControlWindow(QMainWindow):
         self,
         event: QCloseEvent,
     ) -> None:  # pragma: no cover - GUI runtime only
+        self._status_timer.stop()
         self.disconnect_from_server(announce=False)
         super().closeEvent(event)
 

@@ -1627,6 +1627,7 @@ class MainWindow(QMainWindow):
     def closeEvent(
         self, event: QCloseEvent
     ) -> None:  # pragma: no cover - GUI runtime only
+        self._status_timer.stop()
         self._close_viewers()
         self._dispose_manager()
         self._stop_managed_server()

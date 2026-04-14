@@ -100,7 +100,7 @@ jobs:
       - name: Configure Qt platform
         shell: bash
         run: |
-          if [[ "$RUNNER_OS" == "Linux" || "$RUNNER_OS" == "Windows" ]]; then
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
             echo "QT_QPA_PLATFORM=offscreen" >> "$GITHUB_ENV"
           else
             echo "QT_QPA_PLATFORM=minimal" >> "$GITHUB_ENV"

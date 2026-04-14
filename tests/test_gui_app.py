@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import os
+import sys
 
 import numpy as np
 import pytest
 
 from shmpipeline.control.discovery import LocalControlServerRecord
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault(
+    "QT_QPA_PLATFORM",
+    "offscreen" if sys.platform.startswith("linux") else "minimal",
+)
 
 try:
     from PySide6.QtCore import Qt
