@@ -6,6 +6,7 @@ The built-in control plane uses:
 
 - JSON request-response endpoints for commands and snapshots
 - JSON request-response endpoints for pulling, validating, and replacing the active editable document
+- local discovery records for loopback control servers launched on the same machine
 - Server-Sent Events for live worker events and metric updates
 
 ## Install
@@ -44,6 +45,7 @@ Document endpoints:
 
 - `PUT /document`
 - `POST /document/validate`
+- `POST /document/load`
 
 Lifecycle endpoints:
 
@@ -58,6 +60,20 @@ Synthetic-input endpoints:
 
 - `POST /synthetic/start`
 - `POST /synthetic/stop`
+
+## Minimal Control GUI
+
+`shmpipeline-control-gui` is the stripped-down control surface for operators who only need to manage servers and drive the state machine.
+
+It focuses on:
+
+- discovering local control servers
+- launching and killing local server processes
+- switching the config file a server is using
+- showing the current server URL, config path, and pipeline state
+- driving `start`, `pause`, `stop`, and `teardown`
+
+It intentionally omits the YAML editor, graph view, runtime tables, and shared-memory viewers from the full GUI.
 
 ## Python client
 

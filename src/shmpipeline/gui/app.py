@@ -778,8 +778,12 @@ class MainWindow(QMainWindow):
                 self._synthetic_table.setItem(row, column, item)
         self._synthetic_table.resizeColumnsToContents()
 
-        state = status.get("state", "connection error") if status else (
-            "disconnected" if self._manager is None else "connection error"
+        state = (
+            status.get("state", "connection error")
+            if status
+            else (
+                "disconnected" if self._manager is None else "connection error"
+            )
         )
         dirty = "dirty" if self._manager_dirty else "synced"
         placement = (status or {}).get("placement_policy", "n/a")
@@ -1568,9 +1572,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Synthetic Input Failed", exc)
             return
-        self._log_info(
-            f"Synthetic input started for {stream_name}."
-        )
+        self._log_info(f"Synthetic input started for {stream_name}.")
         self._refresh_runtime_status()
 
     def stop_synthetic_input(self) -> None:
@@ -1585,9 +1587,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Synthetic Input Failed", exc)
             return
-        self._log_info(
-            f"Synthetic input stopped for {stream_name}."
-        )
+        self._log_info(f"Synthetic input stopped for {stream_name}.")
         self._refresh_runtime_status()
 
     def open_viewer(self) -> None:

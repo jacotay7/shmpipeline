@@ -5,6 +5,8 @@ import os
 import numpy as np
 import pytest
 
+from shmpipeline.control.discovery import LocalControlServerRecord
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
@@ -119,6 +121,66 @@ def test_control_window_can_start_in_light_theme(qapp):
     window = ControlWindow(theme_name="light")
     try:
         assert window.current_theme_name == "light"
+        assert window._tabs.tabText(0) == "State"
+        assert window._tabs.tabText(1) == "Server"
+        assert window._url_edit.minimumWidth() >= 500
+        assert window._token_edit.minimumWidth() >= 500
+        assert window._config_path_edit.minimumWidth() >= 500
+    finally:
+        window.close()
+
+
+def test_control_window_can_list_discovered_servers(qapp, monkeypatch):
+    record = LocalControlServerRecord(
+        pid=123,
+        host="127.0.0.1",
+        port=8765,
+        token_required=False,
+    )
+    monkeypatch.setattr(
+        "shmpipeline.gui.control.discover_local_servers",
+        lambda: [record],
+    )
+    monkeypatch.setattr(
+        ControlWindow,
+        "_server_info_for_record",
+        lambda self, candidate: {
+            "state": "initialized",
+            "config_path": "/tmp/pipeline.yaml",
+        },
+    )
+
+    window = ControlWindow(theme_name="light")
+    try:
+        assert window._discovered_combo.count() == 1
+        label = window._discovered_combo.itemText(0)
+        assert "127.0.0.1:8765" in label
+        assert "INITIALIZED" in label
+        assert "pipeline.yaml" in label
+    finally:
+        window.close()
+
+
+def test_control_window_updates_primary_button_and_badge(qapp):
+    window = ControlWindow(theme_name="light")
+    try:
+        window._set_connection_status("connected")
+        assert window._server_status_badge.text() == "CONNECTED"
+        assert (
+            window._theme.success in window._server_status_badge.styleSheet()
+        )
+
+        window._set_state_display("paused")
+        assert window._primary_button.text() == "RESUME"
+        assert window._state_badge.text() == "PAUSED"
+
+        window._set_state_display("running")
+        assert window._primary_button.text() == "PAUSE"
+        assert window._state_badge.text() == "RUNNING"
+
+        window._set_state_display("initialized")
+        assert window._primary_button.text() == "START"
+        assert window._state_badge.text() == "INITIALIZED"
     finally:
         window.close()
 
@@ -129,7 +191,13 @@ def test_main_window_build_auto_launches_local_server(qapp, monkeypatch):
     class _FakeSession:
         def __init__(self) -> None:
             self.connection = type(
-                "Conn", (), {"display_name": "127.0.0.1:9000", "base_url": "http://127.0.0.1:9000", "is_local": True}
+                "Conn",
+                (),
+                {
+                    "display_name": "127.0.0.1:9000",
+                    "base_url": "http://127.0.0.1:9000",
+                    "is_local": True,
+                },
             )()
             self.build_called = False
 

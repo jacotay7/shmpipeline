@@ -112,6 +112,9 @@ class RemotePipelineSession:
         payload = None if document is None else clone_document(document)
         return self._client.validate_document(payload)
 
+    def load_document_path(self, path: str) -> dict[str, Any]:
+        return self._client.load_document_path(path)
+
     def status(self) -> dict[str, Any]:
         self._last_status = self._client.status()
         return self._last_status
@@ -144,7 +147,9 @@ class RemotePipelineSession:
         self._last_status = snapshot
         return snapshot
 
-    def stop(self, *, timeout: float = 5.0, force: bool = False) -> dict[str, Any]:
+    def stop(
+        self, *, timeout: float = 5.0, force: bool = False
+    ) -> dict[str, Any]:
         snapshot = self._client.stop(timeout=timeout, force=force)
         self._last_status = snapshot
         return snapshot

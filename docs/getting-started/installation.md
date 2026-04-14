@@ -74,3 +74,5 @@ Start the lightweight remote control GUI:
 ```bash
 shmpipeline-control-gui
 ```
+
+That control window is intentionally minimal: local server discovery, launch and kill actions, config-file switching, and the core pipeline state-machine controls.

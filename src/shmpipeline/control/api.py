@@ -56,6 +56,12 @@ class SyntheticStopRequest(BaseModel):
     timeout: float = 2.0
 
 
+class LoadDocumentPathRequest(BaseModel):
+    """Request body for switching the server to a config file on disk."""
+
+    path: str
+
+
 def create_control_app(
     service: ManagerService,
     *,
@@ -99,6 +105,10 @@ def create_control_app(
         payload: dict[str, Any] | None = Body(default=None),
     ) -> dict[str, Any]:
         return _call_service(service.validate_document, payload)
+
+    @app.post("/document/load", dependencies=auth_dependencies)
+    def load_document(payload: LoadDocumentPathRequest) -> dict[str, Any]:
+        return _call_service(service.load_document_path, payload.path)
 
     @app.get("/status", dependencies=auth_dependencies)
     def status() -> dict[str, Any]:
@@ -226,12 +236,32 @@ def run_control_server(
     log_level: str = "info",
 ) -> None:
     """Run the default HTTP control plane for one pipeline config."""
+    from shmpipeline.control.discovery import LocalControlServerRegistration
+
     if not _is_local_host(host) and token is None:
         raise ValueError(
             "refusing to bind to a non-local interface without a bearer token"
         )
     service = ManagerService(config, poll_interval=poll_interval)
     app = create_control_app(service, token=token)
+    registration = LocalControlServerRegistration(
+        host=host,
+        port=port,
+        token_required=token is not None,
+    )
+
+    original_lifespan_context = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def registered_lifespan(app: FastAPI):
+        registration.register()
+        try:
+            async with original_lifespan_context(app):
+                yield
+        finally:
+            registration.close()
+
+    app.router.lifespan_context = registered_lifespan
     uvicorn.run(app, host=host, port=port, log_level=log_level)
 
 
@@ -242,6 +272,8 @@ def _call_service(method, *args: Any, **kwargs: Any) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ConfigValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except WorkerProcessError as exc:

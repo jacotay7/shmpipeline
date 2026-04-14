@@ -138,36 +138,41 @@ class ManagerService:
     ) -> dict[str, Any]:
         """Replace the current editable document and recreate the manager."""
         with self._lock:
-            state = self._manager.state
-            if state in {
-                PipelineState.RUNNING,
-                PipelineState.PAUSED,
-                PipelineState.FAILED,
-            }:
-                raise StateTransitionError(
-                    "cannot replace the server document while the pipeline is active; stop or shutdown first"
-                )
-
             candidate = normalize_document(document)
             validation = self._validate_document_locked(candidate)
             if validation["errors"]:
                 raise ConfigValidationError(validation["errors"][0])
-
-            if state == PipelineState.BUILT:
-                self._manager.shutdown(force=True)
-            self._document = clone_document(candidate)
-            self._document_revision += 1
-            self._manager = self._create_manager_locked()
-            payload = {
-                "config_path": self._config_path,
-                "revision": self._document_revision,
-                "document": clone_document(self._document),
-                **validation,
-            }
+            payload = self._apply_document_locked(
+                candidate,
+                config_path=self._config_path,
+                validation=validation,
+            )
         self._publish_event(
             "document_updated",
             {
                 "reason": "document_updated",
+                **payload,
+            },
+        )
+        return payload
+
+    def load_document_path(self, path: str | Path) -> dict[str, Any]:
+        """Load one config document from disk and replace the current server config."""
+        resolved_path = str(Path(path).expanduser().resolve())
+        candidate = load_document(resolved_path)
+        with self._lock:
+            validation = self._validate_document_locked(candidate)
+            if validation["errors"]:
+                raise ConfigValidationError(validation["errors"][0])
+            payload = self._apply_document_locked(
+                candidate,
+                config_path=resolved_path,
+                validation=validation,
+            )
+        self._publish_event(
+            "document_updated",
+            {
+                "reason": "document_loaded",
                 **payload,
             },
         )
@@ -251,7 +256,9 @@ class ManagerService:
         """Resume all paused workers."""
         return self._run_command("resume", self._manager.resume)
 
-    def stop(self, *, timeout: float = 5.0, force: bool = False) -> dict[str, Any]:
+    def stop(
+        self, *, timeout: float = 5.0, force: bool = False
+    ) -> dict[str, Any]:
         """Stop all workers while keeping built streams attached."""
         return self._run_command(
             "stop",
@@ -380,6 +387,35 @@ class ManagerService:
             placement_policy=self._placement_policy,
             registry=self._registry,
         )
+
+    def _apply_document_locked(
+        self,
+        document: Mapping[str, Any],
+        *,
+        config_path: str | None,
+        validation: dict[str, Any],
+    ) -> dict[str, Any]:
+        state = self._manager.state
+        if state in {
+            PipelineState.RUNNING,
+            PipelineState.PAUSED,
+            PipelineState.FAILED,
+        }:
+            raise StateTransitionError(
+                "cannot replace the server document while the pipeline is active; stop or shutdown first"
+            )
+        if state == PipelineState.BUILT:
+            self._manager.shutdown(force=True)
+        self._document = clone_document(document)
+        self._config_path = config_path
+        self._document_revision += 1
+        self._manager = self._create_manager_locked()
+        return {
+            "config_path": self._config_path,
+            "revision": self._document_revision,
+            "document": clone_document(self._document),
+            **validation,
+        }
 
     def _validate_document_locked(
         self,

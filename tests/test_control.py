@@ -7,8 +7,12 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from shmpipeline.control import RemoteManagerClient
+from shmpipeline.control import RemoteManagerClient, discover_local_servers
 from shmpipeline.control.api import create_control_app
+from shmpipeline.control.discovery import (
+    LocalControlServerRegistration,
+    terminate_local_server,
+)
 from shmpipeline.control.service import ManagerService
 from shmpipeline.synthetic import SyntheticInputConfig
 
@@ -47,7 +51,9 @@ def test_control_api_rejects_missing_token(tmp_path):
     _write_valid_config(config_path)
     service = ManagerService(config_path, poll_interval=0.01)
 
-    with TestClient(create_control_app(service, token="secret-token")) as client:
+    with TestClient(
+        create_control_app(service, token="secret-token")
+    ) as client:
         response = client.get("/status")
 
     assert response.status_code == 401
@@ -59,7 +65,9 @@ def test_remote_manager_client_controls_pipeline(tmp_path):
     _write_valid_config(config_path)
     service = ManagerService(config_path, poll_interval=0.01)
 
-    with TestClient(create_control_app(service, token="secret-token")) as test_client:
+    with TestClient(
+        create_control_app(service, token="secret-token")
+    ) as test_client:
         client = RemoteManagerClient(
             "http://testserver",
             token="secret-token",
@@ -83,9 +91,7 @@ def test_remote_manager_client_controls_pipeline(tmp_path):
         assert "input_frame" in synthetic["snapshot"]["synthetic_sources"]
 
         stopped_synthetic = client.stop_synthetic_input("input_frame")
-        assert (
-            stopped_synthetic["snapshot"]["synthetic_sources"] == {}
-        )
+        assert stopped_synthetic["snapshot"]["synthetic_sources"] == {}
 
         stopped = client.stop(force=True)
         assert stopped["state"] == "built"
@@ -104,7 +110,9 @@ def test_remote_manager_client_can_sync_documents(tmp_path):
 
         document_payload = client.document()
         assert document_payload["revision"] == 1
-        assert document_payload["document"]["kernels"][0]["name"] == "scale_stage"
+        assert (
+            document_payload["document"]["kernels"][0]["name"] == "scale_stage"
+        )
 
         validation = client.validate_document(
             {"shared_memory": [], "kernels": []}
@@ -128,6 +136,42 @@ def test_remote_manager_client_can_sync_documents(tmp_path):
         )
         assert response.status_code == 409
         assert "stop or shutdown first" in response.json()["detail"]
+
+
+def test_remote_manager_client_can_load_document_path(tmp_path):
+    config_path = tmp_path / "pipeline.yaml"
+    replacement_path = tmp_path / "replacement.yaml"
+    _write_valid_config(config_path)
+    replacement_path.write_text(
+        textwrap.dedent(
+            """
+            shared_memory:
+              - name: source_frame
+                shape: [4]
+                dtype: float32
+                storage: cpu
+              - name: sink_frame
+                shape: [4]
+                dtype: float32
+                storage: cpu
+            kernels:
+              - name: copy_stage
+                kind: cpu.copy
+                input: source_frame
+                output: sink_frame
+            """
+        ),
+        encoding="utf-8",
+    )
+    service = ManagerService(config_path, poll_interval=0.01)
+
+    with TestClient(create_control_app(service)) as test_client:
+        client = RemoteManagerClient("http://testserver", client=test_client)
+
+        payload = client.load_document_path(str(replacement_path))
+
+        assert payload["config_path"] == str(replacement_path.resolve())
+        assert payload["document"]["kernels"][0]["name"] == "copy_stage"
 
 
 def test_manager_service_publishes_snapshot_events(tmp_path):
@@ -175,7 +219,9 @@ def test_remote_manager_client_uses_extended_command_timeouts():
         def close(self):
             return None
 
-    client = RemoteManagerClient("http://testserver", client=_RecordingClient())
+    client = RemoteManagerClient(
+        "http://testserver", client=_RecordingClient()
+    )
 
     client.build()
     client.start()
@@ -186,3 +232,40 @@ def test_remote_manager_client_uses_extended_command_timeouts():
         {"method": "POST", "path": "/commands/start", "timeout": 60.0},
         {"method": "POST", "path": "/commands/stop", "timeout": 12.0},
     ]
+
+
+def test_local_control_server_discovery_round_trip(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "shmpipeline.control.discovery.discovery_directory",
+        lambda: tmp_path,
+    )
+    registration = LocalControlServerRegistration(
+        host="127.0.0.1",
+        port=8765,
+        token_required=False,
+    )
+    registration.register()
+    try:
+        records = discover_local_servers()
+    finally:
+        registration.close()
+
+    assert len(records) == 1
+    assert records[0].base_url == "http://127.0.0.1:8765"
+
+
+def test_terminate_local_server_uses_sigterm(monkeypatch):
+    calls: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "shmpipeline.control.discovery.os.kill",
+        lambda pid, sig: calls.append((pid, sig)),
+    )
+    record = LocalControlServerRegistration(
+        host="127.0.0.1",
+        port=8765,
+        token_required=False,
+    ).record
+
+    terminate_local_server(record)
+
+    assert calls == [(record.pid, 15)]

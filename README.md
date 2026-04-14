@@ -338,7 +338,7 @@ Available patterns:
 The package includes two desktop GUIs:
 
 - `shmpipeline-gui` for editing pipeline configs and controlling one remote server
-- `shmpipeline-control-gui` for lightweight remote state-machine control
+- `shmpipeline-control-gui` for minimal server and state-machine control
 
 The full editor supports:
 
@@ -376,8 +376,16 @@ Both GUIs talk to the built-in control plane. The full editor now auto-launches
 a local loopback server when you hit `Build` or `Start` without an active
 connection. You can still connect to an already-running local or remote server
 from the `Server` menu, and the lightweight control GUI still expects an
-existing server. Live shared-memory viewers remain local-only because they
-attach to local `pyshmem` streams.
+existing server.
+
+The minimal control GUI is intentionally narrow. It focuses on:
+
+- discovering locally running control servers
+- launching and killing local control-server processes
+- swapping the config file a running server is using
+- showing the current pipeline state and driving `start`, `pause`, `stop`, and `teardown`
+
+It does not expose editor features, runtime tables, or performance details. Live shared-memory viewers remain local-only because they attach to local `pyshmem` streams.
 
 ## Runtime Health And Viewers
 

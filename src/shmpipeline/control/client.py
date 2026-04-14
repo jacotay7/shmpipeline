@@ -81,6 +81,14 @@ class RemoteManagerClient:
             payload=document,
         )
 
+    def load_document_path(self, path: str) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/document/load",
+            payload={"path": path},
+            timeout=_STATE_CHANGE_REQUEST_TIMEOUT,
+        )
+
     def status(self) -> dict[str, Any]:
         return self._request_json("GET", "/status")
 
@@ -183,14 +191,20 @@ class RemoteManagerClient:
         headers = self._headers()
         if last_event_id is not None:
             headers["Last-Event-ID"] = str(last_event_id)
-        with self._client.stream("GET", "/events", headers=headers) as response:
+        with self._client.stream(
+            "GET", "/events", headers=headers
+        ) as response:
             self._raise_for_status(response)
             event_id: str | None = None
             event_name = "message"
             data_lines: list[str] = []
             for line in response.iter_lines():
                 if line == "":
-                    if event_id is None and not data_lines and event_name == "message":
+                    if (
+                        event_id is None
+                        and not data_lines
+                        and event_name == "message"
+                    ):
                         continue
                     payload = None
                     if data_lines:

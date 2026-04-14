@@ -100,8 +100,12 @@ def config_to_document(config: PipelineConfig) -> Document:
         if kernel.operation is not None:
             item["operation"] = kernel.operation
         if kernel.auxiliary:
-            if all(binding.alias == binding.name for binding in kernel.auxiliary):
-                item["auxiliary"] = [binding.name for binding in kernel.auxiliary]
+            if all(
+                binding.alias == binding.name for binding in kernel.auxiliary
+            ):
+                item["auxiliary"] = [
+                    binding.name for binding in kernel.auxiliary
+                ]
             else:
                 item["auxiliary"] = {
                     binding.alias: binding.name for binding in kernel.auxiliary
