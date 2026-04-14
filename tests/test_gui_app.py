@@ -65,6 +65,12 @@ def qapp():
         pytest.skip(f"GUI stack is unavailable: {GUI_IMPORT_ERROR}")
     app = QApplication.instance() or QApplication([])
     yield app
+    app.closeAllWindows()
+    app.processEvents()
+    for widget in QApplication.topLevelWidgets():
+        widget.close()
+        widget.deleteLater()
+    app.processEvents()
 
 
 def test_main_window_can_start_in_light_theme(qapp):
@@ -126,8 +132,7 @@ def test_control_window_can_start_in_light_theme(qapp):
         assert window._url_edit.minimumWidth() == window._FIELD_MIN_WIDTH
         assert window._token_edit.minimumWidth() == window._FIELD_MIN_WIDTH
         assert (
-            window._config_path_edit.minimumWidth()
-            == window._FIELD_MIN_WIDTH
+            window._config_path_edit.minimumWidth() == window._FIELD_MIN_WIDTH
         )
     finally:
         window.close()
