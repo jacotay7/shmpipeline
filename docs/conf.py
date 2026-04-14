@@ -30,7 +30,11 @@ templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 autodoc_mock_imports = [
+    "fastapi",
+    "fastapi.responses",
+    "httpx",
     "numba",
+    "pydantic",
     "pyqtgraph",
     "pyshmem",
     "PySide6",
@@ -38,6 +42,7 @@ autodoc_mock_imports = [
     "PySide6.QtGui",
     "PySide6.QtWidgets",
     "torch",
+    "uvicorn",
 ]
 autodoc_member_order = "bysource"
 autoclass_content = "both"

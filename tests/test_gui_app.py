@@ -123,9 +123,12 @@ def test_control_window_can_start_in_light_theme(qapp):
         assert window.current_theme_name == "light"
         assert window._tabs.tabText(0) == "State"
         assert window._tabs.tabText(1) == "Server"
-        assert window._url_edit.minimumWidth() >= 500
-        assert window._token_edit.minimumWidth() >= 500
-        assert window._config_path_edit.minimumWidth() >= 500
+        assert window._url_edit.minimumWidth() == window._FIELD_MIN_WIDTH
+        assert window._token_edit.minimumWidth() == window._FIELD_MIN_WIDTH
+        assert (
+            window._config_path_edit.minimumWidth()
+            == window._FIELD_MIN_WIDTH
+        )
     finally:
         window.close()
 
