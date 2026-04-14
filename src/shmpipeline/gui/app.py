@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
+import socket
+import subprocess
 import sys
+import tempfile
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import pyqtgraph as pg
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QColor
+from PySide6.QtGui import (
+    QAction,
+    QActionGroup,
+    QCloseEvent,
+    QColor,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -40,13 +51,16 @@ from shmpipeline.errors import ConfigValidationError
 from shmpipeline.graph import PipelineGraph
 from shmpipeline.gui.model import (
     available_kernel_kinds,
-    create_manager,
     default_document,
     document_to_yaml,
     load_document,
     parse_inline_yaml,
     save_document,
     validate_document,
+)
+from shmpipeline.gui.remote import (
+    RemotePipelineSession,
+    ServerConnection,
 )
 from shmpipeline.gui.themes import apply_application_theme, resolve_theme
 from shmpipeline.gui.viewers import SharedMemoryViewer, launch_viewer_process
@@ -309,6 +323,47 @@ class SyntheticInputDialog(QDialog):
         )
 
 
+class ConnectionDialog(QDialog):
+    """Collect remote control-server connection details."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        base_url: str = "",
+        token: str = "",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Connect to Server")
+
+        self.base_url_edit = QLineEdit(base_url)
+        self.base_url_edit.setPlaceholderText("http://127.0.0.1:8765")
+        self.token_edit = QLineEdit(token)
+        self.token_edit.setEchoMode(QLineEdit.Password)
+        self.token_edit.setPlaceholderText("optional bearer token")
+
+        form = QFormLayout()
+        form.addRow("Server URL", self.base_url_edit)
+        form.addRow("Bearer token", self.token_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def value(self) -> tuple[str, str]:
+        """Return the edited connection fields."""
+        return (
+            self.base_url_edit.text().strip(),
+            self.token_edit.text().strip(),
+        )
+
+
 class MainWindow(QMainWindow):
     """Main GUI window for configuration editing and pipeline control.
 
@@ -329,11 +384,17 @@ class MainWindow(QMainWindow):
         self._current_path: Path | None = None
         self._manager = None
         self._manager_dirty = True
+        self._managed_server_process: subprocess.Popen[str] | None = None
+        self._managed_server_url: str | None = None
+        self._managed_server_config_path: Path | None = None
+        self._managed_server_log_path: Path | None = None
+        self._managed_server_exit_reported = False
         self._viewers: list[SharedMemoryViewer] = []
         self._viewer_processes: list[Any] = []
         self._validation_state = "idle"
+        self._reported_failures: set[tuple[str, str]] = set()
 
-        self._status_label = QLabel("No config loaded")
+        self._status_label = QLabel("Server: disconnected")
         self._validation_label = QLabel("Validation: not run")
 
         self._shared_table = QTableWidget(0, 6)
@@ -481,6 +542,7 @@ class MainWindow(QMainWindow):
 
     def _build_actions(self) -> None:
         file_menu = self.menuBar().addMenu("File")
+        server_menu = self.menuBar().addMenu("Server")
         stream_menu = self.menuBar().addMenu("Streams")
         control_menu = self.menuBar().addMenu("Pipeline")
         view_menu = self.menuBar().addMenu("View")
@@ -490,6 +552,12 @@ class MainWindow(QMainWindow):
             (file_menu, "Load...", self.load_document_from_disk),
             (file_menu, "Save", self.save_document_to_disk),
             (file_menu, "Save As...", self.save_document_as),
+            (server_menu, "Launch Local Server", self.launch_local_server),
+            (server_menu, "Stop Local Server", self.stop_local_server),
+            (server_menu, "Connect...", self.connect_to_server),
+            (server_menu, "Disconnect", self.disconnect_from_server),
+            (server_menu, "Pull Config", self.pull_document_from_server),
+            (server_menu, "Push Config", self.push_document_to_server),
             (control_menu, "Validate", self.validate_current_document),
             (control_menu, "Build", self.build_pipeline),
             (control_menu, "Start", self.start_pipeline),
@@ -563,10 +631,11 @@ class MainWindow(QMainWindow):
         if self._manager is None:
             return
         try:
-            self._manager.shutdown(force=True)
+            self._manager.close()
         except Exception:
             pass
         self._manager = None
+        self._reported_failures.clear()
 
     def _selected_row(self, table: QTableWidget) -> int | None:
         selected = table.selectionModel().selectedRows()
@@ -578,7 +647,6 @@ class MainWindow(QMainWindow):
         self, document: dict[str, Any], *, path: Path | None = None
     ) -> None:
         self._close_viewers()
-        self._dispose_manager()
         self._document = document
         self._current_path = path
         self._manager_dirty = True
@@ -646,6 +714,7 @@ class MainWindow(QMainWindow):
         self._graph_preview.setPlainText(graph.describe())
 
     def _refresh_runtime_status(self) -> None:
+        self._handle_managed_server_exit()
         kernels = self._document.get("kernels", [])
         status = None
         if self._manager is not None:
@@ -655,6 +724,8 @@ class MainWindow(QMainWindow):
                 self._runtime_output.setPlainText(
                     f"Runtime status failed: {exc}"
                 )
+        if status is not None:
+            self._report_remote_failures(status)
 
         self._worker_table.setRowCount(len(kernels))
         for row, kernel in enumerate(kernels):
@@ -707,10 +778,8 @@ class MainWindow(QMainWindow):
                 self._synthetic_table.setItem(row, column, item)
         self._synthetic_table.resizeColumnsToContents()
 
-        state = (
-            self._manager.state.value
-            if self._manager is not None
-            else "no manager"
+        state = status.get("state", "connection error") if status else (
+            "disconnected" if self._manager is None else "connection error"
         )
         dirty = "dirty" if self._manager_dirty else "synced"
         placement = (status or {}).get("placement_policy", "n/a")
@@ -720,9 +789,15 @@ class MainWindow(QMainWindow):
         idle_workers = summary.get("idle_workers", 0)
         waiting_workers = summary.get("waiting_workers", 0)
         failed_workers = summary.get("failed_workers", 0)
+        server = (
+            self._manager.connection.display_name
+            if self._manager is not None
+            else "disconnected"
+        )
         self._status_label.setText(
-            "State: "
-            f"{state} | Config: {dirty} | Placement: {placement} | "
+            "Server: "
+            f"{server} | State: {state} | Config: {dirty} | "
+            f"Placement: {placement} | "
             f"Synthetic: {synthetic_count} | Active: {active_workers} | "
             f"Idle: {idle_workers} | Waiting: {waiting_workers} | "
             f"Failed: {failed_workers}"
@@ -736,7 +811,7 @@ class MainWindow(QMainWindow):
         self, status: dict[str, Any] | None
     ) -> str:
         if status is None:
-            return "Runtime: manager not built"
+            return "Runtime: server not connected"
         lines = [f"Placement policy: {status.get('placement_policy', 'n/a')}"]
         summary = status.get("summary", {})
         if summary:
@@ -806,11 +881,329 @@ class MainWindow(QMainWindow):
         except Exception:
             return str(value)
 
+    def _append_log_message(self, level: str, message: str) -> None:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        entry = f"[{timestamp}] {level}: {message}"
+        self._validation_output.moveCursor(QTextCursor.End)
+        if self._validation_output.toPlainText():
+            self._validation_output.insertPlainText("\n")
+        self._validation_output.insertPlainText(entry)
+        self._validation_output.moveCursor(QTextCursor.End)
+        self._validation_output.ensureCursorVisible()
+
+    def _log_info(self, message: str) -> None:
+        self._append_log_message("INFO", message)
+
+    def _log_error(self, title: str, error: Exception | str) -> str:
+        message = f"{title}: {error}"
+        self._append_log_message("ERROR", message)
+        return message
+
     def _show_error(self, title: str, error: Exception | str) -> None:
+        self._log_error(title, error)
         QMessageBox.critical(self, title, str(error))
 
     def _show_info(self, title: str, message: str) -> None:
+        self._log_info(f"{title}: {message}")
         QMessageBox.information(self, title, message)
+
+    def _format_connection_error(
+        self,
+        connection: ServerConnection,
+        error: Exception | str,
+    ) -> str:
+        if connection.is_local:
+            return (
+                f"Could not reach the control server at {connection.base_url}.\n\n"
+                "Click Build or Start again to auto-launch a local server, "
+                "use Server > Launch Local Server, or connect to another "
+                "running server.\n\n"
+                f"Original error: {error}"
+            )
+        return (
+            f"Could not reach the control server at {connection.base_url}.\n\n"
+            "Verify the server URL, bearer token, and remote server process.\n\n"
+            f"Original error: {error}"
+        )
+
+    def _ensure_document_valid(self) -> bool:
+        errors = validate_document(self._document)
+        if errors:
+            self._set_validation_status("failed", "Validation: failed")
+            self._log_error("Validation Failed", "\n".join(errors))
+            return False
+        self._set_validation_status("passed", "Validation: passed")
+        return True
+
+    def _ensure_local_server_support(self) -> bool:
+        try:
+            from shmpipeline.control import api as _control_api  # noqa: F401
+        except ImportError as exc:
+            self._show_error(
+                "Local Server Unavailable",
+                "Launching a local control server from the GUI requires the "
+                "control-plane dependencies. Install the updated GUI extra or "
+                'install "shmpipeline[control]" alongside the GUI.\n\n'
+                f"Original error: {exc}",
+            )
+            return False
+        return True
+
+    def _allocate_local_server_port(self) -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
+
+    def _prepare_local_server_config(self) -> Path:
+        if self._managed_server_config_path is None:
+            with tempfile.NamedTemporaryFile(
+                prefix="shmpipeline-gui-",
+                suffix=".yaml",
+                delete=False,
+            ) as handle:
+                self._managed_server_config_path = Path(handle.name)
+        save_document(self._managed_server_config_path, self._document)
+        return self._managed_server_config_path
+
+    def _prepare_local_server_log(self) -> Path:
+        if self._managed_server_log_path is not None:
+            try:
+                self._managed_server_log_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+        with tempfile.NamedTemporaryFile(
+            prefix="shmpipeline-gui-",
+            suffix=".log",
+            delete=False,
+        ) as handle:
+            self._managed_server_log_path = Path(handle.name)
+        return self._managed_server_log_path
+
+    def _read_managed_server_log_tail(self, *, max_chars: int = 8000) -> str:
+        if self._managed_server_log_path is None:
+            return ""
+        try:
+            text = self._managed_server_log_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).strip()
+        except Exception:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return "...\n" + text[-max_chars:]
+
+    def _format_local_server_failure(
+        self,
+        summary: str,
+        *,
+        last_error: Exception | str | None = None,
+    ) -> str:
+        parts = [summary]
+        if last_error is not None:
+            parts.append(f"Last connection error: {last_error}")
+        server_log = self._read_managed_server_log_tail()
+        if server_log:
+            parts.append(f"Server log:\n{server_log}")
+        return "\n\n".join(parts)
+
+    def _handle_managed_server_exit(self) -> None:
+        process = self._managed_server_process
+        if process is None or self._managed_server_exit_reported:
+            return
+        exit_code = process.poll()
+        if exit_code is None:
+            return
+        self._managed_server_exit_reported = True
+        message = self._format_local_server_failure(
+            f"The GUI-launched local control server exited unexpectedly with code {exit_code}."
+        )
+        if (
+            self._manager is not None
+            and self._managed_server_url is not None
+            and self._manager.connection.base_url == self._managed_server_url
+        ):
+            self._dispose_manager()
+            self._refresh_runtime_status()
+        self._show_error("Local Server Failed", message)
+
+    def _connect_to_connection(
+        self,
+        connection: ServerConnection,
+        *,
+        show_feedback: bool = True,
+    ) -> bool:
+        session = None
+        try:
+            session = RemotePipelineSession(connection)
+            session.info()
+        except Exception as exc:
+            if session is not None:
+                session.close()
+            self._show_error(
+                "Connection Failed",
+                self._format_connection_error(connection, exc),
+            )
+            return False
+
+        self._dispose_manager()
+        self._manager = session
+        self._settings.setValue("server_url", connection.base_url)
+        self._settings.setValue("server_token", connection.token or "")
+        if show_feedback:
+            self._log_info(f"Connected to {connection.display_name}.")
+        self._refresh_runtime_status()
+        return True
+
+    def _start_local_server(self, *, show_feedback: bool = True) -> bool:
+        if not self._ensure_local_server_support():
+            return False
+        if (
+            self._managed_server_process is not None
+            and self._managed_server_process.poll() is None
+            and self._managed_server_url is not None
+        ):
+            return self._connect_to_connection(
+                ServerConnection.from_values(self._managed_server_url),
+                show_feedback=show_feedback,
+            )
+
+        config_path = self._prepare_local_server_config()
+        log_path = self._prepare_local_server_log()
+        port = self._allocate_local_server_port()
+        base_url = f"http://127.0.0.1:{port}"
+        command = [
+            sys.executable,
+            "-m",
+            "shmpipeline.cli",
+            "--log-level",
+            "ERROR",
+            "serve",
+            str(config_path),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ]
+        try:
+            with log_path.open("w", encoding="utf-8") as log_handle:
+                process = subprocess.Popen(
+                    command,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+        except Exception as exc:
+            self._show_error("Local Server Failed", exc)
+            return False
+
+        deadline = time.monotonic() + 5.0
+        last_error: Exception | None = None
+        self._managed_server_exit_reported = False
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                self._show_error(
+                    "Local Server Failed",
+                    self._format_local_server_failure(
+                        "The GUI-launched local control server exited before it became ready.",
+                        last_error=last_error,
+                    ),
+                )
+                return False
+            session = None
+            try:
+                connection = ServerConnection.from_values(base_url)
+                session = RemotePipelineSession(connection, timeout=0.5)
+                session.info()
+            except Exception as exc:
+                last_error = exc
+                if session is not None:
+                    session.close()
+                time.sleep(0.1)
+                continue
+
+            self._managed_server_process = process
+            self._managed_server_url = base_url
+            self._dispose_manager()
+            self._manager = session
+            self._settings.setValue("server_url", connection.base_url)
+            self._settings.setValue("server_token", "")
+            if show_feedback:
+                self._log_info(
+                    "Launched a local control server and connected to "
+                    f"{connection.display_name}."
+                )
+            self._refresh_runtime_status()
+            return True
+
+        process.terminate()
+        try:
+            process.wait(timeout=2.0)
+        except Exception:
+            process.kill()
+            process.wait(timeout=2.0)
+        self._show_error(
+            "Local Server Failed",
+            self._format_local_server_failure(
+                "Timed out waiting for the GUI-launched local control server to accept connections.",
+                last_error=last_error,
+            ),
+        )
+        return False
+
+    def _stop_managed_server(self) -> None:
+        process = self._managed_server_process
+        self._managed_server_process = None
+        self._managed_server_url = None
+        self._managed_server_exit_reported = True
+        if process is None:
+            return
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2.0)
+            except Exception:
+                process.kill()
+                process.wait(timeout=2.0)
+
+    def _cleanup_managed_server_config(self) -> None:
+        if self._managed_server_config_path is None:
+            return
+        try:
+            self._managed_server_config_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self._managed_server_config_path = None
+
+    def _cleanup_managed_server_log(self) -> None:
+        if self._managed_server_log_path is None:
+            return
+        try:
+            self._managed_server_log_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        self._managed_server_log_path = None
+
+    def _pipeline_state(self) -> PipelineState | None:
+        if self._manager is None:
+            return None
+        try:
+            status = self._manager.status()
+        except Exception as exc:
+            self._show_error("Server Communication Failed", exc)
+            return None
+        return PipelineState(status["state"])
+
+    def _report_remote_failures(self, status: dict[str, Any]) -> None:
+        active_failures: set[tuple[str, str]] = set()
+        for failure in status.get("failures", []):
+            kernel = str(failure.get("kernel") or "unknown")
+            error = str(failure.get("error") or "unknown error")
+            key = (kernel, error)
+            active_failures.add(key)
+            if key not in self._reported_failures:
+                self._show_error("Pipeline Error", f"{kernel}: {error}")
+        self._reported_failures = active_failures
 
     def _close_viewers(self) -> None:
         for viewer in list(self._viewers):
@@ -840,7 +1233,82 @@ class MainWindow(QMainWindow):
 
     def new_document(self) -> None:
         self._set_document(default_document())
-        self._validation_output.setPlainText("New empty document")
+        self._log_info("New empty document")
+
+    def launch_local_server(self) -> None:
+        if not self._ensure_document_valid():
+            return
+        self._start_local_server(show_feedback=True)
+
+    def stop_local_server(self) -> None:
+        was_connected = (
+            self._manager is not None
+            and self._managed_server_url is not None
+            and self._manager.connection.base_url == self._managed_server_url
+        )
+        if was_connected:
+            self._dispose_manager()
+        self._stop_managed_server()
+        if was_connected:
+            self._refresh_runtime_status()
+        self._log_info("Local control server stopped.")
+
+    def connect_to_server(self) -> bool:
+        initial_url = self._settings.value(
+            "server_url", "http://127.0.0.1:8765", str
+        )
+        initial_token = self._settings.value("server_token", "", str)
+        if self._manager is not None:
+            initial_url = self._manager.connection.base_url
+            initial_token = self._manager.connection.token or ""
+
+        dialog = ConnectionDialog(
+            self,
+            base_url=initial_url,
+            token=initial_token,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return False
+
+        base_url, token = dialog.value()
+        return self._connect_to_connection(
+            ServerConnection.from_values(base_url, token)
+        )
+
+    def disconnect_from_server(self) -> None:
+        if self._manager is None:
+            return
+        self._close_viewers()
+        server_name = self._manager.connection.display_name
+        self._dispose_manager()
+        self._log_info(f"Disconnected from {server_name}.")
+        self._refresh_runtime_status()
+
+    def pull_document_from_server(self) -> None:
+        if self._manager is None and not self.connect_to_server():
+            return
+        try:
+            assert self._manager is not None
+            payload = self._manager.document()
+        except Exception as exc:
+            self._show_error("Pull Failed", exc)
+            return
+        self._set_document(payload["document"])
+        self._manager_dirty = False
+        self._log_info(
+            f"Pulled config revision {payload.get('revision', '?')} from server."
+        )
+        self._refresh_all()
+
+    def push_document_to_server(self) -> None:
+        if not self._ensure_document_valid():
+            return
+        if self._manager is None and not self._start_local_server(
+            show_feedback=False
+        ):
+            return
+        if self._push_document_to_server(show_feedback=True):
+            self._refresh_runtime_status()
 
     def load_document_from_disk(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -858,7 +1326,7 @@ class MainWindow(QMainWindow):
             return
         self._close_viewers()
         self._set_document(document, path=Path(path))
-        self._validation_output.setPlainText(f"Loaded {path}")
+        self._log_info(f"Loaded {path}")
 
     def save_document_to_disk(self) -> None:
         if self._current_path is None:
@@ -869,7 +1337,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Save Failed", exc)
             return
-        self._validation_output.setPlainText(f"Saved {self._current_path}")
+        self._log_info(f"Saved {self._current_path}")
 
     def save_document_as(self) -> None:
         path, _ = QFileDialog.getSaveFileName(
@@ -969,33 +1437,39 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def validate_current_document(self) -> None:
-        errors = validate_document(self._document)
-        if errors:
-            self._set_validation_status("failed", "Validation: failed")
-            self._validation_output.setPlainText("\n".join(errors))
+        if not self._ensure_document_valid():
             return
+        self._log_info("Configuration is valid.")
+
+    def _push_document_to_server(self, *, show_feedback: bool) -> bool:
+        if not self._ensure_document_valid():
+            return False
+        try:
+            assert self._manager is not None
+            payload = self._manager.update_document(self._document)
+        except Exception as exc:
+            self._show_error("Push Failed", exc)
+            return False
+        self._manager_dirty = False
         self._set_validation_status("passed", "Validation: passed")
-        self._validation_output.setPlainText("Configuration is valid.")
+        if show_feedback:
+            self._log_info(
+                "Pushed config to server at revision "
+                f"{payload.get('revision', '?')}."
+            )
+        return True
 
     def _ensure_manager_ready(self) -> bool:
-        errors = validate_document(self._document)
-        if errors:
-            self._set_validation_status("failed", "Validation: failed")
-            self._validation_output.setPlainText("\n".join(errors))
+        if not self._ensure_document_valid():
             return False
-        if self._manager is None or self._manager_dirty:
-            if self._manager is not None:
-                try:
-                    self._close_viewers()
-                    self._dispose_manager()
-                except Exception:
-                    pass
-            try:
-                self._manager = create_manager(self._document)
-            except Exception as exc:
-                self._show_error("Manager Creation Failed", exc)
+        if self._manager is None and not self._start_local_server(
+            show_feedback=False
+        ):
+            return False
+        if self._manager_dirty:
+            self._close_viewers()
+            if not self._push_document_to_server(show_feedback=False):
                 return False
-            self._manager_dirty = False
         return True
 
     def build_pipeline(self) -> None:
@@ -1003,23 +1477,11 @@ class MainWindow(QMainWindow):
             return
         try:
             assert self._manager is not None
-            if self._manager.state == PipelineState.INITIALIZED:
-                self._manager.build()
-            elif self._manager.state == PipelineState.STOPPED:
-                self._manager = create_manager(self._document)
-                self._manager_dirty = False
-                self._manager.build()
-            else:
-                self._show_info(
-                    "Build",
-                    "Build is not allowed while state is "
-                    f"{self._manager.state.value!r}.",
-                )
-                return
+            self._manager.build()
         except Exception as exc:
             self._show_error("Build Failed", exc)
             return
-        self._validation_output.setPlainText("Pipeline built.")
+        self._log_info("Pipeline built.")
         self._refresh_all()
 
     def start_pipeline(self) -> None:
@@ -1027,13 +1489,11 @@ class MainWindow(QMainWindow):
             return
         try:
             assert self._manager is not None
-            if self._manager.state == PipelineState.INITIALIZED:
-                self._manager.build()
             self._manager.start()
         except Exception as exc:
             self._show_error("Start Failed", exc)
             return
-        self._validation_output.setPlainText("Pipeline started.")
+        self._log_info("Pipeline started.")
         self._refresh_all()
 
     def pause_pipeline(self) -> None:
@@ -1044,7 +1504,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Pause Failed", exc)
             return
-        self._validation_output.setPlainText("Pipeline paused.")
+        self._log_info("Pipeline paused.")
         self._refresh_all()
 
     def resume_pipeline(self) -> None:
@@ -1055,7 +1515,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Resume Failed", exc)
             return
-        self._validation_output.setPlainText("Pipeline resumed.")
+        self._log_info("Pipeline resumed.")
         self._refresh_all()
 
     def stop_pipeline(self) -> None:
@@ -1066,7 +1526,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Stop Failed", exc)
             return
-        self._validation_output.setPlainText("Pipeline stopped.")
+        self._log_info("Pipeline stopped.")
         self._refresh_all()
 
     def shutdown_pipeline(self) -> None:
@@ -1078,11 +1538,12 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Shutdown Failed", exc)
             return
-        self._validation_output.setPlainText("Pipeline shut down.")
+        self._log_info("Pipeline shut down.")
         self._refresh_all()
 
     def start_synthetic_input(self) -> None:
-        if self._manager is None or self._manager.state not in {
+        state = self._pipeline_state()
+        if self._manager is None or state not in {
             PipelineState.BUILT,
             PipelineState.RUNNING,
             PipelineState.PAUSED,
@@ -1107,7 +1568,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             self._show_error("Synthetic Input Failed", exc)
             return
-        self._validation_output.setPlainText(
+        self._log_info(
             f"Synthetic input started for {stream_name}."
         )
         self._refresh_runtime_status()
@@ -1119,14 +1580,19 @@ class MainWindow(QMainWindow):
         if spec is None:
             return
         stream_name = spec.get("name", "")
-        self._manager.stop_synthetic_input(stream_name)
-        self._validation_output.setPlainText(
+        try:
+            self._manager.stop_synthetic_input(stream_name)
+        except Exception as exc:
+            self._show_error("Synthetic Input Failed", exc)
+            return
+        self._log_info(
             f"Synthetic input stopped for {stream_name}."
         )
         self._refresh_runtime_status()
 
     def open_viewer(self) -> None:
-        if self._manager is None or self._manager.state not in {
+        state = self._pipeline_state()
+        if self._manager is None or state not in {
             PipelineState.BUILT,
             PipelineState.RUNNING,
             PipelineState.PAUSED,
@@ -1134,6 +1600,18 @@ class MainWindow(QMainWindow):
         }:
             self._show_info(
                 "Viewer", "Build the pipeline before opening viewers."
+            )
+            return
+        if self._manager_dirty:
+            self._show_info(
+                "Viewer",
+                "Push the current config to the server before opening a viewer.",
+            )
+            return
+        if not self._manager.is_local:
+            self._show_info(
+                "Viewer",
+                "Shared-memory viewers are only available when connected to a local server.",
             )
             return
         spec = self._selected_stream_spec(show_message=True)
@@ -1151,6 +1629,9 @@ class MainWindow(QMainWindow):
     ) -> None:  # pragma: no cover - GUI runtime only
         self._close_viewers()
         self._dispose_manager()
+        self._stop_managed_server()
+        self._cleanup_managed_server_config()
+        self._cleanup_managed_server_log()
         super().closeEvent(event)
 
 

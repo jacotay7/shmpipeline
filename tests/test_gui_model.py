@@ -9,6 +9,7 @@ from shmpipeline.gui.model import (
     recommended_spawn_method,
     validate_document,
 )
+from shmpipeline.gui.remote import is_local_server_url, normalize_server_url
 
 
 def test_default_document_is_empty_and_serializable(tmp_path):
@@ -65,6 +66,15 @@ def test_validate_document_accepts_valid_config():
     )
 
     assert errors == []
+
+
+def test_normalize_server_url_adds_scheme_and_strips_slash():
+    assert normalize_server_url("127.0.0.1:8765/") == "http://127.0.0.1:8765"
+
+
+def test_is_local_server_url_detects_loopback_hosts():
+    assert is_local_server_url("http://127.0.0.1:8765") is True
+    assert is_local_server_url("http://192.168.1.10:8765") is False
 
 
 def test_recommended_spawn_method_prefers_forkserver_for_linux_cpu(

@@ -620,13 +620,14 @@ class PipelineManager:
             return not candidate_is_generic
         return False
 
-    def status(self) -> dict[str, Any]:
+    def status(self, *, poll: bool = True) -> dict[str, Any]:
         """Return a snapshot of manager state, workers, and failures.
 
         The result is intentionally JSON-friendly so CLI, GUI, and external
         tooling can consume the same structure.
         """
-        self.poll_events()
+        if poll:
+            self.poll_events()
         workers_status = {
             name: self._status_for_worker(name, worker)
             for name, worker in self._workers.items()
@@ -742,13 +743,13 @@ class PipelineManager:
                 summary["stopped_workers"] += 1
         return summary
 
-    def runtime_snapshot(self) -> dict[str, Any]:
+    def runtime_snapshot(self, *, poll: bool = True) -> dict[str, Any]:
         """Return a richer status snapshot for CLI and GUI consumers.
 
         This extends :meth:`status` with a timestamp and the derived graph
         description.
         """
-        status = self.status()
+        status = self.status(poll=poll)
         return {
             "timestamp": time.time(),
             **status,

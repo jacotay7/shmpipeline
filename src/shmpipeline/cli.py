@@ -77,6 +77,42 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the final runtime snapshot as JSON before exiting.",
     )
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help=(
+            "Expose one pipeline manager over HTTP and Server-Sent Events "
+            "for local or remote control."
+        ),
+    )
+    serve_parser.add_argument(
+        "config", help="Path to the YAML pipeline file to control."
+    )
+    serve_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Host interface to bind. Defaults to loopback only.",
+    )
+    serve_parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="Control-plane TCP port.",
+    )
+    serve_parser.add_argument(
+        "--token",
+        default=None,
+        help=(
+            "Optional bearer token for API access. Required when binding to "
+            "a non-local interface."
+        ),
+    )
+    serve_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=0.1,
+        help="Manager event polling interval in seconds.",
+    )
     return parser
 
 
@@ -96,6 +132,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             duration=args.duration,
             poll_interval=args.poll_interval,
             emit_json_status=args.json_status,
+        )
+    if args.command == "serve":
+        return _run_serve(
+            args.config,
+            host=args.host,
+            port=args.port,
+            token=args.token,
+            poll_interval=args.poll_interval,
+            log_level=args.log_level,
         )
     parser.error(f"unsupported command: {args.command}")
     return 2
@@ -175,3 +220,42 @@ def _run_pipeline(
     if emit_json_status:
         print(json.dumps(manager.runtime_snapshot(), indent=2, sort_keys=True))
     return exit_code
+
+
+def _run_serve(
+    config_path: str,
+    *,
+    host: str,
+    port: int,
+    token: str | None,
+    poll_interval: float,
+    log_level: str,
+) -> int:
+    try:
+        from shmpipeline.control.api import run_control_server
+    except ImportError:
+        print(
+            "Control server support requires the control extra: "
+            'pip install "shmpipeline[control]"'
+        )
+        return 1
+
+    try:
+        run_control_server(
+            config_path,
+            host=host,
+            port=port,
+            token=token,
+            poll_interval=poll_interval,
+            log_level=log_level.lower(),
+        )
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:
+        print(f"Control server failed: {exc}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - module entry point
+    raise SystemExit(main())

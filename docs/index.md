@@ -23,6 +23,7 @@ getting-started/configuration
 :caption: Guides
 
 guides/cli
+guides/control-plane
 guides/runtime
 guides/gui
 guides/extensions

@@ -26,6 +26,8 @@ The current release provides:
 - process supervision and worker error propagation
 - pipeline graph introspection and runtime snapshots
 - a CLI for `validate`, `describe`, and `run` workflows
+- an optional HTTP control plane with SSE event streaming and a Python client
+- a remote-backed configuration GUI and a lightweight remote control GUI
 - backend synthetic inputs for test and demo pipelines
 - unit and integration tests for the supported behavior
 
@@ -198,8 +200,9 @@ Choose the smallest install that matches how you plan to use the package.
 - Base runtime and CLI from PyPI: `pip install shmpipeline`
 - GPU support from PyPI: `pip install "shmpipeline[gpu]"`
 - Desktop GUI from PyPI: `pip install "shmpipeline[gui]"`
+- Remote control service from PyPI: `pip install "shmpipeline[control]"`
 - Local source install: `pip install -e .`
-- Combined local development setup: `pip install -e ".[gpu,gui,test,docs]"`
+- Combined local development setup: `pip install -e ".[control,gpu,gui,test,docs]"`
 
 ## CLI
 
@@ -223,6 +226,41 @@ Run a pipeline until interrupted or for a bounded duration:
 ```bash
 shmpipeline run pipeline.yaml
 shmpipeline run pipeline.yaml --duration 5.0 --json-status
+```
+
+Start the built-in control plane for remote access to one manager instance:
+
+```bash
+shmpipeline serve pipeline.yaml --host 127.0.0.1 --port 8765
+```
+
+## Remote Control Service
+
+The control-plane server wraps a single `PipelineManager` instance and exposes:
+
+- JSON endpoints for lifecycle commands and status snapshots
+- JSON endpoints for pulling, validating, and replacing the active editable document
+- Server-Sent Events for live worker lifecycle and metric events
+- a small Python client for remote control code
+
+Bind to loopback by default. If you bind to a non-local interface, set a bearer token:
+
+```bash
+shmpipeline serve pipeline.yaml --host 0.0.0.0 --port 8765 --token change-me
+```
+
+Python client example:
+
+```python
+from shmpipeline.control import RemoteManagerClient
+
+with RemoteManagerClient("http://127.0.0.1:8765", token="change-me") as client:
+	client.build()
+	client.start()
+	snapshot = client.snapshot()
+	print(snapshot["state"])
+	client.stop(force=True)
+	client.shutdown(force=True)
 ```
 
 ## Graph Introspection
@@ -297,19 +335,24 @@ Available patterns:
 
 ## GUI
 
-The package includes a desktop GUI for editing and running pipelines.
+The package includes two desktop GUIs:
 
-It supports:
+- `shmpipeline-gui` for editing pipeline configs and controlling one remote server
+- `shmpipeline-control-gui` for lightweight remote state-machine control
+
+The full editor supports:
 
 - loading and saving YAML configs
 - add, edit, and remove operations for shared memory and kernels
 - config validation without building the pipeline
 - a graph summary tab derived from the current document
+- explicit connect, disconnect, pull, and push actions for one control server
 - pipeline state-machine controls (`build`, `start`, `pause`, `resume`, `stop`, `shutdown`)
 - live worker status and runtime metrics for configured kernels
+- remote failure relay from the server into the GUI
 - light and dark themes, with light as the default
 - start and stop controls for synthetic test inputs on built streams
-- live shared-memory viewers polling at about 30 Hz
+- live shared-memory viewers polling at about 30 Hz when connected to a local server
 
 Install the GUI dependencies from PyPI:
 
@@ -323,8 +366,18 @@ Launch it with:
 shmpipeline-gui
 ```
 
-The GUI can open live viewers for configured shared-memory streams and switch
-between light and dark themes from the `View` menu.
+Launch the lightweight control surface with:
+
+```bash
+shmpipeline-control-gui
+```
+
+Both GUIs talk to the built-in control plane. The full editor now auto-launches
+a local loopback server when you hit `Build` or `Start` without an active
+connection. You can still connect to an already-running local or remote server
+from the `Server` menu, and the lightweight control GUI still expects an
+existing server. Live shared-memory viewers remain local-only because they
+attach to local `pyshmem` streams.
 
 ## Runtime Health And Viewers
 

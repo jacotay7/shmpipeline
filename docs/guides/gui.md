@@ -1,6 +1,6 @@
 # GUI Guide
 
-The `shmpipeline-gui` desktop application is the interactive surface for editing YAML, validating configs, running pipelines, and inspecting live streams.
+`shmpipeline-gui` is the interactive surface for editing pipeline YAML and controlling a `shmpipeline serve` instance. The GUI no longer owns a local `PipelineManager`; it edits a local document, then pushes that document to the connected server.
 
 ## Launch
 
@@ -16,17 +16,28 @@ Start the application:
 shmpipeline-gui
 ```
 
+For local use, you can simply press `Build` or `Start` and the GUI will auto-launch a loopback control server for the current document.
+
+If you want to attach to an existing local or remote server instead, start it first:
+
+```bash
+shmpipeline serve pipeline.yaml --host 127.0.0.1 --port 8765
+```
+
+The `Server` menu exposes `Launch Local Server`, `Stop Local Server`, `Connect`, `Disconnect`, `Pull Config`, and `Push Config` actions.
+
 ## Main areas of the application
 
 The main window combines several responsibilities:
 
 - shared-memory table editor
 - kernel table editor
+- remote-server connection and document sync controls
 - validation status and graph summary
 - runtime controls for build, start, pause, resume, stop, and shutdown
 - live worker metrics
 - synthetic input management
-- viewer launching for configured streams
+- viewer launching for configured streams when the server is local
 
 :::{figure} ../_static/images/gui/gui-main-window.png
 :alt: Main shmpipeline GUI window showing shared-memory, kernel, and runtime panels.
@@ -40,11 +51,11 @@ Main window with shared-memory definitions, kernel stages, runtime metrics, and 
 1. Load an existing pipeline YAML file or start from an empty document.
 2. Add shared-memory definitions.
 3. Add kernel stages and wire their inputs and outputs.
-4. Validate the config before building.
-5. Build the pipeline.
-6. Start workers and inspect runtime status.
-7. Launch viewers for selected streams.
-8. Stop or shut down the pipeline when finished.
+4. Validate the config locally.
+5. Press `Build` or `Start` to auto-launch a local server, or connect to an existing server from the `Server` menu.
+6. Push config changes to the connected server when needed.
+7. Inspect runtime status and any relayed worker failures.
+8. Launch viewers for selected streams when connected to a local server.
 
 ## Shared memory editor
 
@@ -89,7 +100,7 @@ Kernel editor with stage ordering, kernel kinds, trigger inputs, outputs, and au
 
 ## Runtime controls
 
-The main window follows the same state model as `PipelineManager`:
+The main window follows the same state model as `PipelineManager`, but all lifecycle commands are sent to the connected server:
 
 - build
 - start
@@ -99,6 +110,8 @@ The main window follows the same state model as `PipelineManager`:
 - shutdown
 
 The runtime table shows worker identity and health, including PID, CPU slot, frame counts, timing, and throughput.
+
+If the pipeline fails, the server failure is surfaced back into the GUI through the runtime snapshot and shown to the user.
 
 :::{figure} ../_static/images/gui/gui-runtime-status.png
 :alt: Runtime status table in the shmpipeline GUI showing worker PIDs, health, frame counts, and throughput metrics.
@@ -125,6 +138,8 @@ Synthetic-input dialog for selecting the target stream, pattern, rate, seed, and
 ## Stream viewers
 
 Viewer windows are launched as separate processes so they can keep updating even while the main GUI remains responsive.
+
+Viewers are currently local-only. The GUI will only launch them when the connected control server is running on the same host, because the viewer process attaches directly to local shared-memory streams.
 
 The viewer status distinguishes between:
 

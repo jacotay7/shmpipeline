@@ -1,10 +1,11 @@
 # CLI Guide
 
-The `shmpipeline` CLI provides the three headless workflows most users need:
+The `shmpipeline` CLI provides four headless workflows:
 
 - validate a pipeline config
 - describe the derived graph
 - run a pipeline until interrupted or for a bounded duration
+- serve one pipeline manager over HTTP and SSE
 
 ## Validate
 
@@ -39,6 +40,24 @@ shmpipeline run pipeline.yaml --duration 5.0 --json-status
 ```
 
 The run command builds shared memory, starts workers, polls runtime status, and shuts the pipeline down on exit.
+
+## Serve
+
+```bash
+shmpipeline serve pipeline.yaml
+shmpipeline serve pipeline.yaml --host 127.0.0.1 --port 8765
+shmpipeline serve pipeline.yaml --host 0.0.0.0 --port 8765 --token change-me
+```
+
+The serve command hosts one `PipelineManager` behind a small HTTP control plane.
+
+Use it when you want:
+
+- a remote status endpoint for scripts or dashboards
+- lifecycle control from another process or machine
+- a stable bridge between the in-process manager API and external tooling
+
+See [control plane](control-plane.md) for the endpoint model and Python client example.
 
 ## Logging
 

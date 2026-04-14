@@ -20,11 +20,13 @@ try:
     from shmpipeline.gui import themes as themes_module
     from shmpipeline.gui import viewers as viewers_module
     from shmpipeline.gui.app import MainWindow, SyntheticInputDialog
+    from shmpipeline.gui.control import ControlWindow
 except Exception as exc:  # pragma: no cover - GUI stack unavailable
     viewers_module = None
     themes_module = None
     MainWindow = None
     SyntheticInputDialog = None
+    ControlWindow = None
     GUI_IMPORT_ERROR = exc
 
 pytestmark = pytest.mark.unit
@@ -108,6 +110,118 @@ def test_main_window_exposes_stream_actions_menu(qapp):
     try:
         labels = [action.text() for action in window.menuBar().actions()]
         assert "Streams" in labels
+        assert "Server" in labels
+    finally:
+        window.close()
+
+
+def test_control_window_can_start_in_light_theme(qapp):
+    window = ControlWindow(theme_name="light")
+    try:
+        assert window.current_theme_name == "light"
+    finally:
+        window.close()
+
+
+def test_main_window_build_auto_launches_local_server(qapp, monkeypatch):
+    window = MainWindow(theme_name="light")
+
+    class _FakeSession:
+        def __init__(self) -> None:
+            self.connection = type(
+                "Conn", (), {"display_name": "127.0.0.1:9000", "base_url": "http://127.0.0.1:9000", "is_local": True}
+            )()
+            self.build_called = False
+
+        def status(self):
+            return {
+                "state": "initialized",
+                "placement_policy": "round-robin",
+                "summary": {},
+                "workers": {},
+                "failures": [],
+                "synthetic_sources": {},
+            }
+
+        def build(self):
+            self.build_called = True
+            return {"state": "built"}
+
+        def close(self):
+            return None
+
+    fake_session = _FakeSession()
+
+    def fake_start_local_server(*, show_feedback: bool) -> bool:
+        window._manager = fake_session
+        return True
+
+    def fake_push_document_to_server(*, show_feedback: bool) -> bool:
+        window._manager_dirty = False
+        return True
+
+    monkeypatch.setattr(window, "_start_local_server", fake_start_local_server)
+    monkeypatch.setattr(
+        window,
+        "_push_document_to_server",
+        fake_push_document_to_server,
+    )
+    monkeypatch.setattr(window, "_ensure_document_valid", lambda: True)
+
+    try:
+        window.build_pipeline()
+        assert fake_session.build_called is True
+    finally:
+        window.close()
+
+
+def test_main_window_formats_local_connection_errors(qapp):
+    window = MainWindow(theme_name="light")
+    try:
+        message = window._format_connection_error(
+            type(
+                "Conn",
+                (),
+                {"base_url": "http://127.0.0.1:8765", "is_local": True},
+            )(),
+            RuntimeError("connection refused"),
+        )
+        assert "auto-launch a local server" in message
+        assert "127.0.0.1:8765" in message
+    finally:
+        window.close()
+
+
+def test_main_window_logs_errors_to_gui_output(qapp, monkeypatch):
+    window = MainWindow(theme_name="light")
+    monkeypatch.setattr(
+        "shmpipeline.gui.app.QMessageBox.critical",
+        lambda *args, **kwargs: None,
+    )
+    try:
+        window._show_error("Build Failed", "example failure")
+        assert "ERROR: Build Failed: example failure" in (
+            window._validation_output.toPlainText()
+        )
+    finally:
+        window.close()
+
+
+def test_main_window_local_server_failure_message_includes_server_log(
+    qapp,
+    tmp_path,
+):
+    window = MainWindow(theme_name="light")
+    log_path = tmp_path / "server.log"
+    log_path.write_text("Traceback\nRuntimeError: boom", encoding="utf-8")
+    window._managed_server_log_path = log_path
+    try:
+        message = window._format_local_server_failure(
+            "The GUI-launched local control server exited before it became ready.",
+            last_error="connection refused",
+        )
+        assert "Last connection error: connection refused" in message
+        assert "RuntimeError: boom" in message
     finally:
         window.close()
 

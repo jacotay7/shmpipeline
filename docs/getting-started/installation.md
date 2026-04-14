@@ -20,6 +20,12 @@ Desktop GUI support:
 pip install "shmpipeline[gui]"
 ```
 
+Remote control service support:
+
+```bash
+pip install "shmpipeline[control]"
+```
+
 ## Source installs
 
 Editable source install:
@@ -31,7 +37,7 @@ pip install -e .
 Full local development environment:
 
 ```bash
-pip install -e ".[gpu,gui,test,docs]"
+pip install -e ".[control,gpu,gui,test,docs]"
 ```
 
 ## Platform notes
@@ -39,6 +45,8 @@ pip install -e ".[gpu,gui,test,docs]"
 - CPU pipelines are the default path and have the smallest dependency surface.
 - GPU pipelines require a compatible PyTorch and CUDA environment.
 - The desktop GUI requires Qt bindings through `PySide6` and plotting support through `pyqtgraph`.
+- The desktop GUI extra also installs the local control-plane dependencies so the full editor can auto-launch a loopback server for local workflows.
+- The remote control plane requires the `control` extra, which installs FastAPI, Uvicorn, and the Python HTTP client dependency.
 - The repository CI runs on Linux, macOS, and Windows. GPU tests are skipped automatically when CUDA is unavailable.
 
 ## Verify the install
@@ -59,4 +67,10 @@ Start the GUI after installing the GUI extra:
 
 ```bash
 shmpipeline-gui
+```
+
+Start the lightweight remote control GUI:
+
+```bash
+shmpipeline-control-gui
 ```

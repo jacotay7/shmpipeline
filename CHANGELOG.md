@@ -21,6 +21,8 @@ This will be the first stable public release of `shmpipeline`.
 - Runtime snapshots, rolling worker metrics, synthetic inputs, and shared-memory
   viewers.
 - Desktop GUI for editing, validating, running, and inspecting pipelines.
+- Optional HTTP control plane for remote lifecycle commands, JSON snapshots,
+  and SSE event streaming.
 - Example pipelines ranging from simple affine transforms to observatory-scale
   adaptive optics flows.
 - Multi-platform CI and a PyPI publish workflow.
