@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from shmpipeline.control import RemoteManagerClient, discover_local_servers
 from shmpipeline.control.api import create_control_app
 from shmpipeline.control.discovery import (
+    LocalControlServerRecord,
     LocalControlServerRegistration,
     terminate_local_server,
 )
@@ -260,11 +261,12 @@ def test_terminate_local_server_uses_sigterm(monkeypatch):
         "shmpipeline.control.discovery.os.kill",
         lambda pid, sig: calls.append((pid, sig)),
     )
-    record = LocalControlServerRegistration(
+    record = LocalControlServerRecord(
+        pid=4321,
         host="127.0.0.1",
         port=8765,
         token_required=False,
-    ).record
+    )
 
     terminate_local_server(record)
 

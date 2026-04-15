@@ -15,7 +15,14 @@ from typing import Any
 def discovery_directory() -> Path:
     """Return the filesystem location used for local server discovery."""
     path = Path(tempfile.gettempdir()) / "shmpipeline-control-servers"
-    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.mkdir(parents=True)
+    except FileExistsError:
+        # On Windows runners this path can already exist and pathlib's
+        # exist_ok=True fallback may spend a long time probing is_dir().
+        # Reusing the existing path is sufficient here; later file I/O will
+        # still fail clearly if the path is not actually a directory.
+        pass
     return path
 
 
