@@ -70,10 +70,18 @@ def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
     app.closeAllWindows()
+    QApplication.sendPostedEvents()
     app.processEvents()
-    for widget in QApplication.topLevelWidgets():
-        widget.close()
-        widget.deleteLater()
+    for widget in tuple(QApplication.topLevelWidgets()):
+        try:
+            widget.hide()
+        except Exception:
+            continue
+        try:
+            widget.deleteLater()
+        except Exception:
+            continue
+    QApplication.sendPostedEvents()
     app.processEvents()
 
 
