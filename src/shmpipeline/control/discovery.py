@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import signal
@@ -10,6 +11,15 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+_IS_WINDOWS = os.name == "nt"
+
+if _IS_WINDOWS:
+    from ctypes import wintypes
+
+    _KERNEL32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    _STILL_ACTIVE = 259
 
 
 def discovery_directory() -> Path:
@@ -122,6 +132,8 @@ def terminate_local_server(record: LocalControlServerRecord) -> None:
 def _pid_exists(pid: int) -> bool:
     if pid <= 0:
         return False
+    if _IS_WINDOWS:
+        return _pid_exists_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -135,3 +147,20 @@ def _pid_exists(pid: int) -> bool:
 
 def _kill_pid(pid: int, sig: int) -> None:
     os.kill(pid, sig)
+
+
+def _pid_exists_windows(pid: int) -> bool:
+    handle = _KERNEL32.OpenProcess(
+        _PROCESS_QUERY_LIMITED_INFORMATION,
+        False,
+        pid,
+    )
+    if not handle:
+        return ctypes.get_last_error() == 5
+    try:
+        exit_code = wintypes.DWORD()
+        if not _KERNEL32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return ctypes.get_last_error() == 5
+        return exit_code.value == _STILL_ACTIVE
+    finally:
+        _KERNEL32.CloseHandle(handle)

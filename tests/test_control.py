@@ -8,6 +8,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+import shmpipeline.control.discovery as discovery_module
 from shmpipeline.control import RemoteManagerClient, discover_local_servers
 from shmpipeline.control.api import create_control_app
 from shmpipeline.control.discovery import (
@@ -272,3 +273,21 @@ def test_terminate_local_server_uses_sigterm(monkeypatch):
     terminate_local_server(record)
 
     assert calls == [(record.pid, signal.SIGTERM)]
+
+
+def test_pid_exists_uses_windows_query_helper(monkeypatch):
+    calls: list[int] = []
+    monkeypatch.setattr(discovery_module, "_IS_WINDOWS", True)
+    monkeypatch.setattr(
+        discovery_module,
+        "_pid_exists_windows",
+        lambda pid: calls.append(pid) or True,
+    )
+    monkeypatch.setattr(
+        discovery_module.os,
+        "kill",
+        lambda *_args: pytest.fail("os.kill should not be used on Windows"),
+    )
+
+    assert discovery_module._pid_exists(4321) is True
+    assert calls == [4321]
