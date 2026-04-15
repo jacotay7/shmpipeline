@@ -15,10 +15,11 @@ os.environ.setdefault(
 
 try:
     from PySide6.QtCore import Qt
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QWidget
 except Exception:  # pragma: no cover - exercised when Qt is unavailable
     Qt = None
     QApplication = None
+    QWidget = None
 
 GUI_IMPORT_ERROR: Exception | None = None
 
@@ -59,6 +60,87 @@ class _FakeStream:
 
     def close(self) -> None:
         return None
+
+
+_QT_WIDGET_BASE = QWidget if QWidget is not None else object
+
+
+class _FakePlotCurve:
+    def __init__(self, pen=None) -> None:
+        self.pen = pen
+        self.data = None
+
+    def setData(self, data) -> None:
+        self.data = data
+
+    def setPen(self, pen) -> None:
+        self.pen = pen
+
+
+class _FakePlotWidget(_QT_WIDGET_BASE):
+    def __init__(self) -> None:
+        if QWidget is not None:
+            super().__init__()
+        self.background = None
+        self.curve = _FakePlotCurve()
+
+    def plot(self, pen=None):
+        self.curve = _FakePlotCurve(pen=pen)
+        return self.curve
+
+    def setBackground(self, background) -> None:
+        self.background = background
+
+
+class _FakeImagePlot:
+    def hideAxis(self, *_args) -> None:
+        return None
+
+    def setAspectLocked(self, *_args) -> None:
+        return None
+
+    def addItem(self, _item) -> None:
+        return None
+
+    def autoRange(self) -> None:
+        return None
+
+
+class _FakeGraphicsLayoutWidget(_QT_WIDGET_BASE):
+    def __init__(self) -> None:
+        if QWidget is not None:
+            super().__init__()
+        self.background = None
+        self.plot = _FakeImagePlot()
+
+    def addPlot(self):
+        return self.plot
+
+    def setBackground(self, background) -> None:
+        self.background = background
+
+
+class _FakeImageItem:
+    def __init__(self) -> None:
+        self.image = None
+
+    def setImage(self, image, autoLevels=True) -> None:
+        self.image = image
+
+
+def _patch_viewer_pyqtgraph(monkeypatch) -> None:
+    monkeypatch.setattr(viewers_module.pg, "PlotWidget", _FakePlotWidget)
+    monkeypatch.setattr(
+        viewers_module.pg,
+        "GraphicsLayoutWidget",
+        _FakeGraphicsLayoutWidget,
+    )
+    monkeypatch.setattr(viewers_module.pg, "ImageItem", _FakeImageItem)
+    monkeypatch.setattr(
+        viewers_module.pg,
+        "mkPen",
+        lambda *args, **kwargs: {"args": args, "kwargs": kwargs},
+    )
 
 
 @pytest.fixture
@@ -336,6 +418,7 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
     qapp,
     monkeypatch,
 ):
+    _patch_viewer_pyqtgraph(monkeypatch)
     fake_stream = _FakeStream()
     monkeypatch.setattr(
         viewers_module.pyshmem, "open", lambda *args, **kwargs: fake_stream
@@ -354,6 +437,7 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
 
 
 def test_gpu_viewer_can_open_without_cpu_mirror(qapp, monkeypatch):
+    _patch_viewer_pyqtgraph(monkeypatch)
     fake_stream = _FakeStream()
     open_calls: list[tuple[str, dict[str, object]]] = []
 

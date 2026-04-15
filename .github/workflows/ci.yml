@@ -119,3 +119,7 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+      - name: Re-run tests with full trace on Windows failure
+        if: failure() && runner.os == 'Windows'
+        run: pytest -q --full-trace -o faulthandler_timeout=60
