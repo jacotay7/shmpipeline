@@ -116,7 +116,7 @@ def discover_local_servers() -> list[LocalControlServerRecord]:
 
 def terminate_local_server(record: LocalControlServerRecord) -> None:
     """Terminate one locally registered control-server process."""
-    os.kill(record.pid, signal.SIGTERM)
+    _kill_pid(record.pid, signal.SIGTERM)
 
 
 def _pid_exists(pid: int) -> bool:
@@ -131,3 +131,7 @@ def _pid_exists(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _kill_pid(pid: int, sig: int) -> None:
+    os.kill(pid, sig)

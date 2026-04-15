@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import signal
 import textwrap
 from queue import Empty
 
@@ -258,7 +259,7 @@ def test_local_control_server_discovery_round_trip(monkeypatch, tmp_path):
 def test_terminate_local_server_uses_sigterm(monkeypatch):
     calls: list[tuple[int, int]] = []
     monkeypatch.setattr(
-        "shmpipeline.control.discovery.os.kill",
+        "shmpipeline.control.discovery._kill_pid",
         lambda pid, sig: calls.append((pid, sig)),
     )
     record = LocalControlServerRecord(
@@ -270,4 +271,4 @@ def test_terminate_local_server_uses_sigterm(monkeypatch):
 
     terminate_local_server(record)
 
-    assert calls == [(record.pid, 15)]
+    assert calls == [(record.pid, signal.SIGTERM)]
