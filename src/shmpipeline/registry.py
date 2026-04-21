@@ -346,7 +346,9 @@ class KernelRegistry:
         """Instantiate a sink after validation."""
         sink_cls = self.get_sink(config.kind)
         sink_cls.validate_config(config, shared_memory)
-        return sink_cls(SinkContext(config=config, shared_memory=shared_memory))
+        return sink_cls(
+            SinkContext(config=config, shared_memory=shared_memory)
+        )
 
 
 def _kernel_kind(kernel_cls: type[Kernel]) -> str:

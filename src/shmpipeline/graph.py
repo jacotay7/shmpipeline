@@ -330,9 +330,7 @@ class PipelineGraph:
                     if auxiliary
                     else "none"
                 )
-                upstream = self.upstream_kernels(kernel.name) or (
-                    "external",
-                )
+                upstream = self.upstream_kernels(kernel.name) or ("external",)
                 downstream = self.downstream_kernels(kernel.name) or (
                     "terminal",
                 )
@@ -350,9 +348,7 @@ class PipelineGraph:
         lines.append("Sinks:")
         if self.config.sinks:
             for sink in self.config.sinks:
-                upstream = self._kernel_producers[sink.stream] or [
-                    "external"
-                ]
+                upstream = self._kernel_producers[sink.stream] or ["external"]
                 lines.append(
                     "- "
                     f"{sink.name} ({sink.kind}) "

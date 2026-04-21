@@ -26,9 +26,9 @@ def test_discover_entry_point_loaders_registers_source_plugins(monkeypatch):
     monkeypatch.setattr(
         registry_module,
         "_entry_points_for_group",
-        lambda group: (_FakeEntryPoint(),)
-        if group == "shmpipeline.sources"
-        else (),
+        lambda group: (
+            (_FakeEntryPoint(),) if group == "shmpipeline.sources" else ()
+        ),
     )
 
     loaders = registry_module._discover_entry_point_loaders(

@@ -883,7 +883,9 @@ def test_main_window_shows_synthetic_inputs_in_source_editor_table(qapp):
         window._refresh_runtime_status()
 
         assert window._source_table.rowCount() == 1
-        assert window._source_table.item(0, 0).text() == "synthetic:input_frame"
+        assert (
+            window._source_table.item(0, 0).text() == "synthetic:input_frame"
+        )
         assert window._source_table.item(0, 1).text() == "synthetic.sine"
         assert window._source_table.item(0, 2).text() == "input_frame"
         assert window._source_table.item(0, 3).text() == "15.50 Hz"

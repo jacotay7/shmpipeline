@@ -29,9 +29,13 @@ class SimulatedCameraSource(Source):
         sigma = float(config.parameters.get("sigma", 5.0))
         period = float(config.parameters.get("period", 24.0))
         if sigma <= 0.0:
-            raise ConfigValidationError("simulated camera sigma must be positive")
+            raise ConfigValidationError(
+                "simulated camera sigma must be positive"
+            )
         if period <= 0.0:
-            raise ConfigValidationError("simulated camera period must be positive")
+            raise ConfigValidationError(
+                "simulated camera period must be positive"
+            )
 
     def open(self) -> None:
         shape = self.context.stream_spec.shape
@@ -95,7 +99,9 @@ class NpyFrameSink(Sink):
     def consume(self, value: Any) -> None:
         if self._saved_frames >= self._max_saved_frames:
             return
-        path = self._output_dir / f"{self._prefix}_{self._saved_frames:04d}.npy"
+        path = (
+            self._output_dir / f"{self._prefix}_{self._saved_frames:04d}.npy"
+        )
         np.save(path, np.asarray(value).copy())
         self._saved_frames += 1
 

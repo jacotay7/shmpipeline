@@ -584,9 +584,7 @@ class MainWindow(QMainWindow):
         )
         self._sink_table.setSelectionBehavior(QTableWidget.SelectRows)
         self._sink_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self._sink_table.itemDoubleClicked.connect(
-            lambda *_: self.edit_sink()
-        )
+        self._sink_table.itemDoubleClicked.connect(lambda *_: self.edit_sink())
 
         self._worker_table = QTableWidget(0, 11)
         self._worker_table.setHorizontalHeaderLabels(
@@ -622,9 +620,7 @@ class MainWindow(QMainWindow):
         self._source_runtime_table.setSelectionBehavior(
             QTableWidget.SelectRows
         )
-        self._source_runtime_table.setEditTriggers(
-            QTableWidget.NoEditTriggers
-        )
+        self._source_runtime_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
         self._sink_runtime_table = QTableWidget(0, 7)
         self._sink_runtime_table.setHorizontalHeaderLabels(
@@ -1048,9 +1044,7 @@ class MainWindow(QMainWindow):
                 str(spec.get("pause_sleep", "")),
             ]
             for column, value in enumerate(values):
-                self._sink_table.setItem(
-                    row, column, QTableWidgetItem(value)
-                )
+                self._sink_table.setItem(row, column, QTableWidgetItem(value))
         self._sink_table.resizeColumnsToContents()
 
     def _refresh_graph_preview(self) -> None:
@@ -1166,9 +1160,7 @@ class MainWindow(QMainWindow):
         self._sink_runtime_table.setRowCount(len(sinks))
         for row, sink in enumerate(sinks):
             sink_status = (
-                (status or {})
-                .get("sinks", {})
-                .get(sink.get("name", ""), {})
+                (status or {}).get("sinks", {}).get(sink.get("name", ""), {})
             )
             values = [
                 sink.get("name", ""),
@@ -2011,9 +2003,7 @@ class MainWindow(QMainWindow):
         if entry is None:
             return
         if entry.get("entry_type") == "synthetic":
-            self._stop_synthetic_input_for_stream(
-                str(entry.get("stream", ""))
-            )
+            self._stop_synthetic_input_for_stream(str(entry.get("stream", "")))
             return
         row = entry.get("document_index")
         if not isinstance(row, int):
@@ -2179,9 +2169,7 @@ class MainWindow(QMainWindow):
         self._log_info("Pipeline shut down.")
         self._refresh_all()
 
-    def _configure_synthetic_input_for_stream(
-        self, stream_name: str
-    ) -> None:
+    def _configure_synthetic_input_for_stream(self, stream_name: str) -> None:
         state = self._pipeline_state()
         if self._manager is None or state not in {
             PipelineState.BUILT,

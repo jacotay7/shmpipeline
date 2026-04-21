@@ -520,11 +520,7 @@ class PipelineConfig:
         node_names = [*kernel_names, *source_names, *sink_names]
         if len(node_names) != len(set(node_names)):
             duplicates = sorted(
-                {
-                    name
-                    for name in node_names
-                    if node_names.count(name) > 1
-                }
+                {name for name in node_names if node_names.count(name) > 1}
             )
             raise ConfigValidationError(
                 "pipeline node names must be unique across kernels, "

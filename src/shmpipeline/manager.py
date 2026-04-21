@@ -73,7 +73,9 @@ def _read_sink_payload(stream: Any, *, timeout: float) -> tuple[float, Any]:
 class _SourceController:
     """Manager-owned thread controller for one configured source plugin."""
 
-    def __init__(self, *, stream: Any, source: Any, spec: Any, pause_event: Any):
+    def __init__(
+        self, *, stream: Any, source: Any, spec: Any, pause_event: Any
+    ):
         self.stream = stream
         self.source = source
         self.spec = spec
@@ -315,7 +317,9 @@ class _SinkController:
                     self._last_read_time = time.time()
                     self._last_read_duration_s = finished - started
         except BaseException as exc:
-            self._logger.exception("sink runtime failed: sink=%s", self.spec.name)
+            self._logger.exception(
+                "sink runtime failed: sink=%s", self.spec.name
+            )
             with self._lock:
                 self._last_error = str(exc)
                 self._traceback = traceback.format_exc()
