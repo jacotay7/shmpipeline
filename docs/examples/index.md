@@ -12,6 +12,7 @@ gpu-custom-operations
 basic-ao-system
 gpu-basic-ao-system
 observatory-ao-system
+source-sink-plugins
 ```
 
 ## How to use the examples

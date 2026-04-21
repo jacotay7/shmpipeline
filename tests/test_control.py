@@ -17,6 +17,9 @@ from shmpipeline.control.discovery import (
     terminate_local_server,
 )
 from shmpipeline.control.service import ManagerService
+from shmpipeline.registry import get_default_registry
+from shmpipeline.sink import Sink
+from shmpipeline.source import Source
 from shmpipeline.synthetic import SyntheticInputConfig
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
@@ -175,6 +178,76 @@ def test_remote_manager_client_can_load_document_path(tmp_path):
 
         assert payload["config_path"] == str(replacement_path.resolve())
         assert payload["document"]["kernels"][0]["name"] == "copy_stage"
+
+
+def test_manager_service_uses_custom_registry_for_info_and_validation():
+    class _ProbeSource(Source):
+        kind = "test.control_source"
+        storage = "cpu"
+
+        def read(self):
+            return None
+
+    class _ProbeSink(Sink):
+        kind = "test.control_sink"
+        storage = "cpu"
+
+        def consume(self, value):
+            del value
+
+    document = {
+        "shared_memory": [
+            {
+                "name": "input_frame",
+                "shape": [4],
+                "dtype": "float32",
+                "storage": "cpu",
+            },
+            {
+                "name": "output_frame",
+                "shape": [4],
+                "dtype": "float32",
+                "storage": "cpu",
+            },
+        ],
+        "sources": [
+            {
+                "name": "camera",
+                "kind": "test.control_source",
+                "stream": "input_frame",
+            }
+        ],
+        "kernels": [
+            {
+                "name": "copy_stage",
+                "kind": "cpu.copy",
+                "input": "input_frame",
+                "output": "output_frame",
+            }
+        ],
+        "sinks": [
+            {
+                "name": "display",
+                "kind": "test.control_sink",
+                "stream": "output_frame",
+            }
+        ],
+    }
+    registry = get_default_registry().extended(
+        sources=(_ProbeSource,),
+        sinks=(_ProbeSink,),
+    )
+    service = ManagerService(document, registry=registry, poll_interval=0.01)
+
+    try:
+        info = service.info()
+        validation = service.validate_document(document)
+    finally:
+        service.close()
+
+    assert "test.control_source" in info["source_kinds"]
+    assert "test.control_sink" in info["sink_kinds"]
+    assert validation["valid"] is True
 
 
 def test_manager_service_publishes_snapshot_events(tmp_path):

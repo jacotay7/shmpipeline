@@ -18,7 +18,7 @@ from shmpipeline.document import (
 from shmpipeline.errors import ConfigValidationError, StateTransitionError
 from shmpipeline.graph import PipelineGraph, validate_pipeline_config
 from shmpipeline.manager import PipelineManager
-from shmpipeline.registry import KernelRegistry
+from shmpipeline.registry import KernelRegistry, get_default_registry
 from shmpipeline.scheduling import WorkerPlacementPolicy
 from shmpipeline.state import PipelineState
 from shmpipeline.synthetic import available_synthetic_patterns
@@ -95,6 +95,7 @@ class ManagerService:
     def info(self) -> dict[str, Any]:
         """Return static service metadata and supported control features."""
         with self._lock:
+            registry = self._registry or get_default_registry()
             return {
                 "config_path": self._config_path,
                 "state": self._manager.state.value,
@@ -106,6 +107,9 @@ class ManagerService:
                     "stop",
                     "shutdown",
                 ],
+                "kernel_kinds": list(registry.kinds()),
+                "source_kinds": list(registry.source_kinds()),
+                "sink_kinds": list(registry.sink_kinds()),
                 "synthetic_patterns": list(available_synthetic_patterns()),
                 "document_revision": self._document_revision,
             }
@@ -429,7 +433,10 @@ class ManagerService:
                 "errors": [str(exc)],
             }
 
-        errors = validate_pipeline_config(config)
+        errors = validate_pipeline_config(
+            config,
+            registry=self._registry or get_default_registry(),
+        )
         payload: dict[str, Any] = {
             "valid": not errors,
             "errors": errors,

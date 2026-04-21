@@ -17,17 +17,19 @@ The current release provides:
 - YAML-driven pipeline configuration
 - a pipeline manager with a simple state machine
 - spawned worker processes for each configured kernel
+- manager-owned source and sink plugins for hardware or external I/O edges
 - best-effort worker distribution across CPU slots where the OS allows it
 - built-in CPU kernels
 - GPU kernel parity for the built-in kernel family
 - built-in elementwise arithmetic kernels
 - fused custom arithmetic expressions with `cpu.custom_operation`
+- packaged plugin discovery for third-party kernels, sources, and sinks
 - per-kernel modules grouped under CPU and GPU kernel folders
 - process supervision and worker error propagation
 - pipeline graph introspection and runtime snapshots
 - a CLI for `validate`, `describe`, and `run` workflows
 - an optional HTTP control plane with SSE event streaming and a Python client
-- a remote-backed configuration GUI and a lightweight remote control GUI
+- a remote-backed configuration GUI with source/sink editors and a lightweight remote control GUI
 - backend synthetic inputs for test and demo pipelines
 - unit and integration tests for the supported behavior
 
@@ -173,6 +175,101 @@ kernels:
 		parameters:
 			factor: 2.0
 ```
+
+## Source And Sink Plugins
+
+Sources and sinks let you bring the ends of the pipeline into `shmpipeline`
+instead of assuming another process owns shared-memory I/O.
+
+- sources write into one configured stream
+- sinks consume from one configured stream
+- both are discovered through the same registry surface used for kernels
+- the desktop GUI exposes first-class `Sources` and `Sinks` editors
+
+Example config:
+
+```yaml
+shared_memory:
+	- name: camera_frame
+		shape: [4]
+		dtype: float32
+		storage: cpu
+
+	- name: corrected_frame
+		shape: [4]
+		dtype: float32
+		storage: cpu
+
+sources:
+	- name: camera
+		kind: example.camera
+		stream: camera_frame
+		parameters:
+			device: sim-0
+
+kernels:
+	- name: scale_stage
+		kind: cpu.scale
+		input: camera_frame
+		output: corrected_frame
+		parameters:
+			factor: 2.0
+
+sinks:
+	- name: display
+		kind: example.display
+		stream: corrected_frame
+```
+
+Example plugin package:
+
+```python
+import numpy as np
+
+from shmpipeline import Sink, Source
+
+
+class DemoCamera(Source):
+	kind = "example.camera"
+	storage = "cpu"
+
+	def read(self):
+		return np.arange(4, dtype=np.float32)
+
+
+class DemoDisplay(Sink):
+	kind = "example.display"
+	storage = "cpu"
+
+	def consume(self, value):
+		print(np.asarray(value))
+```
+
+Expose packaged plugins through entry points:
+
+```toml
+[project.entry-points."shmpipeline.sources"]
+"example.camera" = "example_plugins:DemoCamera"
+
+[project.entry-points."shmpipeline.sinks"]
+"example.display" = "example_plugins:DemoDisplay"
+```
+
+You can still register plugins programmatically:
+
+```python
+from shmpipeline import PipelineManager, get_default_registry
+
+registry = get_default_registry().extended(
+	sources=(DemoCamera,),
+	sinks=(DemoDisplay,),
+)
+manager = PipelineManager("pipeline.yaml", registry=registry)
+```
+
+Source and sink plugins run as manager-owned threads, so plugin code should be
+cooperatively stoppable and avoid blocking forever without checking
+`stop_requested()`.
 
 ## Quick Start
 
@@ -364,6 +461,12 @@ Launch it with:
 
 ```bash
 shmpipeline-gui
+```
+
+To open an existing pipeline immediately:
+
+```bash
+shmpipeline-gui path/to/pipeline.yaml
 ```
 
 Launch the lightweight control surface with:

@@ -26,14 +26,24 @@ GUI_IMPORT_ERROR: Exception | None = None
 try:
     from shmpipeline.gui import themes as themes_module
     from shmpipeline.gui import viewers as viewers_module
-    from shmpipeline.gui.app import MainWindow, SyntheticInputDialog
+    from shmpipeline.gui.app import (
+        MainWindow,
+        SyntheticInputDialog,
+    )
+    from shmpipeline.gui.app import (
+        main as gui_main,
+    )
     from shmpipeline.gui.control import ControlWindow
+    from shmpipeline.gui.model import default_document, save_document
 except Exception as exc:  # pragma: no cover - GUI stack unavailable
     viewers_module = None
     themes_module = None
     MainWindow = None
     SyntheticInputDialog = None
     ControlWindow = None
+    gui_main = None
+    default_document = None
+    save_document = None
     GUI_IMPORT_ERROR = exc
 
 pytestmark = pytest.mark.unit
@@ -184,6 +194,46 @@ def test_main_window_can_switch_themes(qapp):
         window.close()
 
 
+def test_gui_main_loads_initial_document_argument(qapp, monkeypatch, tmp_path):
+    path = tmp_path / "pipeline.yaml"
+    document = default_document()
+    document["shared_memory"] = [
+        {
+            "name": "camera_frame",
+            "shape": [4, 4],
+            "dtype": "float32",
+            "storage": "cpu",
+        }
+    ]
+    document["sources"] = [
+        {
+            "name": "simulated_camera",
+            "kind": "example.simulated_camera",
+            "stream": "camera_frame",
+        }
+    ]
+    save_document(path, document)
+
+    windows = []
+
+    def _show(window) -> None:
+        windows.append(window)
+
+    monkeypatch.setattr(MainWindow, "show", _show)
+    monkeypatch.setattr(QApplication, "exec", lambda self: 0)
+
+    assert gui_main([str(path)]) == 0
+    assert len(windows) == 1
+
+    window = windows[0]
+    try:
+        assert window._current_path == path
+        assert window._source_table.rowCount() == 1
+        assert window.windowTitle().endswith(str(path))
+    finally:
+        window.close()
+
+
 def test_main_window_stacks_kernels_under_shared_memory(qapp):
     window = MainWindow(theme_name="light")
     try:
@@ -203,6 +253,18 @@ def test_main_window_uses_rolling_metric_columns(qapp):
         assert "Avg us" in labels
         assert "Jitter us RMS" in labels
         assert "Hz" in labels
+    finally:
+        window.close()
+
+
+def test_main_window_exposes_runtime_tabs_for_all_component_types(qapp):
+    window = MainWindow(theme_name="light")
+    try:
+        labels = [
+            window._runtime_tabs.tabText(index)
+            for index in range(window._runtime_tabs.count())
+        ]
+        assert labels == ["Workers", "Sources", "Sinks", "Synthetic"]
     finally:
         window.close()
 
@@ -489,5 +551,171 @@ def test_main_window_runtime_status_text_includes_worker_health(qapp):
         assert "stage health=active" in text
         assert "idle_s=0.12" in text
         assert "metric_age_s=0.05" in text
+    finally:
+        window.close()
+
+
+def test_main_window_prefers_remote_plugin_kinds(qapp):
+    window = MainWindow(theme_name="light")
+    try:
+        window._server_info = {
+            "source_kinds": ["remote.source"],
+            "sink_kinds": ["remote.sink"],
+            "kernel_kinds": ["remote.kernel"],
+        }
+
+        assert window._available_kinds(
+            remote_key="source_kinds",
+            fallback=lambda: ("local.source",),
+        ) == ["remote.source"]
+        assert window._available_kinds(
+            remote_key="sink_kinds",
+            fallback=lambda: ("local.sink",),
+        ) == ["remote.sink"]
+        assert window._available_kinds(
+            remote_key="kernel_kinds",
+            fallback=lambda: ("local.kernel",),
+        ) == ["remote.kernel"]
+    finally:
+        window.close()
+
+
+def test_main_window_refreshes_source_and_sink_tables(qapp):
+    window = MainWindow(theme_name="light")
+    try:
+        window._document = {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "output_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "example.camera",
+                    "stream": "input_frame",
+                    "poll_interval": 0.01,
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "copy_stage",
+                    "kind": "cpu.copy",
+                    "input": "input_frame",
+                    "output": "output_frame",
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "example.display",
+                    "stream": "output_frame",
+                    "read_timeout": 0.1,
+                    "pause_sleep": 0.01,
+                }
+            ],
+        }
+
+        window._refresh_all()
+
+        assert window._source_table.rowCount() == 1
+        assert window._sink_table.rowCount() == 1
+        assert window._source_runtime_table.rowCount() == 1
+        assert window._sink_runtime_table.rowCount() == 1
+    finally:
+        window.close()
+
+
+def test_main_window_populates_source_and_sink_runtime_tables(qapp):
+    window = MainWindow(theme_name="light")
+
+    class _FakeSession:
+        connection = type(
+            "Conn",
+            (),
+            {
+                "display_name": "127.0.0.1:9000",
+                "base_url": "",
+                "is_local": True,
+            },
+        )()
+
+        def status(self):
+            return {
+                "state": "running",
+                "placement_policy": "round-robin",
+                "summary": {
+                    "active_workers": 0,
+                    "idle_workers": 0,
+                    "waiting_workers": 0,
+                    "paused_workers": 0,
+                    "failed_workers": 0,
+                    "active_sources": 1,
+                    "failed_sources": 0,
+                    "active_sinks": 1,
+                    "failed_sinks": 0,
+                },
+                "workers": {},
+                "sources": {
+                    "camera": {
+                        "alive": True,
+                        "stream": "input_frame",
+                        "frames_written": 12,
+                        "effective_rate_hz": 48.5,
+                        "last_error": None,
+                    }
+                },
+                "sinks": {
+                    "display": {
+                        "alive": True,
+                        "stream": "output_frame",
+                        "frames_consumed": 11,
+                        "effective_rate_hz": 47.2,
+                        "last_error": None,
+                    }
+                },
+                "failures": [],
+                "synthetic_sources": {},
+            }
+
+        def close(self):
+            return None
+
+    try:
+        window._document = {
+            "shared_memory": [],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "example.camera",
+                    "stream": "input_frame",
+                }
+            ],
+            "kernels": [],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "example.display",
+                    "stream": "output_frame",
+                }
+            ],
+        }
+        window._manager = _FakeSession()
+
+        window._refresh_runtime_status()
+
+        assert window._source_runtime_table.item(0, 3).text() == "True"
+        assert window._source_runtime_table.item(0, 4).text() == "12"
+        assert window._sink_runtime_table.item(0, 3).text() == "True"
+        assert window._sink_runtime_table.item(0, 4).text() == "11"
     finally:
         window.close()

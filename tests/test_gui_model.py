@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from shmpipeline import PipelineConfig
 from shmpipeline.gui.model import (
+    available_sink_kinds,
+    available_source_kinds,
     default_document,
     document_to_yaml,
     load_document,
@@ -66,6 +68,23 @@ def test_validate_document_accepts_valid_config():
     )
 
     assert errors == []
+
+
+def test_available_source_and_sink_kinds_use_registry(monkeypatch):
+    class _FakeRegistry:
+        def source_kinds(self):
+            return ("demo.source",)
+
+        def sink_kinds(self):
+            return ("demo.sink",)
+
+    monkeypatch.setattr(
+        "shmpipeline.gui.model.get_default_registry",
+        lambda: _FakeRegistry(),
+    )
+
+    assert available_source_kinds() == ("demo.source",)
+    assert available_sink_kinds() == ("demo.sink",)
 
 
 def test_normalize_server_url_adds_scheme_and_strips_slash():

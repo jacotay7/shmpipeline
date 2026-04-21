@@ -66,6 +66,22 @@ def _normalize_names(value: Any, *, context: str) -> tuple[str, ...]:
     return tuple(_normalize_name(item, context=context) for item in value)
 
 
+def _normalize_parameters(value: Any, *, context: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ConfigValidationError(f"{context} must be a mapping")
+    return dict(value)
+
+
+def _normalize_positive_float(value: Any, *, context: str) -> float:
+    try:
+        normalized = float(value)
+    except Exception as exc:
+        raise ConfigValidationError(f"{context} must be a number") from exc
+    if normalized <= 0.0:
+        raise ConfigValidationError(f"{context} must be positive")
+    return normalized
+
+
 @dataclass(frozen=True)
 class SharedMemoryConfig:
     """Configuration for one named shared-memory resource.
@@ -231,21 +247,18 @@ class KernelConfig:
             operation = _normalize_name(
                 operation, context=f"operation for {name}"
             )
-        parameters = data.get("parameters", {})
-        if not isinstance(parameters, dict):
-            raise ConfigValidationError(
-                f"parameters for kernel {name!r} must be a mapping"
-            )
-        read_timeout = float(data.get("read_timeout", 1.0))
-        pause_sleep = float(data.get("pause_sleep", 0.01))
-        if read_timeout <= 0.0:
-            raise ConfigValidationError(
-                f"read_timeout for kernel {name!r} must be positive"
-            )
-        if pause_sleep <= 0.0:
-            raise ConfigValidationError(
-                f"pause_sleep for kernel {name!r} must be positive"
-            )
+        parameters = _normalize_parameters(
+            data.get("parameters", {}),
+            context=f"parameters for kernel {name!r}",
+        )
+        read_timeout = _normalize_positive_float(
+            data.get("read_timeout", 1.0),
+            context=f"read_timeout for kernel {name!r}",
+        )
+        pause_sleep = _normalize_positive_float(
+            data.get("pause_sleep", 0.01),
+            context=f"pause_sleep for kernel {name!r}",
+        )
         return cls(
             name=name,
             kind=kind,
@@ -306,6 +319,119 @@ class KernelConfig:
 
 
 @dataclass(frozen=True)
+class SourceConfig:
+    """Configuration for one manager-owned source plugin.
+
+    Sources write payloads into one shared-memory stream and are discovered
+    through the active :class:`shmpipeline.registry.KernelRegistry`.
+    """
+
+    name: str
+    kind: str
+    stream: str
+    parameters: dict[str, Any] = field(default_factory=dict)
+    poll_interval: float = 0.01
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any]) -> "SourceConfig":
+        """Build a normalized source configuration from a mapping."""
+        data = _expect_mapping(raw, context="source entry")
+        _reject_unexpected_keys(
+            data,
+            context="source entry",
+            allowed={
+                "name",
+                "kind",
+                "stream",
+                "parameters",
+                "poll_interval",
+            },
+        )
+        name = _normalize_name(data.get("name"), context="source name")
+        kind = _normalize_name(
+            data.get("kind"), context=f"kind for source {name}"
+        )
+        stream = _normalize_name(
+            data.get("stream"), context=f"stream for source {name}"
+        )
+        parameters = _normalize_parameters(
+            data.get("parameters", {}),
+            context=f"parameters for source {name!r}",
+        )
+        poll_interval = _normalize_positive_float(
+            data.get("poll_interval", 0.01),
+            context=f"poll_interval for source {name!r}",
+        )
+        return cls(
+            name=name,
+            kind=kind,
+            stream=stream,
+            parameters=parameters,
+            poll_interval=poll_interval,
+        )
+
+
+@dataclass(frozen=True)
+class SinkConfig:
+    """Configuration for one manager-owned sink plugin.
+
+    Sinks consume payloads from one shared-memory stream and are discovered
+    through the active :class:`shmpipeline.registry.KernelRegistry`.
+    """
+
+    name: str
+    kind: str
+    stream: str
+    parameters: dict[str, Any] = field(default_factory=dict)
+    read_timeout: float = 1.0
+    pause_sleep: float = 0.01
+
+    @classmethod
+    def from_dict(cls, raw: Mapping[str, Any]) -> "SinkConfig":
+        """Build a normalized sink configuration from a mapping."""
+        data = _expect_mapping(raw, context="sink entry")
+        _reject_unexpected_keys(
+            data,
+            context="sink entry",
+            allowed={
+                "name",
+                "kind",
+                "stream",
+                "parameters",
+                "read_timeout",
+                "pause_sleep",
+            },
+        )
+        name = _normalize_name(data.get("name"), context="sink name")
+        kind = _normalize_name(
+            data.get("kind"), context=f"kind for sink {name}"
+        )
+        stream = _normalize_name(
+            data.get("stream"), context=f"stream for sink {name}"
+        )
+        parameters = _normalize_parameters(
+            data.get("parameters", {}),
+            context=f"parameters for sink {name!r}",
+        )
+        read_timeout = _normalize_positive_float(
+            data.get("read_timeout", 1.0),
+            context=f"read_timeout for sink {name!r}",
+        )
+        pause_sleep = _normalize_positive_float(
+            data.get("pause_sleep", 0.01),
+            context=f"pause_sleep for sink {name!r}",
+        )
+        return cls(
+            name=name,
+            kind=kind,
+            stream=stream,
+            parameters=parameters,
+            read_timeout=read_timeout,
+            pause_sleep=pause_sleep,
+        )
+
+
+@dataclass(frozen=True)
 class PipelineConfig:
     """Complete pipeline configuration loaded from YAML or a mapping.
 
@@ -316,6 +442,8 @@ class PipelineConfig:
 
     shared_memory: tuple[SharedMemoryConfig, ...]
     kernels: tuple[KernelConfig, ...]
+    sources: tuple[SourceConfig, ...] = field(default_factory=tuple)
+    sinks: tuple[SinkConfig, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "PipelineConfig":
@@ -324,17 +452,31 @@ class PipelineConfig:
         _reject_unexpected_keys(
             data,
             context="pipeline config",
-            allowed={"shared_memory", "kernels"},
+            allowed={"shared_memory", "kernels", "sources", "sinks"},
         )
         shared_memory_raw = data.get("shared_memory")
-        kernels_raw = data.get("kernels")
+        kernels_raw = data.get("kernels", [])
+        sources_raw = data.get("sources", [])
+        sinks_raw = data.get("sinks", [])
         if not isinstance(shared_memory_raw, list) or not shared_memory_raw:
             raise ConfigValidationError(
                 "pipeline config must define a non-empty shared_memory list"
             )
-        if not isinstance(kernels_raw, list) or not kernels_raw:
+        if not isinstance(kernels_raw, list):
             raise ConfigValidationError(
-                "pipeline config must define a non-empty kernels list"
+                "pipeline config field 'kernels' must be a list"
+            )
+        if not isinstance(sources_raw, list):
+            raise ConfigValidationError(
+                "pipeline config field 'sources' must be a list"
+            )
+        if not isinstance(sinks_raw, list):
+            raise ConfigValidationError(
+                "pipeline config field 'sinks' must be a list"
+            )
+        if not kernels_raw and not sources_raw and not sinks_raw:
+            raise ConfigValidationError(
+                "pipeline config must define at least one kernel, source, or sink"
             )
         return cls(
             shared_memory=tuple(
@@ -344,6 +486,10 @@ class PipelineConfig:
             kernels=tuple(
                 KernelConfig.from_dict(item) for item in kernels_raw
             ),
+            sources=tuple(
+                SourceConfig.from_dict(item) for item in sources_raw
+            ),
+            sinks=tuple(SinkConfig.from_dict(item) for item in sinks_raw),
         )
 
     @classmethod
@@ -363,6 +509,29 @@ class PipelineConfig:
         if len(kernel_names) != len(set(kernel_names)):
             raise ConfigValidationError("kernel names must be unique")
 
+        source_names = [item.name for item in self.sources]
+        if len(source_names) != len(set(source_names)):
+            raise ConfigValidationError("source names must be unique")
+
+        sink_names = [item.name for item in self.sinks]
+        if len(sink_names) != len(set(sink_names)):
+            raise ConfigValidationError("sink names must be unique")
+
+        node_names = [*kernel_names, *source_names, *sink_names]
+        if len(node_names) != len(set(node_names)):
+            duplicates = sorted(
+                {
+                    name
+                    for name in node_names
+                    if node_names.count(name) > 1
+                }
+            )
+            raise ConfigValidationError(
+                "pipeline node names must be unique across kernels, "
+                "sources, and sinks: "
+                + ", ".join(repr(name) for name in duplicates)
+            )
+
         available = set(shared_names)
         for kernel in self.kernels:
             missing = [
@@ -375,6 +544,18 @@ class PipelineConfig:
                 raise ConfigValidationError(
                     f"kernel {kernel.name!r} references undefined shared "
                     f"memory: {missing_list}"
+                )
+        for source in self.sources:
+            if source.stream not in available:
+                raise ConfigValidationError(
+                    f"source {source.name!r} references undefined shared "
+                    f"memory: {source.stream}"
+                )
+        for sink in self.sinks:
+            if sink.stream not in available:
+                raise ConfigValidationError(
+                    f"sink {sink.name!r} references undefined shared "
+                    f"memory: {sink.stream}"
                 )
 
     @property
