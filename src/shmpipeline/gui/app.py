@@ -51,6 +51,8 @@ from shmpipeline.errors import ConfigValidationError
 from shmpipeline.graph import PipelineGraph
 from shmpipeline.gui.model import (
     available_kernel_kinds,
+    available_sink_kinds,
+    available_source_kinds,
     default_document,
     document_to_yaml,
     load_document,
@@ -164,6 +166,7 @@ class KernelDialog(QDialog):
     def __init__(
         self,
         shared_names: list[str],
+        available_kinds: list[str],
         parent: QWidget | None = None,
         initial: dict[str, Any] | None = None,
     ) -> None:
@@ -174,7 +177,7 @@ class KernelDialog(QDialog):
         self.name_edit = QLineEdit(initial.get("name", ""))
         self.kind_combo = QComboBox()
         self.kind_combo.setEditable(True)
-        self.kind_combo.addItems(list(available_kernel_kinds()))
+        self.kind_combo.addItems(available_kinds)
         self.kind_combo.setCurrentText(initial.get("kind", "cpu.copy"))
         self.input_combo = QComboBox()
         self.input_combo.setEditable(True)
@@ -253,6 +256,153 @@ class KernelDialog(QDialog):
         if operation:
             record["operation"] = operation
         return record
+
+
+class SourceDialog(QDialog):
+    """Edit one source definition."""
+
+    def __init__(
+        self,
+        shared_names: list[str],
+        available_kinds: list[str],
+        parent: QWidget | None = None,
+        initial: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Source")
+        initial = dict(initial or {})
+
+        self.name_edit = QLineEdit(initial.get("name", ""))
+        self.kind_combo = QComboBox()
+        self.kind_combo.setEditable(True)
+        self.kind_combo.addItems(available_kinds)
+        self.kind_combo.setCurrentText(
+            initial.get(
+                "kind",
+                available_kinds[0] if available_kinds else "",
+            )
+        )
+        self.stream_combo = QComboBox()
+        self.stream_combo.setEditable(True)
+        self.stream_combo.addItems(shared_names)
+        self.stream_combo.setCurrentText(
+            initial.get("stream", shared_names[0] if shared_names else "")
+        )
+        self.parameters_edit = QPlainTextEdit()
+        self.parameters_edit.setPlainText(
+            document_to_yaml(initial.get("parameters", {})).strip()
+            if initial.get("parameters")
+            else "{}"
+        )
+        self.poll_interval_edit = QLineEdit(
+            str(initial.get("poll_interval", 0.01))
+        )
+
+        form = QFormLayout()
+        form.addRow("Name", self.name_edit)
+        form.addRow("Kind", self.kind_combo)
+        form.addRow("Stream", self.stream_combo)
+        form.addRow("Parameters YAML", self.parameters_edit)
+        form.addRow("Poll interval", self.poll_interval_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def value(self) -> dict[str, Any]:
+        """Return the edited source document row."""
+        parameters = parse_inline_yaml(
+            self.parameters_edit.toPlainText(), fallback={}
+        )
+        return {
+            "name": self.name_edit.text().strip(),
+            "kind": self.kind_combo.currentText().strip(),
+            "stream": self.stream_combo.currentText().strip(),
+            "parameters": parameters,
+            "poll_interval": float(self.poll_interval_edit.text().strip()),
+        }
+
+
+class SinkDialog(QDialog):
+    """Edit one sink definition."""
+
+    def __init__(
+        self,
+        shared_names: list[str],
+        available_kinds: list[str],
+        parent: QWidget | None = None,
+        initial: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Sink")
+        initial = dict(initial or {})
+
+        self.name_edit = QLineEdit(initial.get("name", ""))
+        self.kind_combo = QComboBox()
+        self.kind_combo.setEditable(True)
+        self.kind_combo.addItems(available_kinds)
+        self.kind_combo.setCurrentText(
+            initial.get(
+                "kind",
+                available_kinds[0] if available_kinds else "",
+            )
+        )
+        self.stream_combo = QComboBox()
+        self.stream_combo.setEditable(True)
+        self.stream_combo.addItems(shared_names)
+        self.stream_combo.setCurrentText(
+            initial.get("stream", shared_names[0] if shared_names else "")
+        )
+        self.parameters_edit = QPlainTextEdit()
+        self.parameters_edit.setPlainText(
+            document_to_yaml(initial.get("parameters", {})).strip()
+            if initial.get("parameters")
+            else "{}"
+        )
+        self.read_timeout_edit = QLineEdit(
+            str(initial.get("read_timeout", 1.0))
+        )
+        self.pause_sleep_edit = QLineEdit(
+            str(initial.get("pause_sleep", 0.01))
+        )
+
+        form = QFormLayout()
+        form.addRow("Name", self.name_edit)
+        form.addRow("Kind", self.kind_combo)
+        form.addRow("Stream", self.stream_combo)
+        form.addRow("Parameters YAML", self.parameters_edit)
+        form.addRow("Read timeout", self.read_timeout_edit)
+        form.addRow("Pause sleep", self.pause_sleep_edit)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.addLayout(form)
+        layout.addWidget(buttons)
+
+    def value(self) -> dict[str, Any]:
+        """Return the edited sink document row."""
+        parameters = parse_inline_yaml(
+            self.parameters_edit.toPlainText(), fallback={}
+        )
+        return {
+            "name": self.name_edit.text().strip(),
+            "kind": self.kind_combo.currentText().strip(),
+            "stream": self.stream_combo.currentText().strip(),
+            "parameters": parameters,
+            "read_timeout": float(self.read_timeout_edit.text().strip()),
+            "pause_sleep": float(self.pause_sleep_edit.text().strip()),
+        }
 
 
 class SyntheticInputDialog(QDialog):
@@ -383,6 +533,7 @@ class MainWindow(QMainWindow):
         self._document = default_document()
         self._current_path: Path | None = None
         self._manager = None
+        self._server_info: dict[str, Any] | None = None
         self._manager_dirty = True
         self._managed_server_process: subprocess.Popen[str] | None = None
         self._managed_server_url: str | None = None
@@ -417,6 +568,24 @@ class MainWindow(QMainWindow):
             lambda *_: self.edit_kernel()
         )
 
+        self._source_table = QTableWidget(0, 4)
+        self._source_table.setHorizontalHeaderLabels(
+            ["Name", "Kind", "Stream", "Poll / Rate"]
+        )
+        self._source_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._source_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._source_table.itemDoubleClicked.connect(
+            lambda *_: self.edit_source()
+        )
+
+        self._sink_table = QTableWidget(0, 5)
+        self._sink_table.setHorizontalHeaderLabels(
+            ["Name", "Kind", "Stream", "Read Timeout", "Pause Sleep"]
+        )
+        self._sink_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._sink_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._sink_table.itemDoubleClicked.connect(lambda *_: self.edit_sink())
+
         self._worker_table = QTableWidget(0, 11)
         self._worker_table.setHorizontalHeaderLabels(
             [
@@ -435,6 +604,38 @@ class MainWindow(QMainWindow):
         )
         self._worker_table.setSelectionBehavior(QTableWidget.SelectRows)
         self._worker_table.setEditTriggers(QTableWidget.NoEditTriggers)
+
+        self._source_runtime_table = QTableWidget(0, 7)
+        self._source_runtime_table.setHorizontalHeaderLabels(
+            [
+                "Source",
+                "Kind",
+                "Stream",
+                "Alive",
+                "Frames",
+                "Hz",
+                "Last Error",
+            ]
+        )
+        self._source_runtime_table.setSelectionBehavior(
+            QTableWidget.SelectRows
+        )
+        self._source_runtime_table.setEditTriggers(QTableWidget.NoEditTriggers)
+
+        self._sink_runtime_table = QTableWidget(0, 7)
+        self._sink_runtime_table.setHorizontalHeaderLabels(
+            [
+                "Sink",
+                "Kind",
+                "Stream",
+                "Alive",
+                "Frames",
+                "Hz",
+                "Last Error",
+            ]
+        )
+        self._sink_runtime_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self._sink_runtime_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
         self._synthetic_table = QTableWidget(0, 6)
         self._synthetic_table.setHorizontalHeaderLabels(
@@ -468,8 +669,8 @@ class MainWindow(QMainWindow):
         top_bar.addWidget(self._status_label, 1)
         top_bar.addWidget(self._validation_label, 1)
 
-        shared_box = QGroupBox("Shared Memory")
-        shared_layout = QVBoxLayout(shared_box)
+        shared_page = QWidget()
+        shared_layout = QVBoxLayout(shared_page)
         shared_layout.addWidget(self._shared_table)
         shared_button_row = QHBoxLayout()
         for label, handler in [
@@ -485,8 +686,8 @@ class MainWindow(QMainWindow):
             shared_button_row.addWidget(button)
         shared_layout.addLayout(shared_button_row)
 
-        kernel_box = QGroupBox("Kernels")
-        kernel_layout = QVBoxLayout(kernel_box)
+        kernel_page = QWidget()
+        kernel_layout = QVBoxLayout(kernel_page)
         kernel_layout.addWidget(self._kernel_table)
         kernel_button_row = QHBoxLayout()
         for label, handler in [
@@ -499,16 +700,58 @@ class MainWindow(QMainWindow):
             kernel_button_row.addWidget(button)
         kernel_layout.addLayout(kernel_button_row)
 
+        source_page = QWidget()
+        source_layout = QVBoxLayout(source_page)
+        source_layout.addWidget(self._source_table)
+        source_button_row = QHBoxLayout()
+        for label, handler in [
+            ("Add", self.add_source),
+            ("Edit", self.edit_source),
+            ("Remove", self.remove_source),
+        ]:
+            button = QPushButton(label)
+            button.clicked.connect(handler)
+            source_button_row.addWidget(button)
+        source_layout.addLayout(source_button_row)
+
+        sink_page = QWidget()
+        sink_layout = QVBoxLayout(sink_page)
+        sink_layout.addWidget(self._sink_table)
+        sink_button_row = QHBoxLayout()
+        for label, handler in [
+            ("Add", self.add_sink),
+            ("Edit", self.edit_sink),
+            ("Remove", self.remove_sink),
+        ]:
+            button = QPushButton(label)
+            button.clicked.connect(handler)
+            sink_button_row.addWidget(button)
+        sink_layout.addLayout(sink_button_row)
+
         runtime_box = QGroupBox("Runtime")
         runtime_layout = QVBoxLayout(runtime_box)
-        runtime_layout.addWidget(self._worker_table)
-        runtime_layout.addWidget(self._synthetic_table)
+        self._runtime_tabs = QTabWidget()
+        self._runtime_tabs.addTab(self._worker_table, "Workers")
+        self._runtime_tabs.addTab(self._source_runtime_table, "Sources")
+        self._runtime_tabs.addTab(self._sink_runtime_table, "Sinks")
+        self._runtime_tabs.addTab(self._synthetic_table, "Synthetic")
+        runtime_layout.addWidget(self._runtime_tabs)
         runtime_layout.addWidget(self._runtime_output)
         runtime_layout.addWidget(self._validation_output)
 
+        self._pipeline_editor_tabs = QTabWidget()
+        self._pipeline_editor_tabs.addTab(shared_page, "Shared Memory")
+        self._pipeline_editor_tabs.addTab(kernel_page, "Kernels")
+        self._pipeline_editor_tabs.setCurrentIndex(0)
+
+        self._endpoint_editor_tabs = QTabWidget()
+        self._endpoint_editor_tabs.addTab(source_page, "Sources")
+        self._endpoint_editor_tabs.addTab(sink_page, "Sinks")
+        self._endpoint_editor_tabs.setCurrentIndex(0)
+
         self._editor_splitter = QSplitter(Qt.Vertical)
-        self._editor_splitter.addWidget(shared_box)
-        self._editor_splitter.addWidget(kernel_box)
+        self._editor_splitter.addWidget(self._pipeline_editor_tabs)
+        self._editor_splitter.addWidget(self._endpoint_editor_tabs)
         self._editor_splitter.setStretchFactor(0, 5)
         self._editor_splitter.setStretchFactor(1, 3)
 
@@ -635,6 +878,7 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
         self._manager = None
+        self._server_info = None
         self._reported_failures.clear()
 
     def _selected_row(self, table: QTableWidget) -> int | None:
@@ -654,7 +898,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_all(self) -> None:
         self._refresh_shared_table()
+        self._refresh_source_table()
         self._refresh_kernel_table()
+        self._refresh_sink_table()
         self._refresh_graph_preview()
         self._refresh_runtime_status()
         self._yaml_preview.setPlainText(document_to_yaml(self._document))
@@ -704,6 +950,103 @@ class MainWindow(QMainWindow):
                 )
         self._kernel_table.resizeColumnsToContents()
 
+    def _source_editor_entries(
+        self,
+        synthetic_sources: dict[str, dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        for index, spec in enumerate(self._document.get("sources", [])):
+            entries.append(
+                {
+                    "entry_type": "configured",
+                    "document_index": index,
+                    "name": spec.get("name", ""),
+                    "kind": spec.get("kind", ""),
+                    "stream": spec.get("stream", ""),
+                    "detail": str(spec.get("poll_interval", "")),
+                    "tooltip": "",
+                }
+            )
+
+        if synthetic_sources is None:
+            synthetic_sources = {}
+            if self._manager is not None:
+                try:
+                    synthetic_sources = self._manager.synthetic_input_status()
+                except Exception:
+                    synthetic_sources = {}
+
+        for stream_name, source_status in sorted(synthetic_sources.items()):
+            pattern = str(source_status.get("pattern") or "")
+            kind = f"synthetic.{pattern}" if pattern else "synthetic"
+            requested_rate = source_status.get("requested_rate_hz")
+            if requested_rate in {None, ""}:
+                requested_rate = source_status.get("rate_hz")
+            detail = "max"
+            if requested_rate not in {None, ""}:
+                detail = f"{self._format_float(requested_rate)} Hz"
+            entries.append(
+                {
+                    "entry_type": "synthetic",
+                    "document_index": None,
+                    "name": f"synthetic:{stream_name}",
+                    "kind": kind,
+                    "stream": stream_name,
+                    "detail": detail,
+                    "tooltip": (
+                        "Runtime-only synthetic test input; "
+                        "not saved to pipeline YAML."
+                    ),
+                }
+            )
+        return entries
+
+    def _selected_source_entry(self) -> dict[str, Any] | None:
+        row = self._selected_row(self._source_table)
+        if row is None:
+            return None
+        entries = self._source_editor_entries()
+        if row >= len(entries):
+            return None
+        return entries[row]
+
+    def _refresh_source_table(
+        self,
+        *,
+        synthetic_sources: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        rows = self._source_editor_entries(synthetic_sources)
+        self._source_table.setRowCount(len(rows))
+        for row, spec in enumerate(rows):
+            values = [
+                spec.get("name", ""),
+                spec.get("kind", ""),
+                spec.get("stream", ""),
+                str(spec.get("detail", "")),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                tooltip = str(spec.get("tooltip") or "")
+                if tooltip:
+                    item.setToolTip(tooltip)
+                self._source_table.setItem(row, column, item)
+        self._source_table.resizeColumnsToContents()
+
+    def _refresh_sink_table(self) -> None:
+        rows = self._document.get("sinks", [])
+        self._sink_table.setRowCount(len(rows))
+        for row, spec in enumerate(rows):
+            values = [
+                spec.get("name", ""),
+                spec.get("kind", ""),
+                spec.get("stream", ""),
+                str(spec.get("read_timeout", "")),
+                str(spec.get("pause_sleep", "")),
+            ]
+            for column, value in enumerate(values):
+                self._sink_table.setItem(row, column, QTableWidgetItem(value))
+        self._sink_table.resizeColumnsToContents()
+
     def _refresh_graph_preview(self) -> None:
         try:
             config = PipelineConfig.from_dict(self._document)
@@ -713,9 +1056,46 @@ class MainWindow(QMainWindow):
         graph = PipelineGraph.from_config(config)
         self._graph_preview.setPlainText(graph.describe())
 
+    def _source_runtime_entries(
+        self, status: dict[str, Any] | None
+    ) -> list[dict[str, Any]]:
+        entries: list[dict[str, Any]] = []
+        source_statuses = (status or {}).get("sources", {})
+        for source in self._document.get("sources", []):
+            source_status = source_statuses.get(source.get("name", ""), {})
+            entries.append(
+                {
+                    "name": source.get("name", ""),
+                    "kind": source.get("kind", ""),
+                    "stream": source.get("stream", ""),
+                    "alive": bool(source_status.get("alive", False)),
+                    "frames": source_status.get("frames_written", 0),
+                    "rate_hz": source_status.get("effective_rate_hz"),
+                    "last_error": str(source_status.get("last_error") or ""),
+                }
+            )
+
+        synthetic_sources = (status or {}).get("synthetic_sources", {})
+        for stream_name, source_status in sorted(synthetic_sources.items()):
+            pattern = str(source_status.get("pattern") or "")
+            kind = f"synthetic.{pattern}" if pattern else "synthetic"
+            entries.append(
+                {
+                    "name": f"synthetic:{stream_name}",
+                    "kind": kind,
+                    "stream": stream_name,
+                    "alive": bool(source_status.get("alive", False)),
+                    "frames": source_status.get("frames_written", 0),
+                    "rate_hz": source_status.get("effective_rate_hz"),
+                    "last_error": str(source_status.get("last_error") or ""),
+                }
+            )
+        return entries
+
     def _refresh_runtime_status(self) -> None:
         self._handle_managed_server_exit()
         kernels = self._document.get("kernels", [])
+        sinks = self._document.get("sinks", [])
         status = None
         if self._manager is not None:
             try:
@@ -756,7 +1136,52 @@ class MainWindow(QMainWindow):
                 self._worker_table.setItem(row, column, item)
         self._worker_table.resizeColumnsToContents()
 
+        source_entries = self._source_runtime_entries(status)
+        self._source_runtime_table.setRowCount(len(source_entries))
+        for row, source_entry in enumerate(source_entries):
+            values = [
+                str(source_entry.get("name", "")),
+                str(source_entry.get("kind", "")),
+                str(source_entry.get("stream", "")),
+                str(source_entry.get("alive", False)),
+                str(source_entry.get("frames", 0)),
+                self._format_float(source_entry.get("rate_hz")),
+                str(source_entry.get("last_error") or ""),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 3 and value == "True":
+                    item.setBackground(QColor(self._theme.success_bg))
+                if column == 6 and value:
+                    item.setBackground(QColor(self._theme.error_bg))
+                self._source_runtime_table.setItem(row, column, item)
+        self._source_runtime_table.resizeColumnsToContents()
+
+        self._sink_runtime_table.setRowCount(len(sinks))
+        for row, sink in enumerate(sinks):
+            sink_status = (
+                (status or {}).get("sinks", {}).get(sink.get("name", ""), {})
+            )
+            values = [
+                sink.get("name", ""),
+                sink.get("kind", ""),
+                sink.get("stream", ""),
+                str(sink_status.get("alive", False)),
+                str(sink_status.get("frames_consumed", 0)),
+                self._format_float(sink_status.get("effective_rate_hz")),
+                str(sink_status.get("last_error") or ""),
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                if column == 3 and value == "True":
+                    item.setBackground(QColor(self._theme.success_bg))
+                if column == 6 and value:
+                    item.setBackground(QColor(self._theme.error_bg))
+                self._sink_runtime_table.setItem(row, column, item)
+        self._sink_runtime_table.resizeColumnsToContents()
+
         synthetic_sources = (status or {}).get("synthetic_sources", {})
+        self._refresh_source_table(synthetic_sources=synthetic_sources)
         self._synthetic_table.setRowCount(len(synthetic_sources))
         for row, (stream_name, source_status) in enumerate(
             sorted(synthetic_sources.items())
@@ -793,6 +1218,19 @@ class MainWindow(QMainWindow):
         idle_workers = summary.get("idle_workers", 0)
         waiting_workers = summary.get("waiting_workers", 0)
         failed_workers = summary.get("failed_workers", 0)
+        active_sources = summary.get("active_sources", 0) + sum(
+            1
+            for source_status in synthetic_sources.values()
+            if source_status.get("alive")
+            and not source_status.get("last_error")
+        )
+        failed_sources = summary.get("failed_sources", 0) + sum(
+            1
+            for source_status in synthetic_sources.values()
+            if source_status.get("last_error")
+        )
+        active_sinks = summary.get("active_sinks", 0)
+        failed_sinks = summary.get("failed_sinks", 0)
         server = (
             self._manager.connection.display_name
             if self._manager is not None
@@ -802,9 +1240,10 @@ class MainWindow(QMainWindow):
             "Server: "
             f"{server} | State: {state} | Config: {dirty} | "
             f"Placement: {placement} | "
-            f"Synthetic: {synthetic_count} | Active: {active_workers} | "
-            f"Idle: {idle_workers} | Waiting: {waiting_workers} | "
-            f"Failed: {failed_workers}"
+            f"Synthetic: {synthetic_count} | "
+            f"Workers A/I/W/F: {active_workers}/{idle_workers}/{waiting_workers}/{failed_workers} | "
+            f"Sources A/F: {active_sources}/{failed_sources} | "
+            f"Sinks A/F: {active_sinks}/{failed_sinks}"
         )
 
         self._runtime_output.setPlainText(
@@ -847,24 +1286,49 @@ class MainWindow(QMainWindow):
         if failures:
             lines.append("Failures:")
             for failure in failures:
+                component_type = failure.get("component_type", "worker")
                 lines.append(
-                    f"- {failure.get('kernel')}: {failure.get('error')}"
+                    f"- {component_type} {failure.get('kernel')}: {failure.get('error')}"
                 )
         else:
             lines.append("Failures: none")
 
-        synthetic_sources = status.get("synthetic_sources", {})
-        if synthetic_sources:
-            lines.append("Synthetic inputs:")
-            for stream_name, source_status in sorted(
-                synthetic_sources.items()
-            ):
+        source_entries = self._source_runtime_entries(status)
+        if source_entries:
+            lines.append("Sources:")
+            for source_entry in source_entries:
                 lines.append(
                     "- "
-                    f"{stream_name} pattern={source_status.get('pattern')} "
-                    f"frames={source_status.get('frames_written')} "
-                    f"hz={self._format_float(source_status.get('effective_rate_hz'))}"
+                    f"{source_entry.get('name')} "
+                    f"kind={source_entry.get('kind')} "
+                    f"stream={source_entry.get('stream')} "
+                    f"alive={source_entry.get('alive')} "
+                    f"frames={source_entry.get('frames')} "
+                    f"hz={self._format_float(source_entry.get('rate_hz'))}"
                 )
+        else:
+            lines.append("Sources: none")
+
+        sinks = status.get("sinks", {})
+        if sinks:
+            lines.append("Sinks:")
+            for sink_name, sink_status in sorted(sinks.items()):
+                lines.append(
+                    "- "
+                    f"{sink_name} stream={sink_status.get('stream')} "
+                    f"alive={sink_status.get('alive')} "
+                    f"frames={sink_status.get('frames_consumed')} "
+                    f"hz={self._format_float(sink_status.get('effective_rate_hz'))}"
+                )
+        else:
+            lines.append("Sinks: none")
+
+        synthetic_sources = status.get("synthetic_sources", {})
+        if synthetic_sources:
+            lines.append(
+                "Synthetic inputs: "
+                f"{len(synthetic_sources)} active (listed under Sources)"
+            )
         else:
             lines.append("Synthetic inputs: none")
         return "\n".join(lines)
@@ -931,7 +1395,16 @@ class MainWindow(QMainWindow):
         )
 
     def _ensure_document_valid(self) -> bool:
-        errors = validate_document(self._document)
+        try:
+            if self._manager is not None:
+                validation = self._manager.validate_document(self._document)
+                errors = validation.get("errors", [])
+            else:
+                errors = validate_document(self._document)
+        except Exception as exc:
+            self._set_validation_status("failed", "Validation: failed")
+            self._log_error("Validation Failed", str(exc))
+            return False
         if errors:
             self._set_validation_status("failed", "Validation: failed")
             self._log_error("Validation Failed", "\n".join(errors))
@@ -1040,7 +1513,7 @@ class MainWindow(QMainWindow):
         session = None
         try:
             session = RemotePipelineSession(connection)
-            session.info()
+            info = session.info()
         except Exception as exc:
             if session is not None:
                 session.close()
@@ -1052,6 +1525,7 @@ class MainWindow(QMainWindow):
 
         self._dispose_manager()
         self._manager = session
+        self._server_info = dict(info)
         self._settings.setValue("server_url", connection.base_url)
         self._settings.setValue("server_token", connection.token or "")
         if show_feedback:
@@ -1118,7 +1592,7 @@ class MainWindow(QMainWindow):
             try:
                 connection = ServerConnection.from_values(base_url)
                 session = RemotePipelineSession(connection, timeout=0.5)
-                session.info()
+                info = session.info()
             except Exception as exc:
                 last_error = exc
                 if session is not None:
@@ -1130,6 +1604,7 @@ class MainWindow(QMainWindow):
             self._managed_server_url = base_url
             self._dispose_manager()
             self._manager = session
+            self._server_info = dict(info)
             self._settings.setValue("server_url", connection.base_url)
             self._settings.setValue("server_token", "")
             if show_feedback:
@@ -1201,13 +1676,35 @@ class MainWindow(QMainWindow):
     def _report_remote_failures(self, status: dict[str, Any]) -> None:
         active_failures: set[tuple[str, str]] = set()
         for failure in status.get("failures", []):
+            component_type = str(failure.get("component_type") or "worker")
             kernel = str(failure.get("kernel") or "unknown")
             error = str(failure.get("error") or "unknown error")
-            key = (kernel, error)
+            key = (f"{component_type}:{kernel}", error)
             active_failures.add(key)
             if key not in self._reported_failures:
-                self._show_error("Pipeline Error", f"{kernel}: {error}")
+                self._show_error(
+                    "Pipeline Error",
+                    f"{component_type} {kernel}: {error}",
+                )
         self._reported_failures = active_failures
+
+    def _shared_names(self) -> list[str]:
+        return [
+            spec.get("name", "")
+            for spec in self._document.get("shared_memory", [])
+        ]
+
+    def _available_kinds(
+        self,
+        *,
+        remote_key: str,
+        fallback,
+    ) -> list[str]:
+        if self._server_info is not None:
+            values = self._server_info.get(remote_key)
+            if isinstance(values, list):
+                return [str(value) for value in values]
+        return list(fallback())
 
     def _close_viewers(self) -> None:
         for viewer in list(self._viewers):
@@ -1314,6 +1811,13 @@ class MainWindow(QMainWindow):
         if self._push_document_to_server(show_feedback=True):
             self._refresh_runtime_status()
 
+    def _load_document_path(self, path: str | Path) -> None:
+        document_path = Path(path)
+        document = load_document(document_path)
+        self._close_viewers()
+        self._set_document(document, path=document_path)
+        self._log_info(f"Loaded {document_path}")
+
     def load_document_from_disk(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
@@ -1324,13 +1828,10 @@ class MainWindow(QMainWindow):
         if not path:
             return
         try:
-            document = load_document(path)
+            self._load_document_path(path)
         except Exception as exc:
             self._show_error("Load Failed", exc)
             return
-        self._close_viewers()
-        self._set_document(document, path=Path(path))
-        self._log_info(f"Loaded {path}")
 
     def save_document_to_disk(self) -> None:
         if self._current_path is None:
@@ -1394,11 +1895,14 @@ class MainWindow(QMainWindow):
         self._refresh_all()
 
     def add_kernel(self) -> None:
-        shared_names = [
-            spec.get("name", "")
-            for spec in self._document.get("shared_memory", [])
-        ]
-        dialog = KernelDialog(shared_names, self)
+        dialog = KernelDialog(
+            self._shared_names(),
+            self._available_kinds(
+                remote_key="kernel_kinds",
+                fallback=available_kernel_kinds,
+            ),
+            self,
+        )
         if dialog.exec() != QDialog.Accepted:
             return
         try:
@@ -1414,12 +1918,14 @@ class MainWindow(QMainWindow):
         row = self._selected_row(self._kernel_table)
         if row is None:
             return
-        shared_names = [
-            spec.get("name", "")
-            for spec in self._document.get("shared_memory", [])
-        ]
         dialog = KernelDialog(
-            shared_names, self, self._document["kernels"][row]
+            self._shared_names(),
+            self._available_kinds(
+                remote_key="kernel_kinds",
+                fallback=available_kernel_kinds,
+            ),
+            self,
+            self._document["kernels"][row],
         )
         if dialog.exec() != QDialog.Accepted:
             return
@@ -1437,6 +1943,124 @@ class MainWindow(QMainWindow):
         if row is None:
             return
         del self._document["kernels"][row]
+        self._manager_dirty = True
+        self._refresh_all()
+
+    def add_source(self) -> None:
+        dialog = SourceDialog(
+            self._shared_names(),
+            self._available_kinds(
+                remote_key="source_kinds",
+                fallback=available_source_kinds,
+            ),
+            self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            value = dialog.value()
+        except Exception as exc:
+            self._show_error("Invalid Source", exc)
+            return
+        self._document.setdefault("sources", []).append(value)
+        self._manager_dirty = True
+        self._refresh_all()
+
+    def edit_source(self) -> None:
+        entry = self._selected_source_entry()
+        if entry is None:
+            return
+        if entry.get("entry_type") == "synthetic":
+            self._configure_synthetic_input_for_stream(
+                str(entry.get("stream", ""))
+            )
+            return
+        row = entry.get("document_index")
+        if not isinstance(row, int):
+            return
+        dialog = SourceDialog(
+            self._shared_names(),
+            self._available_kinds(
+                remote_key="source_kinds",
+                fallback=available_source_kinds,
+            ),
+            self,
+            self._document["sources"][row],
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            value = dialog.value()
+        except Exception as exc:
+            self._show_error("Invalid Source", exc)
+            return
+        self._document["sources"][row] = value
+        self._manager_dirty = True
+        self._refresh_all()
+
+    def remove_source(self) -> None:
+        entry = self._selected_source_entry()
+        if entry is None:
+            return
+        if entry.get("entry_type") == "synthetic":
+            self._stop_synthetic_input_for_stream(str(entry.get("stream", "")))
+            return
+        row = entry.get("document_index")
+        if not isinstance(row, int):
+            return
+        del self._document["sources"][row]
+        self._manager_dirty = True
+        self._refresh_all()
+
+    def add_sink(self) -> None:
+        dialog = SinkDialog(
+            self._shared_names(),
+            self._available_kinds(
+                remote_key="sink_kinds",
+                fallback=available_sink_kinds,
+            ),
+            self,
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            value = dialog.value()
+        except Exception as exc:
+            self._show_error("Invalid Sink", exc)
+            return
+        self._document.setdefault("sinks", []).append(value)
+        self._manager_dirty = True
+        self._refresh_all()
+
+    def edit_sink(self) -> None:
+        row = self._selected_row(self._sink_table)
+        if row is None:
+            return
+        dialog = SinkDialog(
+            self._shared_names(),
+            self._available_kinds(
+                remote_key="sink_kinds",
+                fallback=available_sink_kinds,
+            ),
+            self,
+            self._document["sinks"][row],
+        )
+        if dialog.exec() != QDialog.Accepted:
+            return
+        try:
+            value = dialog.value()
+        except Exception as exc:
+            self._show_error("Invalid Sink", exc)
+            return
+        self._document["sinks"][row] = value
+        self._manager_dirty = True
+        self._refresh_all()
+
+    def remove_sink(self) -> None:
+        row = self._selected_row(self._sink_table)
+        if row is None:
+            return
+        del self._document["sinks"][row]
         self._manager_dirty = True
         self._refresh_all()
 
@@ -1545,7 +2169,7 @@ class MainWindow(QMainWindow):
         self._log_info("Pipeline shut down.")
         self._refresh_all()
 
-    def start_synthetic_input(self) -> None:
+    def _configure_synthetic_input_for_stream(self, stream_name: str) -> None:
         state = self._pipeline_state()
         if self._manager is None or state not in {
             PipelineState.BUILT,
@@ -1558,10 +2182,6 @@ class MainWindow(QMainWindow):
                 "Build the pipeline before starting a synthetic input.",
             )
             return
-        spec = self._selected_stream_spec(show_message=True)
-        if spec is None:
-            return
-        stream_name = spec.get("name", "")
         initial = self._manager.synthetic_input_status().get(stream_name, {})
         dialog = SyntheticInputDialog(stream_name, self, initial=initial)
         if dialog.exec() != QDialog.Accepted:
@@ -1575,13 +2195,9 @@ class MainWindow(QMainWindow):
         self._log_info(f"Synthetic input started for {stream_name}.")
         self._refresh_runtime_status()
 
-    def stop_synthetic_input(self) -> None:
+    def _stop_synthetic_input_for_stream(self, stream_name: str) -> None:
         if self._manager is None:
             return
-        spec = self._selected_stream_spec(show_message=True)
-        if spec is None:
-            return
-        stream_name = spec.get("name", "")
         try:
             self._manager.stop_synthetic_input(stream_name)
         except Exception as exc:
@@ -1589,6 +2205,18 @@ class MainWindow(QMainWindow):
             return
         self._log_info(f"Synthetic input stopped for {stream_name}.")
         self._refresh_runtime_status()
+
+    def start_synthetic_input(self) -> None:
+        spec = self._selected_stream_spec(show_message=True)
+        if spec is None:
+            return
+        self._configure_synthetic_input_for_stream(spec.get("name", ""))
+
+    def stop_synthetic_input(self) -> None:
+        spec = self._selected_stream_spec(show_message=True)
+        if spec is None:
+            return
+        self._stop_synthetic_input_for_stream(spec.get("name", ""))
 
     def open_viewer(self) -> None:
         state = self._pipeline_state()
@@ -1636,13 +2264,29 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Launch the shmpipeline desktop GUI."""
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("shmpipeline GUI")
     app.setOrganizationName("shmpipeline")
     pg.setConfigOptions(imageAxisOrder="row-major", antialias=True)
+    argv = list(app.arguments()[1:] if argv is None else argv)
+    if len(argv) > 1:
+        print(
+            "usage: shmpipeline-gui [pipeline.yaml]",
+            file=sys.stderr,
+        )
+        return 2
     window = MainWindow()
+    if argv:
+        try:
+            window._load_document_path(argv[0])
+        except Exception as exc:
+            print(
+                f"shmpipeline-gui: failed to load {argv[0]}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
     window.show()
     return app.exec()
 

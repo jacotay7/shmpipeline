@@ -1,0 +1,44 @@
+shared_memory:
+  - name: camera_frame
+    shape: [64, 64]
+    dtype: float32
+    storage: cpu
+
+  - name: processed_frame
+    shape: [64, 64]
+    dtype: float32
+    storage: cpu
+
+sources:
+  - name: simulated_camera
+    kind: example.simulated_camera
+    stream: camera_frame
+    parameters:
+      amplitude: 40.0
+      background: 5.0
+      noise_std: 0.15
+      sigma: 5.0
+      period: 24
+      seed: 7
+    poll_interval: 0.02
+
+kernels:
+  - name: normalize_stage
+    kind: cpu.scale
+    input: camera_frame
+    output: processed_frame
+    parameters:
+      factor: 0.5
+    read_timeout: 0.1
+    pause_sleep: 0.01
+
+sinks:
+  - name: frame_archive
+    kind: example.npy_frame_sink
+    stream: processed_frame
+    parameters:
+      output_dir: examples/source_sink_plugins/output
+      prefix: processed_frame
+      max_saved_frames: 8
+    read_timeout: 0.1
+    pause_sleep: 0.01

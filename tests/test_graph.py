@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from shmpipeline import PipelineConfig, PipelineGraph
+from shmpipeline import PipelineConfig, PipelineGraph, get_default_registry
 from shmpipeline.graph import validate_pipeline_config
+from shmpipeline.source import Source
 
 pytestmark = pytest.mark.unit
 
@@ -111,3 +112,107 @@ def test_validate_pipeline_config_rejects_multiple_producers():
 
     assert len(errors) == 1
     assert "multiple producer kernels" in errors[0]
+
+
+def test_pipeline_graph_reports_explicit_sources_and_sinks():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "output_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "example.camera",
+                    "stream": "input_frame",
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "copy_stage",
+                    "kind": "cpu.copy",
+                    "input": "input_frame",
+                    "output": "output_frame",
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "example.display",
+                    "stream": "output_frame",
+                }
+            ],
+        }
+    )
+
+    graph = PipelineGraph.from_config(config)
+
+    assert graph.source_streams() == ("input_frame",)
+    assert graph.sink_streams() == ("output_frame",)
+    assert any(edge.role == "source" for edge in graph.edges)
+    assert any(edge.role == "sink" for edge in graph.edges)
+    assert graph.to_dict()["sources"][0]["name"] == "camera"
+    assert graph.to_dict()["sinks"][0]["name"] == "display"
+    assert "Sources:" in graph.describe()
+    assert "Sinks:" in graph.describe()
+
+
+def test_validate_pipeline_config_rejects_source_and_kernel_conflict():
+    class _ConflictSource(Source):
+        kind = "test.conflict_source"
+        storage = "cpu"
+
+        def read(self):
+            return None
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "shared_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "test.conflict_source",
+                    "stream": "shared_output",
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "copy_stage",
+                    "kind": "cpu.copy",
+                    "input": "input_frame",
+                    "output": "shared_output",
+                }
+            ],
+        }
+    )
+
+    errors = validate_pipeline_config(
+        config,
+        registry=get_default_registry().extended_sources(_ConflictSource),
+    )
+
+    assert any("multiple producers" in error for error in errors)

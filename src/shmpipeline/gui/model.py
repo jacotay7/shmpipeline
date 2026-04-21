@@ -34,6 +34,8 @@ Document = dict[str, Any]
 __all__ = [
     "Document",
     "available_kernel_kinds",
+    "available_sink_kinds",
+    "available_source_kinds",
     "clone_document",
     "create_manager",
     "default_document",
@@ -83,6 +85,16 @@ def create_manager(document: Mapping[str, Any]) -> PipelineManager:
 def available_kernel_kinds() -> tuple[str, ...]:
     """Return all registered kernel kinds for UI selection widgets."""
     return get_default_registry().kinds()
+
+
+def available_source_kinds() -> tuple[str, ...]:
+    """Return all registered source kinds for UI selection widgets."""
+    return get_default_registry().source_kinds()
+
+
+def available_sink_kinds() -> tuple[str, ...]:
+    """Return all registered sink kinds for UI selection widgets."""
+    return get_default_registry().sink_kinds()
 
 
 def to_numpy(value: Any) -> np.ndarray:

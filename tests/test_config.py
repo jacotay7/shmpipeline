@@ -44,6 +44,92 @@ def test_pipeline_config_loads_from_yaml(tmp_path):
     assert config.kernels[0].parameters["factor"] == 3.0
 
 
+def test_pipeline_config_accepts_sources_and_sinks():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "output_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "example.camera",
+                    "stream": "input_frame",
+                    "parameters": {"device": "sim-0"},
+                    "poll_interval": 0.05,
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "copy",
+                    "kind": "cpu.copy",
+                    "input": "input_frame",
+                    "output": "output_frame",
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "example.display",
+                    "stream": "output_frame",
+                    "parameters": {"window": "main"},
+                    "read_timeout": 0.25,
+                    "pause_sleep": 0.02,
+                }
+            ],
+        }
+    )
+
+    assert config.sources[0].parameters == {"device": "sim-0"}
+    assert config.sources[0].poll_interval == 0.05
+    assert config.sinks[0].parameters == {"window": "main"}
+    assert config.sinks[0].read_timeout == 0.25
+
+
+def test_pipeline_config_allows_source_and_sink_only_pipeline():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                }
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "example.camera",
+                    "stream": "frame",
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "example.display",
+                    "stream": "frame",
+                }
+            ],
+        }
+    )
+
+    assert config.kernels == ()
+    assert config.sources[0].stream == "frame"
+    assert config.sinks[0].stream == "frame"
+
+
 def test_pipeline_config_rejects_unknown_shared_memory_reference():
     with pytest.raises(ConfigValidationError, match="undefined shared memory"):
         PipelineConfig.from_dict(

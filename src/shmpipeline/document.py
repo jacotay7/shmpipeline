@@ -18,7 +18,9 @@ def default_document() -> Document:
     """Return an empty editable pipeline document."""
     return {
         "shared_memory": [],
+        "sources": [],
         "kernels": [],
+        "sinks": [],
     }
 
 
@@ -31,7 +33,9 @@ def normalize_document(document: Mapping[str, Any]) -> Document:
     """Ensure a document always has the expected top-level keys."""
     normalized = clone_document(document)
     normalized.setdefault("shared_memory", [])
+    normalized.setdefault("sources", [])
     normalized.setdefault("kernels", [])
+    normalized.setdefault("sinks", [])
     return normalized
 
 
@@ -112,7 +116,34 @@ def config_to_document(config: PipelineConfig) -> Document:
                 }
         kernels.append(item)
 
+    sources = []
+    for source in config.sources:
+        sources.append(
+            {
+                "name": source.name,
+                "kind": source.kind,
+                "stream": source.stream,
+                "parameters": deepcopy(source.parameters),
+                "poll_interval": source.poll_interval,
+            }
+        )
+
+    sinks = []
+    for sink in config.sinks:
+        sinks.append(
+            {
+                "name": sink.name,
+                "kind": sink.kind,
+                "stream": sink.stream,
+                "parameters": deepcopy(sink.parameters),
+                "read_timeout": sink.read_timeout,
+                "pause_sleep": sink.pause_sleep,
+            }
+        )
+
     return {
         "shared_memory": shared_memory,
+        "sources": sources,
         "kernels": kernels,
+        "sinks": sinks,
     }

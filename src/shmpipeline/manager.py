@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import threading
 import time
+import traceback
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +46,292 @@ class _WorkerHandle:
     cpu_slot: int | None
 
 
+def _wait_for_stream_update(
+    stream: Any,
+    previous_count: float,
+    *,
+    timeout: float,
+) -> float | None:
+    """Wait for a stream write count to advance beyond the previous count."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        current = stream.count
+        if current > previous_count:
+            return current
+        time.sleep(1e-5)
+    return None
+
+
+def _read_sink_payload(stream: Any, *, timeout: float) -> tuple[float, Any]:
+    """Read one stable payload for a sink plugin."""
+    with stream.locked(timeout=timeout):
+        current_count = stream.count
+        payload = stream.read(safe=True)
+    return current_count, payload
+
+
+class _SourceController:
+    """Manager-owned thread controller for one configured source plugin."""
+
+    def __init__(
+        self, *, stream: Any, source: Any, spec: Any, pause_event: Any
+    ):
+        self.stream = stream
+        self.source = source
+        self.spec = spec
+        self._pause_event = pause_event
+        self._stop_event = threading.Event()
+        self._logger = get_logger(f"source.{spec.name}")
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"shmpipeline-source-{spec.name}",
+            daemon=True,
+        )
+        self._started_at_wall: float | None = None
+        self._started_at_mono: float | None = None
+        self._last_write_time: float | None = None
+        self._last_write_duration_s: float | None = None
+        self._frames_written = 0
+        self._last_error: str | None = None
+        self._traceback: str | None = None
+        self._failure_reported = False
+        self.source._attach_runtime_events(
+            stop_event=self._stop_event,
+            pause_event=self._pause_event,
+        )
+
+    def start(self) -> None:
+        """Start the source thread."""
+        if self._thread.is_alive():
+            return
+        self.source.open()
+        self._started_at_wall = time.time()
+        self._started_at_mono = time.perf_counter()
+        self._thread.start()
+
+    def stop(self, *, timeout: float = 2.0) -> None:
+        """Request shutdown and wait for the source thread to exit."""
+        self._stop_event.set()
+        self._thread.join(timeout=timeout)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a stable status snapshot for one source plugin."""
+        with self._lock:
+            elapsed_s = 0.0
+            if self._started_at_mono is not None:
+                elapsed_s = max(
+                    0.0, time.perf_counter() - self._started_at_mono
+                )
+            effective_rate_hz = 0.0
+            if elapsed_s > 0.0:
+                effective_rate_hz = self._frames_written / elapsed_s
+            return {
+                "name": self.spec.name,
+                "kind": self.spec.kind,
+                "stream": self.spec.stream,
+                "poll_interval": self.spec.poll_interval,
+                "alive": self._thread.is_alive(),
+                "frames_written": self._frames_written,
+                "effective_rate_hz": effective_rate_hz,
+                "started_at": self._started_at_wall,
+                "last_write_time": self._last_write_time,
+                "last_write_duration_ms": (
+                    None
+                    if self._last_write_duration_s is None
+                    else 1000.0 * self._last_write_duration_s
+                ),
+                "last_error": self._last_error,
+            }
+
+    def consume_failure(self) -> dict[str, Any] | None:
+        """Return one source failure payload once, if the source failed."""
+        with self._lock:
+            if self._last_error is None or self._failure_reported:
+                return None
+            self._failure_reported = True
+            return {
+                "type": "source_failed",
+                "kernel": self.spec.name,
+                "component_type": "source",
+                "kind": self.spec.kind,
+                "stream": self.spec.stream,
+                "error": self._last_error,
+                "traceback": self._traceback,
+            }
+
+    def _run(self) -> None:
+        try:
+            while not self._stop_event.is_set():
+                if self._pause_event.is_set():
+                    if self._stop_event.wait(self.spec.poll_interval):
+                        return
+                    continue
+                payload = self.source.read()
+                if payload is None:
+                    if self._stop_event.wait(self.spec.poll_interval):
+                        return
+                    continue
+                started = time.perf_counter()
+                self.stream.write(payload)
+                finished = time.perf_counter()
+                with self._lock:
+                    self._frames_written += 1
+                    self._last_write_time = time.time()
+                    self._last_write_duration_s = finished - started
+        except BaseException as exc:
+            self._logger.exception(
+                "source runtime failed: source=%s", self.spec.name
+            )
+            with self._lock:
+                self._last_error = str(exc)
+                self._traceback = traceback.format_exc()
+        finally:
+            try:
+                self.source.close()
+            except Exception:
+                self._logger.exception(
+                    "source close failed: source=%s", self.spec.name
+                )
+
+
+class _SinkController:
+    """Manager-owned thread controller for one configured sink plugin."""
+
+    def __init__(self, *, stream: Any, sink: Any, spec: Any, pause_event: Any):
+        self.stream = stream
+        self.sink = sink
+        self.spec = spec
+        self._pause_event = pause_event
+        self._stop_event = threading.Event()
+        self._logger = get_logger(f"sink.{spec.name}")
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"shmpipeline-sink-{spec.name}",
+            daemon=True,
+        )
+        self._started_at_wall: float | None = None
+        self._started_at_mono: float | None = None
+        self._last_read_time: float | None = None
+        self._last_read_duration_s: float | None = None
+        self._frames_consumed = 0
+        self._last_error: str | None = None
+        self._traceback: str | None = None
+        self._failure_reported = False
+        self.sink._attach_runtime_events(
+            stop_event=self._stop_event,
+            pause_event=self._pause_event,
+        )
+
+    def start(self) -> None:
+        """Start the sink thread."""
+        if self._thread.is_alive():
+            return
+        self.sink.open()
+        self._started_at_wall = time.time()
+        self._started_at_mono = time.perf_counter()
+        self._thread.start()
+
+    def stop(self, *, timeout: float = 2.0) -> None:
+        """Request shutdown and wait for the sink thread to exit."""
+        self._stop_event.set()
+        self._thread.join(timeout=timeout)
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return a stable status snapshot for one sink plugin."""
+        with self._lock:
+            elapsed_s = 0.0
+            if self._started_at_mono is not None:
+                elapsed_s = max(
+                    0.0, time.perf_counter() - self._started_at_mono
+                )
+            effective_rate_hz = 0.0
+            if elapsed_s > 0.0:
+                effective_rate_hz = self._frames_consumed / elapsed_s
+            return {
+                "name": self.spec.name,
+                "kind": self.spec.kind,
+                "stream": self.spec.stream,
+                "read_timeout": self.spec.read_timeout,
+                "pause_sleep": self.spec.pause_sleep,
+                "alive": self._thread.is_alive(),
+                "frames_consumed": self._frames_consumed,
+                "effective_rate_hz": effective_rate_hz,
+                "started_at": self._started_at_wall,
+                "last_read_time": self._last_read_time,
+                "last_read_duration_ms": (
+                    None
+                    if self._last_read_duration_s is None
+                    else 1000.0 * self._last_read_duration_s
+                ),
+                "last_error": self._last_error,
+            }
+
+    def consume_failure(self) -> dict[str, Any] | None:
+        """Return one sink failure payload once, if the sink failed."""
+        with self._lock:
+            if self._last_error is None or self._failure_reported:
+                return None
+            self._failure_reported = True
+            return {
+                "type": "sink_failed",
+                "kernel": self.spec.name,
+                "component_type": "sink",
+                "kind": self.spec.kind,
+                "stream": self.spec.stream,
+                "error": self._last_error,
+                "traceback": self._traceback,
+            }
+
+    def _run(self) -> None:
+        try:
+            last_seen_count = self.stream.count
+            while not self._stop_event.is_set():
+                if self._pause_event.is_set():
+                    if self._stop_event.wait(self.spec.pause_sleep):
+                        return
+                    continue
+                triggered_count = _wait_for_stream_update(
+                    self.stream,
+                    last_seen_count,
+                    timeout=self.spec.read_timeout,
+                )
+                if triggered_count is None:
+                    continue
+                try:
+                    current_count, payload = _read_sink_payload(
+                        self.stream,
+                        timeout=self.spec.read_timeout,
+                    )
+                except TimeoutError:
+                    continue
+                if current_count <= last_seen_count:
+                    continue
+                started = time.perf_counter()
+                self.sink.consume(payload)
+                finished = time.perf_counter()
+                last_seen_count = current_count
+                with self._lock:
+                    self._frames_consumed += 1
+                    self._last_read_time = time.time()
+                    self._last_read_duration_s = finished - started
+        except BaseException as exc:
+            self._logger.exception(
+                "sink runtime failed: sink=%s", self.spec.name
+            )
+            with self._lock:
+                self._last_error = str(exc)
+                self._traceback = traceback.format_exc()
+        finally:
+            try:
+                self.sink.close()
+            except Exception:
+                self._logger.exception(
+                    "sink close failed: sink=%s", self.spec.name
+                )
+
+
 class PipelineManager:
     """Create shared memory, spawn workers, and supervise pipeline state.
 
@@ -78,15 +366,23 @@ class PipelineManager:
         self._worker_metrics: dict[str, dict[str, Any]] = {}
         self._worker_runtime: dict[str, dict[str, Any]] = {}
         self._synthetic_sources: dict[str, Any] = {}
+        self._sources: dict[str, _SourceController] = {}
+        self._sinks: dict[str, _SinkController] = {}
         self._kernel_configs = {
             kernel.name: kernel for kernel in self.config.kernels
         }
+        self._source_configs = {
+            source.name: source for source in self.config.sources
+        }
+        self._sink_configs = {sink.name: sink for sink in self.config.sinks}
         self._logger.info(
             "manager initialized: spawn_method=%s placement_policy=%s "
-            "kernels=%d streams=%d",
+            "kernels=%d sources=%d sinks=%d streams=%d",
             spawn_method,
             self.placement_policy.describe(),
             len(self.config.kernels),
+            len(self.config.sources),
+            len(self.config.sinks),
             len(self.config.shared_memory),
         )
 
@@ -142,6 +438,22 @@ class PipelineManager:
                 kernel_config.input,
                 kernel_config.output,
                 kernel_config.auxiliary_by_alias,
+            )
+        for source_config in self.config.sources:
+            self.registry.validate_source(source_config, shared_by_name)
+            self._logger.info(
+                "validated source: name=%s kind=%s stream=%s",
+                source_config.name,
+                source_config.kind,
+                source_config.stream,
+            )
+        for sink_config in self.config.sinks:
+            self.registry.validate_sink(sink_config, shared_by_name)
+            self._logger.info(
+                "validated sink: name=%s kind=%s stream=%s",
+                sink_config.name,
+                sink_config.kind,
+                sink_config.stream,
             )
         for spec in self.config.shared_memory:
             self._streams[spec.name] = self._build_stream(spec)
@@ -270,51 +582,85 @@ class PipelineManager:
         self._worker_runtime.clear()
         self._close_event_readers()
         cpu_count = max(1, os.cpu_count() or 1)
-        for index, kernel_config in enumerate(self.config.kernels):
-            stop_event = self.context.Event()
-            event_reader, event_writer = self.context.Pipe(duplex=False)
-            cpu_slot = self.placement_policy.cpu_slot_for(
-                kernel=kernel_config,
-                index=index,
-                cpu_count=cpu_count,
-            )
-            process = self.context.Process(
-                target=run_kernel_process,
-                args=(
-                    kernel_config,
-                    self.config.shared_memory,
-                    self._pause_event,
-                    stop_event,
-                    event_writer,
-                    cpu_slot,
-                    self._runtime_registry,
-                ),
-                name=f"shmpipeline-{kernel_config.name}",
-            )
-            try:
-                process.start()
-            except BaseException:
-                event_reader.close()
+        try:
+            self._start_sinks()
+            for index, kernel_config in enumerate(self.config.kernels):
+                stop_event = self.context.Event()
+                event_reader, event_writer = self.context.Pipe(duplex=False)
+                cpu_slot = self.placement_policy.cpu_slot_for(
+                    kernel=kernel_config,
+                    index=index,
+                    cpu_count=cpu_count,
+                )
+                process = self.context.Process(
+                    target=run_kernel_process,
+                    args=(
+                        kernel_config,
+                        self.config.shared_memory,
+                        self._pause_event,
+                        stop_event,
+                        event_writer,
+                        cpu_slot,
+                        self._runtime_registry,
+                    ),
+                    name=f"shmpipeline-{kernel_config.name}",
+                )
+                try:
+                    process.start()
+                except BaseException:
+                    event_reader.close()
+                    event_writer.close()
+                    raise
                 event_writer.close()
-                raise
-            event_writer.close()
-            self._logger.info(
-                "spawned worker: kernel=%s pid=%s cpu_slot=%s",
-                kernel_config.name,
-                process.pid,
-                cpu_slot,
-            )
-            self._workers[kernel_config.name] = _WorkerHandle(
-                name=kernel_config.name,
-                process=process,
-                stop_event=stop_event,
-                event_reader=event_reader,
-                cpu_slot=cpu_slot,
-            )
-        self._wait_for_workers_started()
+                self._logger.info(
+                    "spawned worker: kernel=%s pid=%s cpu_slot=%s",
+                    kernel_config.name,
+                    process.pid,
+                    cpu_slot,
+                )
+                self._workers[kernel_config.name] = _WorkerHandle(
+                    name=kernel_config.name,
+                    process=process,
+                    stop_event=stop_event,
+                    event_reader=event_reader,
+                    cpu_slot=cpu_slot,
+                )
+            self._wait_for_workers_started()
+            self._start_sources()
+        except BaseException:
+            self._stop_runtime_components(timeout=1.0, force=True)
+            raise
         self._transition_state(
             PipelineState.RUNNING, reason="all workers started"
         )
+
+    def _start_sources(self) -> None:
+        """Start all configured source plugins."""
+        shared_by_name = self.config.shared_memory_by_name
+        for source_config in self.config.sources:
+            source = self.registry.create_source(source_config, shared_by_name)
+            controller = _SourceController(
+                stream=self._streams[source_config.stream],
+                source=source,
+                spec=source_config,
+                pause_event=self._pause_event,
+            )
+            controller.start()
+            self._sources[source_config.name] = controller
+
+    def _start_sinks(self) -> None:
+        """Start all configured sink plugins."""
+        shared_by_name = self.config.shared_memory_by_name
+        for sink_config in self.config.sinks:
+            sink = self.registry.create_sink(sink_config, shared_by_name)
+            controller = _SinkController(
+                stream=self._streams[sink_config.stream],
+                sink=sink,
+                spec=sink_config,
+                pause_event=self._pause_event,
+            )
+            controller.start()
+            self._sinks[sink_config.name] = controller
 
     def _wait_for_workers_started(self, *, timeout: float = 5.0) -> None:
         """Block until all worker processes report a started event."""
@@ -389,6 +735,31 @@ class PipelineManager:
         self._logger.info(
             "stop requested: timeout=%s force=%s", timeout, force
         )
+        self._stop_runtime_components(timeout=timeout, force=force)
+        self._transition_state(PipelineState.BUILT, reason="workers stopped")
+
+    def _stop_sources(self, *, timeout: float) -> None:
+        """Stop all configured source plugins."""
+        for name, controller in list(self._sources.items()):
+            controller.stop(timeout=timeout)
+            self._logger.info("source stopped: name=%s", name)
+        self._sources.clear()
+
+    def _stop_sinks(self, *, timeout: float) -> None:
+        """Stop all configured sink plugins."""
+        for name, controller in list(self._sinks.items()):
+            controller.stop(timeout=timeout)
+            self._logger.info("sink stopped: name=%s", name)
+        self._sinks.clear()
+
+    def _stop_runtime_components(
+        self,
+        *,
+        timeout: float,
+        force: bool,
+    ) -> None:
+        """Stop sources, workers, and sinks without a state transition."""
+        self._stop_sources(timeout=timeout)
         for worker in self._workers.values():
             worker.stop_event.set()
         for worker in self._workers.values():
@@ -405,11 +776,11 @@ class PipelineManager:
                 worker.process.pid,
                 worker.process.exitcode,
             )
+        self._stop_sinks(timeout=timeout)
         self.poll_events()
         self._close_event_readers()
         self._workers.clear()
         self._pause_event = None
-        self._transition_state(PipelineState.BUILT, reason="workers stopped")
 
     def shutdown(self, *, unlink: bool = True, force: bool = False) -> None:
         """Stop workers, close local handles, and optionally unlink streams.
@@ -515,6 +886,18 @@ class PipelineManager:
                             ),
                         }
                     )
+        for controller in self._sources.values():
+            failure = controller.consume_failure()
+            if failure is not None:
+                self._events.append(failure)
+                self._log_event(failure)
+                self._record_worker_failure(failure)
+        for controller in self._sinks.values():
+            failure = controller.consume_failure()
+            if failure is not None:
+                self._events.append(failure)
+                self._log_event(failure)
+                self._record_worker_failure(failure)
         if self._failures and self.state in {
             PipelineState.RUNNING,
             PipelineState.PAUSED,
@@ -561,6 +944,15 @@ class PipelineManager:
                 "worker failed: kernel=%s pid=%s error=%s",
                 event.get("kernel"),
                 event.get("pid"),
+                event.get("error"),
+            )
+            return
+        if event_type in {"source_failed", "sink_failed"}:
+            self._logger.error(
+                "%s failed: name=%s stream=%s error=%s",
+                event_type.split("_", 1)[0],
+                event.get("kernel"),
+                event.get("stream"),
                 event.get("error"),
             )
             return
@@ -632,9 +1024,13 @@ class PipelineManager:
             name: self._status_for_worker(name, worker)
             for name, worker in self._workers.items()
         }
+        sources_status = self.source_status()
+        sinks_status = self.sink_status()
         return {
             "state": self.state.value,
             "workers": workers_status,
+            "sources": sources_status,
+            "sinks": sinks_status,
             "failures": list(self._failures),
             "metrics": {
                 name: dict(metrics)
@@ -642,7 +1038,25 @@ class PipelineManager:
             },
             "synthetic_sources": self.synthetic_input_status(),
             "placement_policy": self.placement_policy.describe(),
-            "summary": self._status_summary(workers_status),
+            "summary": self._status_summary(
+                workers_status,
+                sources_status,
+                sinks_status,
+            ),
+        }
+
+    def source_status(self) -> dict[str, dict[str, Any]]:
+        """Return status snapshots for configured source plugins."""
+        return {
+            name: controller.snapshot()
+            for name, controller in self._sources.items()
+        }
+
+    def sink_status(self) -> dict[str, dict[str, Any]]:
+        """Return status snapshots for configured sink plugins."""
+        return {
+            name: controller.snapshot()
+            for name, controller in self._sinks.items()
         }
 
     def _status_for_worker(
@@ -716,7 +1130,10 @@ class PipelineManager:
         return "active", idle_s, last_metric_age_s
 
     def _status_summary(
-        self, workers_status: dict[str, dict[str, Any]]
+        self,
+        workers_status: dict[str, dict[str, Any]],
+        sources_status: dict[str, dict[str, Any]],
+        sinks_status: dict[str, dict[str, Any]],
     ) -> dict[str, int]:
         summary = {
             "workers_total": len(workers_status),
@@ -726,6 +1143,12 @@ class PipelineManager:
             "paused_workers": 0,
             "failed_workers": 0,
             "stopped_workers": 0,
+            "sources_total": len(sources_status),
+            "active_sources": 0,
+            "failed_sources": 0,
+            "sinks_total": len(sinks_status),
+            "active_sinks": 0,
+            "failed_sinks": 0,
         }
         for worker in workers_status.values():
             health = worker.get("health")
@@ -741,6 +1164,16 @@ class PipelineManager:
                 summary["failed_workers"] += 1
             elif health == "stopped":
                 summary["stopped_workers"] += 1
+        for source in sources_status.values():
+            if source.get("last_error"):
+                summary["failed_sources"] += 1
+            elif source.get("alive"):
+                summary["active_sources"] += 1
+        for sink in sinks_status.values():
+            if sink.get("last_error"):
+                summary["failed_sinks"] += 1
+            elif sink.get("alive"):
+                summary["active_sinks"] += 1
         return summary
 
     def runtime_snapshot(self, *, poll: bool = True) -> dict[str, Any]:
@@ -762,7 +1195,11 @@ class PipelineManager:
         if not self._failures:
             return
         failure = self._failures[0]
-        message = f"worker {failure['kernel']!r} failed: {failure['error']}"
+        component_type = failure.get("component_type", "worker")
+        message = (
+            f"{component_type} {failure['kernel']!r} failed: "
+            f"{failure['error']}"
+        )
         raise WorkerProcessError(message)
 
     def get_stream(self, name: str):
@@ -797,6 +1234,19 @@ class PipelineManager:
         if spec.stream_name not in self._streams:
             raise KeyError(
                 f"unknown shared memory stream: {spec.stream_name!r}"
+            )
+        configured_source = next(
+            (
+                source.name
+                for source in self.config.sources
+                if source.stream == spec.stream_name
+            ),
+            None,
+        )
+        if configured_source is not None:
+            raise ConfigValidationError(
+                f"stream {spec.stream_name!r} is already driven by source "
+                f"{configured_source!r}"
             )
         self.stop_synthetic_input(spec.stream_name)
         controller = SyntheticSourceController(

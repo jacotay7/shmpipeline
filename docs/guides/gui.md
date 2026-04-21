@@ -16,6 +16,12 @@ Start the application:
 shmpipeline-gui
 ```
 
+Or open an existing pipeline document on launch:
+
+```bash
+shmpipeline-gui path/to/pipeline.yaml
+```
+
 For local use, you can simply press `Build` or `Start` and the GUI will auto-launch a loopback control server for the current document.
 
 If you want to attach to an existing local or remote server instead, start it first:
@@ -31,7 +37,9 @@ The `Server` menu exposes `Launch Local Server`, `Stop Local Server`, `Connect`,
 The main window combines several responsibilities:
 
 - shared-memory table editor
+- source table editor
 - kernel table editor
+- sink table editor
 - remote-server connection and document sync controls
 - validation status and graph summary
 - runtime controls for build, start, pause, resume, stop, and shutdown
@@ -50,12 +58,13 @@ Main window with shared-memory definitions, kernel stages, runtime metrics, and 
 
 1. Load an existing pipeline YAML file or start from an empty document.
 2. Add shared-memory definitions.
-3. Add kernel stages and wire their inputs and outputs.
-4. Validate the config locally.
-5. Press `Build` or `Start` to auto-launch a local server, or connect to an existing server from the `Server` menu.
-6. Push config changes to the connected server when needed.
-7. Inspect runtime status and any relayed worker failures.
-8. Launch viewers for selected streams when connected to a local server.
+3. Add optional source and sink plugins for hardware or external I/O edges.
+4. Add kernel stages and wire their inputs and outputs.
+5. Validate the config locally or against the connected server.
+6. Press `Build` or `Start` to auto-launch a local server, or connect to an existing server from the `Server` menu.
+7. Push config changes to the connected server when needed.
+8. Inspect runtime status and any relayed worker failures.
+9. Launch viewers for selected streams when connected to a local server.
 
 ## Shared memory editor
 
@@ -98,6 +107,29 @@ The kernel dialog exposes:
 Kernel editor with stage ordering, kernel kinds, trigger inputs, outputs, and auxiliary stream bindings.
 :::
 
+## Source And Sink Editors
+
+The source dialog exposes:
+
+- source name
+- source kind
+- target stream
+- parameter YAML
+- source poll interval
+
+The sink dialog exposes:
+
+- sink name
+- sink kind
+- source stream
+- parameter YAML
+- sink read timeout
+- sink pause polling interval
+
+When the GUI is connected to a control server, the kind pickers use the
+server-reported plugin kinds so remote packaged plugins remain selectable even
+when they are not installed on the GUI client machine.
+
 ## Runtime controls
 
 The main window follows the same state model as `PipelineManager`, but all lifecycle commands are sent to the connected server:
@@ -109,9 +141,13 @@ The main window follows the same state model as `PipelineManager`, but all lifec
 - stop
 - shutdown
 
-The runtime table shows worker identity and health, including PID, CPU slot, frame counts, timing, and throughput.
+The runtime pane uses dedicated tabs for worker, source, sink, and synthetic-input status.
 
 If the pipeline fails, the server failure is surfaced back into the GUI through the runtime snapshot and shown to the user.
+
+Worker status includes PID, CPU slot, frame counts, timing, and throughput.
+Source and sink plugin status is shown in dedicated runtime tables alongside
+worker metrics and synthetic inputs.
 
 :::{figure} ../_static/images/gui/gui-runtime-status.png
 :alt: Runtime status table in the shmpipeline GUI showing worker PIDs, health, frame counts, and throughput metrics.
