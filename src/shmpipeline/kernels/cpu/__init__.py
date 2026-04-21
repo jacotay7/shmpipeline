@@ -21,6 +21,7 @@ from shmpipeline.kernels.cpu.leaky_integrator import LeakyIntegratorCpuKernel
 from shmpipeline.kernels.cpu.raise_error import RaiseErrorCpuKernel
 from shmpipeline.kernels.cpu.scale import ScaleCpuKernel
 from shmpipeline.kernels.cpu.scale_offset import ScaleOffsetCpuKernel
+from shmpipeline.kernels.cpu.spot_centroid import SpotCentroidCpuKernel
 
 __all__ = [
     "AddConstantCpuKernel",
@@ -37,5 +38,6 @@ __all__ = [
     "RaiseErrorCpuKernel",
     "ScaleCpuKernel",
     "ScaleOffsetCpuKernel",
+    "SpotCentroidCpuKernel",
     "ShackHartmannCentroidCpuKernel",
 ]

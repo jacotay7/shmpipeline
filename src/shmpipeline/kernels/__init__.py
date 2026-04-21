@@ -50,6 +50,10 @@ _EXPORTS = {
         "shmpipeline.kernels.cpu",
         "ScaleOffsetCpuKernel",
     ),
+    "SpotCentroidCpuKernel": (
+        "shmpipeline.kernels.cpu",
+        "SpotCentroidCpuKernel",
+    ),
     "ShackHartmannCentroidCpuKernel": (
         "shmpipeline.kernels.cpu",
         "ShackHartmannCentroidCpuKernel",
@@ -71,6 +75,7 @@ __all__ = [
     "RaiseErrorCpuKernel",
     "ScaleCpuKernel",
     "ScaleOffsetCpuKernel",
+    "SpotCentroidCpuKernel",
     "ShackHartmannCentroidCpuKernel",
 ]
 

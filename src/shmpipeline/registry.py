@@ -29,6 +29,7 @@ from shmpipeline.kernels.cpu import (
     RaiseErrorCpuKernel,
     ScaleCpuKernel,
     ScaleOffsetCpuKernel,
+    SpotCentroidCpuKernel,
     ShackHartmannCentroidCpuKernel,
 )
 from shmpipeline.sink import Sink, SinkContext
@@ -392,6 +393,7 @@ _DEFAULT_KERNELS: dict[str, type[Kernel]] = {
     RaiseErrorCpuKernel.kind: RaiseErrorCpuKernel,
     ScaleCpuKernel.kind: ScaleCpuKernel,
     ScaleOffsetCpuKernel.kind: ScaleOffsetCpuKernel,
+    SpotCentroidCpuKernel.kind: SpotCentroidCpuKernel,
     ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
 }
 

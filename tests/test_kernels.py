@@ -20,6 +20,7 @@ from shmpipeline.kernels.cpu import (
     RaiseErrorCpuKernel,
     ScaleCpuKernel,
     ScaleOffsetCpuKernel,
+    SpotCentroidCpuKernel,
     ShackHartmannCentroidCpuKernel,
 )
 
@@ -434,6 +435,31 @@ def test_centroid_kernel_computes_tile_centroids():
         ],
         dtype=np.float32,
     )
+    np.testing.assert_allclose(output, expected, rtol=1e-6, atol=1e-6)
+
+
+def test_spot_centroid_kernel_computes_single_centroid():
+    kernel = _instantiate_kernel(
+        SpotCentroidCpuKernel,
+        input_shape=(5, 5),
+        output_shape=(2,),
+        parameters={"threshold": 0.0, "background": 0.0},
+    )
+    output = np.empty(2, dtype=np.float32)
+    image = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 3.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    kernel.compute_into(image, output, {})
+
+    expected = np.array([0.0, 0.75], dtype=np.float32)
     np.testing.assert_allclose(output, expected, rtol=1e-6, atol=1e-6)
 
 

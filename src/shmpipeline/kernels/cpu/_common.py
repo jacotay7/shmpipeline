@@ -173,6 +173,31 @@ if njit is not None:
                         x_weighted / total
                     ) - center
 
+    @njit(cache=True)
+    def spot_centroid(image, destination, threshold, background, weight_power):
+        """Compute one image centroid relative to the image center."""
+        center_y = 0.5 * (image.shape[0] - 1)
+        center_x = 0.5 * (image.shape[1] - 1)
+        total = 0.0
+        y_weighted = 0.0
+        x_weighted = 0.0
+        for row in range(image.shape[0]):
+            for col in range(image.shape[1]):
+                value = image[row, col] - background
+                if value <= threshold:
+                    continue
+                if weight_power != 1.0:
+                    value = value ** weight_power
+                total += value
+                y_weighted += value * row
+                x_weighted += value * col
+        if total <= 0.0:
+            destination[0] = 0.0
+            destination[1] = 0.0
+        else:
+            destination[0] = y_weighted / total - center_y
+            destination[1] = x_weighted / total - center_x
+
 else:
 
     def scale_offset_array(source, offset, destination, gain):
@@ -213,3 +238,19 @@ else:
                 destination[tile_y, tile_x, 1] = (
                     np.sum(x_coords * patch) / total - center
                 )
+
+    def spot_centroid(image, destination, threshold, background, weight_power):
+        """Compute one image centroid relative to the image center."""
+        signal = np.asarray(image, dtype=np.float64) - background
+        signal = np.where(signal > threshold, signal, 0.0)
+        if weight_power != 1.0:
+            signal = signal**weight_power
+        total = float(np.sum(signal))
+        if total <= 0.0:
+            destination[...] = 0.0
+            return
+        y_coords, x_coords = np.indices(signal.shape, dtype=np.float32)
+        center_y = 0.5 * (signal.shape[0] - 1)
+        center_x = 0.5 * (signal.shape[1] - 1)
+        destination[0] = np.sum(y_coords * signal) / total - center_y
+        destination[1] = np.sum(x_coords * signal) / total - center_x
