@@ -239,6 +239,16 @@ def test_main_window_stacks_kernels_under_shared_memory(qapp):
     try:
         assert window._editor_splitter.orientation() == Qt.Vertical
         assert window._main_splitter.orientation() == Qt.Horizontal
+        assert [
+            window._pipeline_editor_tabs.tabText(index)
+            for index in range(window._pipeline_editor_tabs.count())
+        ] == ["Shared Memory", "Kernels"]
+        assert [
+            window._endpoint_editor_tabs.tabText(index)
+            for index in range(window._endpoint_editor_tabs.count())
+        ] == ["Sources", "Sinks"]
+        assert window._pipeline_editor_tabs.currentIndex() == 0
+        assert window._endpoint_editor_tabs.currentIndex() == 0
     finally:
         window.close()
 
@@ -717,5 +727,165 @@ def test_main_window_populates_source_and_sink_runtime_tables(qapp):
         assert window._source_runtime_table.item(0, 4).text() == "12"
         assert window._sink_runtime_table.item(0, 3).text() == "True"
         assert window._sink_runtime_table.item(0, 4).text() == "11"
+    finally:
+        window.close()
+
+
+def test_main_window_shows_synthetic_inputs_in_source_runtime_table(qapp):
+    window = MainWindow(theme_name="light")
+
+    class _FakeSession:
+        connection = type(
+            "Conn",
+            (),
+            {
+                "display_name": "127.0.0.1:9000",
+                "base_url": "",
+                "is_local": True,
+            },
+        )()
+
+        def status(self):
+            return {
+                "state": "running",
+                "placement_policy": "round-robin",
+                "summary": {
+                    "active_workers": 0,
+                    "idle_workers": 0,
+                    "waiting_workers": 0,
+                    "paused_workers": 0,
+                    "failed_workers": 0,
+                    "active_sources": 0,
+                    "failed_sources": 0,
+                    "active_sinks": 0,
+                    "failed_sinks": 0,
+                },
+                "workers": {},
+                "sources": {},
+                "sinks": {},
+                "failures": [],
+                "synthetic_sources": {
+                    "input_frame": {
+                        "pattern": "sine",
+                        "alive": True,
+                        "frames_written": 7,
+                        "effective_rate_hz": 15.5,
+                        "last_error": None,
+                    }
+                },
+            }
+
+        def close(self):
+            return None
+
+    try:
+        window._document = {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                }
+            ],
+            "sources": [],
+            "kernels": [],
+            "sinks": [],
+        }
+        window._manager = _FakeSession()
+
+        window._refresh_runtime_status()
+
+        assert window._source_runtime_table.rowCount() == 1
+        assert window._source_runtime_table.item(0, 0).text() == (
+            "synthetic:input_frame"
+        )
+        assert window._source_runtime_table.item(0, 1).text() == (
+            "synthetic.sine"
+        )
+        assert window._source_runtime_table.item(0, 2).text() == "input_frame"
+        assert window._source_runtime_table.item(0, 3).text() == "True"
+        assert window._source_runtime_table.item(0, 4).text() == "7"
+        assert window._synthetic_table.rowCount() == 1
+        assert "Sources A/F: 1/0" in window._status_label.text()
+        assert "synthetic:input_frame" in window._runtime_output.toPlainText()
+    finally:
+        window.close()
+
+
+def test_main_window_shows_synthetic_inputs_in_source_editor_table(qapp):
+    window = MainWindow(theme_name="light")
+
+    class _FakeSession:
+        connection = type(
+            "Conn",
+            (),
+            {
+                "display_name": "127.0.0.1:9000",
+                "base_url": "",
+                "is_local": True,
+            },
+        )()
+
+        def status(self):
+            return {
+                "state": "running",
+                "placement_policy": "round-robin",
+                "summary": {
+                    "active_workers": 0,
+                    "idle_workers": 0,
+                    "waiting_workers": 0,
+                    "paused_workers": 0,
+                    "failed_workers": 0,
+                    "active_sources": 0,
+                    "failed_sources": 0,
+                    "active_sinks": 0,
+                    "failed_sinks": 0,
+                },
+                "workers": {},
+                "sources": {},
+                "sinks": {},
+                "failures": [],
+                "synthetic_sources": {
+                    "input_frame": {
+                        "pattern": "sine",
+                        "alive": True,
+                        "frames_written": 7,
+                        "effective_rate_hz": 15.5,
+                        "requested_rate_hz": 15.5,
+                        "last_error": None,
+                    }
+                },
+            }
+
+        def synthetic_input_status(self):
+            return self.status()["synthetic_sources"]
+
+        def close(self):
+            return None
+
+    try:
+        window._document = {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                }
+            ],
+            "sources": [],
+            "kernels": [],
+            "sinks": [],
+        }
+        window._manager = _FakeSession()
+
+        window._refresh_runtime_status()
+
+        assert window._source_table.rowCount() == 1
+        assert window._source_table.item(0, 0).text() == "synthetic:input_frame"
+        assert window._source_table.item(0, 1).text() == "synthetic.sine"
+        assert window._source_table.item(0, 2).text() == "input_frame"
+        assert window._source_table.item(0, 3).text() == "15.50 Hz"
     finally:
         window.close()
