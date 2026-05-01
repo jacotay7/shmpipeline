@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Event
 from typing import Any, Mapping
 
@@ -18,11 +18,20 @@ class SourceContext:
 
     config: SourceConfig
     shared_memory: Mapping[str, SharedMemoryConfig]
+    auxiliary_streams: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def stream_spec(self) -> SharedMemoryConfig:
         """Return the shared-memory specification written by the source."""
         return self.shared_memory[self.config.stream]
+
+    @property
+    def auxiliary_specs(self) -> dict[str, SharedMemoryConfig]:
+        """Return auxiliary shared-memory specs keyed by alias."""
+        return {
+            binding.alias: self.shared_memory[binding.name]
+            for binding in self.config.auxiliary
+        }
 
 
 class Source(ABC):
@@ -54,6 +63,12 @@ class Source(ABC):
                 f"source {config.name!r} of kind {cls.kind!r} requires "
                 f"{cls.storage} shared memory for {config.stream!r}"
             )
+        for binding in config.auxiliary:
+            if shared_memory[binding.name].storage != cls.storage:
+                raise ConfigValidationError(
+                    f"source {config.name!r} of kind {cls.kind!r} requires "
+                    f"{cls.storage} shared memory for auxiliary {binding.name!r}"
+                )
 
     def _attach_runtime_events(
         self,
@@ -91,6 +106,20 @@ class Source(ABC):
 
     def open(self) -> None:
         """Prepare the source before the runtime thread starts."""
+
+    def read_auxiliary(self, alias: str, *, timeout: float = 0.01) -> Any | None:
+        """Return one stable auxiliary payload when that stream has data."""
+        auxiliary_streams = getattr(self.context, "auxiliary_streams", {})
+        stream = auxiliary_streams.get(alias)
+        if stream is None or stream.count <= 0:
+            return None
+        try:
+            with stream.locked(timeout=timeout):
+                if stream.count <= 0:
+                    return None
+                return stream.read(safe=True)
+        except TimeoutError:
+            return None
 
     @abstractmethod
     def read(self) -> Any | None:

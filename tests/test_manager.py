@@ -1705,6 +1705,154 @@ def test_manager_runs_source_and_sink_plugins(
     manager.shutdown()
 
 
+def test_manager_wires_auxiliary_streams_into_source_and_sink_plugins(
+    tmp_path, shm_prefix, monkeypatch
+):
+    module_name = f"endpoint_aux_plugins_{shm_prefix}"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            import numpy as np
+
+            from shmpipeline.sink import Sink
+            from shmpipeline.source import Source
+
+
+            CONSUMED = []
+
+
+            class AuxiliarySource(Source):
+                kind = "test.aux_source"
+                storage = "cpu"
+
+                def __init__(self, context):
+                    super().__init__(context)
+                    self._emitted = False
+
+                def read(self):
+                    if self._emitted:
+                        return None
+                    payload = self.read_auxiliary("payload")
+                    if payload is None:
+                        return None
+                    self._emitted = True
+                    return np.asarray(payload, dtype=np.float32)
+
+
+            class AuxiliarySink(Sink):
+                kind = "test.aux_sink"
+                storage = "cpu"
+
+                def consume(self, value):
+                    expected = self.read_auxiliary("expected")
+                    CONSUMED.append(
+                        (
+                            np.asarray(value).copy(),
+                            None if expected is None else np.asarray(expected).copy(),
+                        )
+                    )
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    sys.modules.pop(module_name, None)
+    module = importlib.import_module(module_name)
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_source_aux",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": f"{shm_prefix}_sink_aux",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "test.aux_source",
+                    "stream": f"{shm_prefix}_input",
+                    "auxiliary": {"payload": f"{shm_prefix}_source_aux"},
+                    "poll_interval": 0.01,
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "copy_stage",
+                    "kind": "cpu.copy",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "read_timeout": 0.1,
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "test.aux_sink",
+                    "stream": f"{shm_prefix}_output",
+                    "auxiliary": {"expected": f"{shm_prefix}_sink_aux"},
+                    "read_timeout": 0.1,
+                    "pause_sleep": 0.01,
+                }
+            ],
+        }
+    )
+    registry = get_default_registry().extended(
+        sources=(module.AuxiliarySource,),
+        sinks=(module.AuxiliarySink,),
+    )
+    manager = PipelineManager(config, registry=registry)
+    manager.build()
+    manager.get_stream(f"{shm_prefix}_source_aux").write(
+        np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    )
+    manager.get_stream(f"{shm_prefix}_sink_aux").write(
+        np.array([9.0, 8.0, 7.0, 6.0], dtype=np.float32)
+    )
+    manager.start()
+
+    deadline = time.monotonic() + 2.0
+    while not module.CONSUMED and time.monotonic() < deadline:
+        manager.poll_events()
+        manager.raise_if_failed()
+        time.sleep(1e-3)
+
+    assert module.CONSUMED
+    received, expected = module.CONSUMED[-1]
+    np.testing.assert_allclose(
+        received,
+        np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+    )
+    np.testing.assert_allclose(
+        expected,
+        np.array([9.0, 8.0, 7.0, 6.0], dtype=np.float32),
+    )
+
+    manager.shutdown()
+
+
 def test_manager_runs_custom_dark_flat_operation(shm_prefix):
     config = _make_custom_operation_pipeline_config(
         shm_prefix,

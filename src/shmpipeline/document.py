@@ -118,28 +118,50 @@ def config_to_document(config: PipelineConfig) -> Document:
 
     sources = []
     for source in config.sources:
-        sources.append(
-            {
-                "name": source.name,
-                "kind": source.kind,
-                "stream": source.stream,
-                "parameters": deepcopy(source.parameters),
-                "poll_interval": source.poll_interval,
-            }
-        )
+        item = {
+            "name": source.name,
+            "kind": source.kind,
+            "stream": source.stream,
+            "parameters": deepcopy(source.parameters),
+            "poll_interval": source.poll_interval,
+        }
+        if source.auxiliary:
+            if all(
+                binding.alias == binding.name for binding in source.auxiliary
+            ):
+                item["auxiliary"] = [
+                    binding.name for binding in source.auxiliary
+                ]
+            else:
+                item["auxiliary"] = {
+                    binding.alias: binding.name
+                    for binding in source.auxiliary
+                }
+        sources.append(item)
 
     sinks = []
     for sink in config.sinks:
-        sinks.append(
-            {
-                "name": sink.name,
-                "kind": sink.kind,
-                "stream": sink.stream,
-                "parameters": deepcopy(sink.parameters),
-                "read_timeout": sink.read_timeout,
-                "pause_sleep": sink.pause_sleep,
-            }
-        )
+        item = {
+            "name": sink.name,
+            "kind": sink.kind,
+            "stream": sink.stream,
+            "parameters": deepcopy(sink.parameters),
+            "read_timeout": sink.read_timeout,
+            "pause_sleep": sink.pause_sleep,
+        }
+        if sink.auxiliary:
+            if all(
+                binding.alias == binding.name for binding in sink.auxiliary
+            ):
+                item["auxiliary"] = [
+                    binding.name for binding in sink.auxiliary
+                ]
+            else:
+                item["auxiliary"] = {
+                    binding.alias: binding.name
+                    for binding in sink.auxiliary
+                }
+        sinks.append(item)
 
     return {
         "shared_memory": shared_memory,

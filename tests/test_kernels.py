@@ -408,6 +408,59 @@ def test_leaky_integrator_kernel_updates_state():
     np.testing.assert_allclose(second_output, expected_second)
 
 
+def test_leaky_integrator_kernel_uses_auxiliary_gain_when_override_enabled():
+    kernel = _instantiate_kernel(
+        LeakyIntegratorCpuKernel,
+        input_shape=(1,),
+        output_shape=(1,),
+        parameters={"leak": 0.0, "gain": 0.5},
+        auxiliary=[
+            {"name": "gain_stream", "alias": "gain", "shape": (1,)},
+            {
+                "name": "override_stream",
+                "alias": "override_enabled",
+                "shape": (1,),
+            },
+        ],
+    )
+    output = np.empty(1, dtype=np.float32)
+    trigger = np.array([2.0], dtype=np.float32)
+
+    kernel.compute_into(
+        trigger,
+        output,
+        {
+            "gain": np.array([0.0], dtype=np.float32),
+            "override_enabled": np.array([0.0], dtype=np.float32),
+        },
+    )
+    np.testing.assert_allclose(output, np.array([1.0], dtype=np.float32))
+
+    kernel = _instantiate_kernel(
+        LeakyIntegratorCpuKernel,
+        input_shape=(1,),
+        output_shape=(1,),
+        parameters={"leak": 0.0, "gain": 0.5},
+        auxiliary=[
+            {"name": "gain_stream", "alias": "gain", "shape": (1,)},
+            {
+                "name": "override_stream",
+                "alias": "override_enabled",
+                "shape": (1,),
+            },
+        ],
+    )
+    kernel.compute_into(
+        trigger,
+        output,
+        {
+            "gain": np.array([0.0], dtype=np.float32),
+            "override_enabled": np.array([1.0], dtype=np.float32),
+        },
+    )
+    np.testing.assert_allclose(output, np.array([0.0], dtype=np.float32))
+
+
 def test_centroid_kernel_computes_tile_centroids():
     kernel = _instantiate_kernel(
         ShackHartmannCentroidCpuKernel,

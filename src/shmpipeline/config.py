@@ -72,6 +72,32 @@ def _normalize_parameters(value: Any, *, context: str) -> dict[str, Any]:
     return dict(value)
 
 
+def _normalize_auxiliary_bindings(
+    value: Any,
+    *,
+    context: str,
+) -> tuple[AuxiliaryBinding, ...]:
+    if value is None or value == () or value == []:
+        return ()
+    if isinstance(value, Mapping):
+        return tuple(
+            AuxiliaryBinding(
+                alias=_normalize_name(
+                    alias, context=f"{context} alias"
+                ),
+                name=_normalize_name(
+                    stream_name,
+                    context=f"{context} stream name",
+                ),
+            )
+            for alias, stream_name in value.items()
+        )
+    return tuple(
+        AuxiliaryBinding(alias=item, name=item)
+        for item in _normalize_names(value, context=context)
+    )
+
+
 def _normalize_positive_float(value: Any, *, context: str) -> float:
     try:
         normalized = float(value)
@@ -219,29 +245,10 @@ class KernelConfig:
         output_name = _normalize_name(
             output_name, context=f"output for {name}"
         )
-        if auxiliary_raw is None or auxiliary_raw == () or auxiliary_raw == []:
-            auxiliary = ()
-        elif isinstance(auxiliary_raw, Mapping):
-            auxiliary = tuple(
-                AuxiliaryBinding(
-                    alias=_normalize_name(
-                        alias, context=f"auxiliary alias for {name}"
-                    ),
-                    name=_normalize_name(
-                        stream_name,
-                        context=f"auxiliary stream name for {name}",
-                    ),
-                )
-                for alias, stream_name in auxiliary_raw.items()
-            )
-        else:
-            auxiliary = tuple(
-                AuxiliaryBinding(alias=item, name=item)
-                for item in _normalize_names(
-                    auxiliary_raw,
-                    context=f"auxiliary for {name}",
-                )
-            )
+        auxiliary = _normalize_auxiliary_bindings(
+            auxiliary_raw,
+            context=f"auxiliary for {name}",
+        )
         operation = data.get("operation")
         if operation is not None:
             operation = _normalize_name(
@@ -329,6 +336,7 @@ class SourceConfig:
     name: str
     kind: str
     stream: str
+    auxiliary: tuple[AuxiliaryBinding, ...] = field(default_factory=tuple)
     parameters: dict[str, Any] = field(default_factory=dict)
     poll_interval: float = 0.01
 
@@ -343,6 +351,7 @@ class SourceConfig:
                 "name",
                 "kind",
                 "stream",
+                "auxiliary",
                 "parameters",
                 "poll_interval",
             },
@@ -353,6 +362,10 @@ class SourceConfig:
         )
         stream = _normalize_name(
             data.get("stream"), context=f"stream for source {name}"
+        )
+        auxiliary = _normalize_auxiliary_bindings(
+            data.get("auxiliary", ()),
+            context=f"auxiliary for {name}",
         )
         parameters = _normalize_parameters(
             data.get("parameters", {}),
@@ -366,9 +379,25 @@ class SourceConfig:
             name=name,
             kind=kind,
             stream=stream,
+            auxiliary=auxiliary,
             parameters=parameters,
             poll_interval=poll_interval,
         )
+
+    @property
+    def auxiliary_names(self) -> tuple[str, ...]:
+        """Return auxiliary shared-memory names in config order."""
+        return tuple(binding.name for binding in self.auxiliary)
+
+    @property
+    def auxiliary_aliases(self) -> tuple[str, ...]:
+        """Return auxiliary aliases in config order."""
+        return tuple(binding.alias for binding in self.auxiliary)
+
+    @property
+    def auxiliary_by_alias(self) -> dict[str, str]:
+        """Return auxiliary bindings keyed by alias."""
+        return {binding.alias: binding.name for binding in self.auxiliary}
 
 
 @dataclass(frozen=True)
@@ -382,6 +411,7 @@ class SinkConfig:
     name: str
     kind: str
     stream: str
+    auxiliary: tuple[AuxiliaryBinding, ...] = field(default_factory=tuple)
     parameters: dict[str, Any] = field(default_factory=dict)
     read_timeout: float = 1.0
     pause_sleep: float = 0.01
@@ -397,6 +427,7 @@ class SinkConfig:
                 "name",
                 "kind",
                 "stream",
+                "auxiliary",
                 "parameters",
                 "read_timeout",
                 "pause_sleep",
@@ -408,6 +439,10 @@ class SinkConfig:
         )
         stream = _normalize_name(
             data.get("stream"), context=f"stream for sink {name}"
+        )
+        auxiliary = _normalize_auxiliary_bindings(
+            data.get("auxiliary", ()),
+            context=f"auxiliary for {name}",
         )
         parameters = _normalize_parameters(
             data.get("parameters", {}),
@@ -425,10 +460,26 @@ class SinkConfig:
             name=name,
             kind=kind,
             stream=stream,
+            auxiliary=auxiliary,
             parameters=parameters,
             read_timeout=read_timeout,
             pause_sleep=pause_sleep,
         )
+
+    @property
+    def auxiliary_names(self) -> tuple[str, ...]:
+        """Return auxiliary shared-memory names in config order."""
+        return tuple(binding.name for binding in self.auxiliary)
+
+    @property
+    def auxiliary_aliases(self) -> tuple[str, ...]:
+        """Return auxiliary aliases in config order."""
+        return tuple(binding.alias for binding in self.auxiliary)
+
+    @property
+    def auxiliary_by_alias(self) -> dict[str, str]:
+        """Return auxiliary bindings keyed by alias."""
+        return {binding.alias: binding.name for binding in self.auxiliary}
 
 
 @dataclass(frozen=True)
@@ -542,16 +593,28 @@ class PipelineConfig:
                     f"memory: {missing_list}"
                 )
         for source in self.sources:
-            if source.stream not in available:
+            missing = [
+                name
+                for name in (source.stream, *source.auxiliary_names)
+                if name not in available
+            ]
+            if missing:
+                missing_list = ", ".join(sorted(set(missing)))
                 raise ConfigValidationError(
                     f"source {source.name!r} references undefined shared "
-                    f"memory: {source.stream}"
+                    f"memory: {missing_list}"
                 )
         for sink in self.sinks:
-            if sink.stream not in available:
+            missing = [
+                name
+                for name in (sink.stream, *sink.auxiliary_names)
+                if name not in available
+            ]
+            if missing:
+                missing_list = ", ".join(sorted(set(missing)))
                 raise ConfigValidationError(
                     f"sink {sink.name!r} references undefined shared "
-                    f"memory: {sink.stream}"
+                    f"memory: {missing_list}"
                 )
 
     @property

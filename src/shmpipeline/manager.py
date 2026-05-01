@@ -442,18 +442,20 @@ class PipelineManager:
         for source_config in self.config.sources:
             self.registry.validate_source(source_config, shared_by_name)
             self._logger.info(
-                "validated source: name=%s kind=%s stream=%s",
+                "validated source: name=%s kind=%s stream=%s auxiliary=%s",
                 source_config.name,
                 source_config.kind,
                 source_config.stream,
+                source_config.auxiliary_by_alias,
             )
         for sink_config in self.config.sinks:
             self.registry.validate_sink(sink_config, shared_by_name)
             self._logger.info(
-                "validated sink: name=%s kind=%s stream=%s",
+                "validated sink: name=%s kind=%s stream=%s auxiliary=%s",
                 sink_config.name,
                 sink_config.kind,
                 sink_config.stream,
+                sink_config.auxiliary_by_alias,
             )
         for spec in self.config.shared_memory:
             self._streams[spec.name] = self._build_stream(spec)
@@ -638,7 +640,11 @@ class PipelineManager:
         """Start all configured source plugins."""
         shared_by_name = self.config.shared_memory_by_name
         for source_config in self.config.sources:
-            source = self.registry.create_source(source_config, shared_by_name)
+            source = self.registry.create_source(
+                source_config,
+                shared_by_name,
+                self._streams,
+            )
             controller = _SourceController(
                 stream=self._streams[source_config.stream],
                 source=source,
@@ -652,7 +658,11 @@ class PipelineManager:
         """Start all configured sink plugins."""
         shared_by_name = self.config.shared_memory_by_name
         for sink_config in self.config.sinks:
-            sink = self.registry.create_sink(sink_config, shared_by_name)
+            sink = self.registry.create_sink(
+                sink_config,
+                shared_by_name,
+                self._streams,
+            )
             controller = _SinkController(
                 stream=self._streams[sink_config.stream],
                 sink=sink,

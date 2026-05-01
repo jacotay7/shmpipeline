@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import partial
 from importlib.metadata import entry_points
 from importlib.util import find_spec
-from typing import Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from shmpipeline.config import (
     KernelConfig,
@@ -323,12 +323,21 @@ class KernelRegistry:
         self,
         config: SourceConfig,
         shared_memory: Mapping[str, SharedMemoryConfig],
+        streams: Mapping[str, Any] | None = None,
     ) -> Source:
         """Instantiate a source after validation."""
         source_cls = self.get_source(config.kind)
         source_cls.validate_config(config, shared_memory)
+        auxiliary_streams = {
+            binding.alias: streams[binding.name]
+            for binding in config.auxiliary
+        } if streams is not None else {}
         return source_cls(
-            SourceContext(config=config, shared_memory=shared_memory)
+            SourceContext(
+                config=config,
+                shared_memory=shared_memory,
+                auxiliary_streams=auxiliary_streams,
+            )
         )
 
     def validate_sink(
@@ -343,12 +352,21 @@ class KernelRegistry:
         self,
         config: SinkConfig,
         shared_memory: Mapping[str, SharedMemoryConfig],
+        streams: Mapping[str, Any] | None = None,
     ) -> Sink:
         """Instantiate a sink after validation."""
         sink_cls = self.get_sink(config.kind)
         sink_cls.validate_config(config, shared_memory)
+        auxiliary_streams = {
+            binding.alias: streams[binding.name]
+            for binding in config.auxiliary
+        } if streams is not None else {}
         return sink_cls(
-            SinkContext(config=config, shared_memory=shared_memory)
+            SinkContext(
+                config=config,
+                shared_memory=shared_memory,
+                auxiliary_streams=auxiliary_streams,
+            )
         )
 
 

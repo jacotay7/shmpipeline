@@ -352,6 +352,70 @@ def test_kernel_config_accepts_named_auxiliary_bindings():
     }
 
 
+def test_source_and_sink_configs_accept_named_auxiliary_bindings():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "source_aux",
+                    "shape": [1],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "output_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "sink_aux",
+                    "shape": [1],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "example.camera",
+                    "stream": "input_frame",
+                    "auxiliary": {"enabled": "source_aux"},
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "copy",
+                    "kind": "cpu.copy",
+                    "input": "input_frame",
+                    "output": "output_frame",
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "example.display",
+                    "stream": "output_frame",
+                    "auxiliary": {"mask": "sink_aux"},
+                }
+            ],
+        }
+    )
+
+    assert config.sources[0].auxiliary_aliases == ("enabled",)
+    assert config.sources[0].auxiliary_names == ("source_aux",)
+    assert config.sources[0].auxiliary_by_alias == {"enabled": "source_aux"}
+    assert config.sinks[0].auxiliary_aliases == ("mask",)
+    assert config.sinks[0].auxiliary_names == ("sink_aux",)
+    assert config.sinks[0].auxiliary_by_alias == {"mask": "sink_aux"}
+
+
 def test_custom_operation_rejects_unsupported_function():
     from shmpipeline import PipelineManager
 

@@ -42,6 +42,9 @@ class PipelineGraph:
         self._kernel_consumers = {
             stream_name: [] for stream_name in self._shared_by_name
         }
+        self._source_consumers = {
+            stream_name: [] for stream_name in self._shared_by_name
+        }
         self._sink_consumers = {
             stream_name: [] for stream_name in self._shared_by_name
         }
@@ -52,8 +55,12 @@ class PipelineGraph:
                 self._kernel_consumers[binding.name].append(kernel.name)
         for source in config.sources:
             self._source_producers[source.stream].append(source.name)
+            for binding in source.auxiliary:
+                self._source_consumers[binding.name].append(source.name)
         for sink in config.sinks:
             self._sink_consumers[sink.stream].append(sink.name)
+            for binding in sink.auxiliary:
+                self._sink_consumers[binding.name].append(sink.name)
 
         self._producers = {
             stream_name: [
@@ -65,6 +72,7 @@ class PipelineGraph:
         self._consumers = {
             stream_name: [
                 *self._kernel_consumers[stream_name],
+                *self._source_consumers[stream_name],
                 *self._sink_consumers[stream_name],
             ]
             for stream_name in self._shared_by_name
@@ -80,6 +88,15 @@ class PipelineGraph:
         """Return the directed edges in stream-kernel-stream form."""
         edges: list[GraphEdge] = []
         for source in self.config.sources:
+            for binding in source.auxiliary:
+                edges.append(
+                    GraphEdge(
+                        source=binding.name,
+                        target=source.name,
+                        role=f"auxiliary:{binding.alias}",
+                        stream=binding.name,
+                    )
+                )
             edges.append(
                 GraphEdge(
                     source=source.name,
@@ -115,6 +132,15 @@ class PipelineGraph:
                 )
             )
         for sink in self.config.sinks:
+            for binding in sink.auxiliary:
+                edges.append(
+                    GraphEdge(
+                        source=binding.name,
+                        target=sink.name,
+                        role=f"auxiliary:{binding.alias}",
+                        stream=binding.name,
+                    )
+                )
             edges.append(
                 GraphEdge(
                     source=sink.stream,
@@ -135,7 +161,7 @@ class PipelineGraph:
                     name
                     for name, producers in self._kernel_producers.items()
                     if not producers
-                    and self._kernel_consumers[name]
+                    and self._consumers[name]
                     and name not in explicit_sources
                 }
             )
@@ -149,7 +175,7 @@ class PipelineGraph:
                 explicit_sinks
                 | {
                     name
-                    for name, consumers in self._kernel_consumers.items()
+                    for name, consumers in self._consumers.items()
                     if not consumers
                     and self._kernel_producers[name]
                     and name not in explicit_sinks
@@ -243,6 +269,7 @@ class PipelineGraph:
                     "name": source.name,
                     "kind": source.kind,
                     "stream": source.stream,
+                    "auxiliary": source.auxiliary_by_alias,
                     "parameters": dict(source.parameters),
                     "downstream_kernels": tuple(
                         sorted(self._kernel_consumers[source.stream])
@@ -267,6 +294,7 @@ class PipelineGraph:
                     "name": sink.name,
                     "kind": sink.kind,
                     "stream": sink.stream,
+                    "auxiliary": sink.auxiliary_by_alias,
                     "parameters": dict(sink.parameters),
                     "upstream_kernels": tuple(
                         sorted(self._kernel_producers[sink.stream])
@@ -309,10 +337,20 @@ class PipelineGraph:
                 downstream = self._kernel_consumers[source.stream] or [
                     "external"
                 ]
+                auxiliary = source.auxiliary_by_alias
+                auxiliary_text = (
+                    ", ".join(
+                        f"{alias}={stream_name}"
+                        for alias, stream_name in auxiliary.items()
+                    )
+                    if auxiliary
+                    else "none"
+                )
                 lines.append(
                     "- "
                     f"{source.name} ({source.kind}) "
                     f"stream={source.stream} "
+                    f"auxiliary={auxiliary_text} "
                     f"downstream={', '.join(downstream)}"
                 )
         else:
@@ -349,10 +387,20 @@ class PipelineGraph:
         if self.config.sinks:
             for sink in self.config.sinks:
                 upstream = self._kernel_producers[sink.stream] or ["external"]
+                auxiliary = sink.auxiliary_by_alias
+                auxiliary_text = (
+                    ", ".join(
+                        f"{alias}={stream_name}"
+                        for alias, stream_name in auxiliary.items()
+                    )
+                    if auxiliary
+                    else "none"
+                )
                 lines.append(
                     "- "
                     f"{sink.name} ({sink.kind}) "
                     f"stream={sink.stream} "
+                    f"auxiliary={auxiliary_text} "
                     f"upstream={', '.join(upstream)}"
                 )
         else:
