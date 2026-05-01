@@ -134,8 +134,7 @@ def config_to_document(config: PipelineConfig) -> Document:
                 ]
             else:
                 item["auxiliary"] = {
-                    binding.alias: binding.name
-                    for binding in source.auxiliary
+                    binding.alias: binding.name for binding in source.auxiliary
                 }
         sources.append(item)
 
@@ -158,8 +157,7 @@ def config_to_document(config: PipelineConfig) -> Document:
                 ]
             else:
                 item["auxiliary"] = {
-                    binding.alias: binding.name
-                    for binding in sink.auxiliary
+                    binding.alias: binding.name for binding in sink.auxiliary
                 }
         sinks.append(item)
 

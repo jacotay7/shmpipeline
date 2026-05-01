@@ -187,7 +187,7 @@ if njit is not None:
                 if value <= threshold:
                     continue
                 if weight_power != 1.0:
-                    value = value ** weight_power
+                    value = value**weight_power
                 total += value
                 y_weighted += value * row
                 x_weighted += value * col

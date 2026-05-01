@@ -107,7 +107,9 @@ class Source(ABC):
     def open(self) -> None:
         """Prepare the source before the runtime thread starts."""
 
-    def read_auxiliary(self, alias: str, *, timeout: float = 0.01) -> Any | None:
+    def read_auxiliary(
+        self, alias: str, *, timeout: float = 0.01
+    ) -> Any | None:
         """Return one stable auxiliary payload when that stream has data."""
         auxiliary_streams = getattr(self.context, "auxiliary_streams", {})
         stream = auxiliary_streams.get(alias)

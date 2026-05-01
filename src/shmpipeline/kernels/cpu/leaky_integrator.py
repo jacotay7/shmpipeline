@@ -44,7 +44,9 @@ class LeakyIntegratorCpuKernel(CpuKernel):
         aliases = set(config.auxiliary_aliases)
         unknown_aliases = aliases - cls._DYNAMIC_PARAMETER_ALIASES
         if unknown_aliases:
-            unknown_list = ", ".join(sorted(repr(alias) for alias in unknown_aliases))
+            unknown_list = ", ".join(
+                sorted(repr(alias) for alias in unknown_aliases)
+            )
             raise ConfigValidationError(
                 f"kernel {config.name!r} supports only auxiliary aliases 'gain', 'leak', and 'override_enabled', got {unknown_list}"
             )
@@ -114,8 +116,12 @@ class LeakyIntegratorCpuKernel(CpuKernel):
         leak = self.leak
         gain = self.gain
         if use_auxiliary:
-            leak = self._resolve_scalar(auxiliary_inputs, self._leak_alias, leak)
-            gain = self._resolve_scalar(auxiliary_inputs, self._gain_alias, gain)
+            leak = self._resolve_scalar(
+                auxiliary_inputs, self._leak_alias, leak
+            )
+            gain = self._resolve_scalar(
+                auxiliary_inputs, self._gain_alias, gain
+            )
         leaky_integrator_step(
             np.asarray(trigger_input),
             self.state,

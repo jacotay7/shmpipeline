@@ -82,9 +82,7 @@ def _normalize_auxiliary_bindings(
     if isinstance(value, Mapping):
         return tuple(
             AuxiliaryBinding(
-                alias=_normalize_name(
-                    alias, context=f"{context} alias"
-                ),
+                alias=_normalize_name(alias, context=f"{context} alias"),
                 name=_normalize_name(
                     stream_name,
                     context=f"{context} stream name",

@@ -20,8 +20,8 @@ from shmpipeline.kernels.cpu import (
     RaiseErrorCpuKernel,
     ScaleCpuKernel,
     ScaleOffsetCpuKernel,
-    SpotCentroidCpuKernel,
     ShackHartmannCentroidCpuKernel,
+    SpotCentroidCpuKernel,
 )
 
 try:

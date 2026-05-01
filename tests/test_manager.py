@@ -3,9 +3,12 @@ from __future__ import annotations
 import importlib
 import io
 import logging
+import os
+import subprocess
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import numpy as np
 import pyshmem
@@ -30,6 +33,26 @@ except Exception:  # pragma: no cover - exercised when torch is unavailable
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
 
 CUDA_AVAILABLE = torch is not None and torch.cuda.is_available()
+
+
+def _run_python_child(code: str, *, extra_paths: tuple[str, ...] = ()):
+    env = dict(os.environ)
+    pythonpath_entries = [
+        str(Path(pyshmem.__file__).resolve().parents[1]),
+        str(Path(__file__).resolve().parents[1] / "src"),
+        *extra_paths,
+    ]
+    existing = env.get("PYTHONPATH")
+    if existing:
+        pythonpath_entries.append(existing)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_entries)
+    return subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def _wait_for_next_write(
@@ -1063,6 +1086,40 @@ def test_manager_build_reuses_compatible_existing_shared_memory(shm_prefix):
     finally:
         existing_input.close()
         existing_output.close()
+        manager.shutdown(force=True)
+
+
+def test_manager_owned_stream_survives_external_client_exit(shm_prefix):
+    input_name = f"{shm_prefix}_input"
+    payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    manager = PipelineManager(
+        _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
+    )
+
+    manager.build()
+    try:
+        manager.get_stream(input_name).write(payload)
+
+        child = _run_python_child(
+            "import pyshmem; "
+            f"shm = pyshmem.open({input_name!r}); "
+            "print(shm.read().tolist())"
+        )
+
+        assert child.returncode == 0, child.stderr
+        assert child.stdout.strip() == str(payload.tolist())
+        assert "resource_tracker" not in child.stderr
+
+        reopened = pyshmem.open(input_name)
+        np.testing.assert_allclose(reopened.read(), payload)
+        reopened.close()
+
+        spec = manager.config.shared_memory_by_name[input_name]
+        reusable = manager._open_existing_stream(spec)
+        assert reusable is not None
+        np.testing.assert_allclose(reusable.read(), payload)
+        reusable.close()
+    finally:
         manager.shutdown(force=True)
 
 
