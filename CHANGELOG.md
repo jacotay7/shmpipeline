@@ -5,7 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog, and this project follows Semantic
 Versioning.
 
-## [1.0.0] - Pending
+## [1.0.1]
+
+There is now a standard and defined/supported way to add "plugins" which are sources/sinks for the pipeline.
+This should like you create hardware drivers as sources and sinks for shared memory objects.
+
+## [1.0.0]
 
 This will be the first stable public release of `shmpipeline`.
 

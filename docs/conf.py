@@ -10,7 +10,7 @@ sys.path.insert(0, str(SRC))
 
 project = "shmpipeline"
 author = "Jacob Taylor"
-release = "1.0.0"
+release = "1.0.1"
 version = release
 
 extensions = [

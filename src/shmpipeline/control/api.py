@@ -79,7 +79,7 @@ def create_control_app(
 
     app = FastAPI(
         title="shmpipeline control plane",
-        version="1.0.0",
+        version="1.0.1",
         lifespan=lifespan,
     )
     auth_dependencies = [Depends(_require_token(token))]
