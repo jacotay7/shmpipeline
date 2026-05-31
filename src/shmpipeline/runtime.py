@@ -141,7 +141,14 @@ def _read_worker_input(stream: Any):
 def _write_worker_output(
     output_stream: Any, output_view: Any, value: Any
 ) -> None:
-    """Publish one output buffer while keeping GPU mirrors and metadata consistent."""
+    """Publish one output buffer while keeping GPU mirrors and metadata consistent.
+
+    Accesses pyshmem private API (_mark_write_started, _finish_write, _array)
+    intentionally: the worker already holds the stream lock, so the public
+    write() path (which re-acquires the lock) cannot be used without deadlock.
+    This avoids an extra lock round-trip on every frame.  See CLAUDE.md for
+    the full coupling contract.
+    """
     output_stream._mark_write_started()
     if isinstance(output_view, np.ndarray):
         np.copyto(output_view, value)
@@ -164,7 +171,12 @@ def _compute_and_publish_output(
     output_stream: Any,
     output_view: Any,
 ) -> None:
-    """Compute one kernel result and publish it to the output stream."""
+    """Compute one kernel result and publish it to the output stream.
+
+    CPU kernels use a zero-copy fast path: compute_into writes directly into
+    the locked output_view (the shared-memory buffer itself).  GPU kernels
+    write into kernel.output_buffer first, then copy into the CUDA IPC tensor.
+    """
     if getattr(kernel, "storage", None) == "cpu" and isinstance(
         output_view, np.ndarray
     ):

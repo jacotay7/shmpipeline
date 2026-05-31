@@ -2083,6 +2083,7 @@ def test_color_formatter_emits_ansi_sequences():
     assert "colored message" in output
 
 
+@pytest.mark.slow
 def test_manager_runs_basic_ao_pipeline_and_verifies_all_stages(shm_prefix):
     config = _make_ao_pipeline_config(shm_prefix)
     manager = PipelineManager(config)

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from threading import Event
 from typing import Any, Mapping
 
+from shmpipeline._endpoint_base import _EndpointBase
 from shmpipeline.config import SharedMemoryConfig, SourceConfig
 from shmpipeline.errors import ConfigValidationError
 
@@ -34,7 +34,7 @@ class SourceContext:
         }
 
 
-class Source(ABC):
+class Source(_EndpointBase, ABC):
     """Base class for source plugins managed by the runtime.
 
     Sources are manager-owned thread plugins. Implementations normally
@@ -47,9 +47,8 @@ class Source(ABC):
     storage = "cpu"
 
     def __init__(self, context: SourceContext) -> None:
+        _EndpointBase.__init__(self)
         self.context = context
-        self._stop_event: Event | None = None
-        self._pause_event: Event | None = None
 
     @classmethod
     def validate_config(
@@ -70,58 +69,8 @@ class Source(ABC):
                     f"{cls.storage} shared memory for auxiliary {binding.name!r}"
                 )
 
-    def _attach_runtime_events(
-        self,
-        *,
-        stop_event: Event,
-        pause_event: Event,
-    ) -> None:
-        self._stop_event = stop_event
-        self._pause_event = pause_event
-
-    def stop_requested(self) -> bool:
-        """Return whether the manager has requested that the source stop."""
-        return bool(self._stop_event is not None and self._stop_event.is_set())
-
-    def paused(self) -> bool:
-        """Return whether the manager is currently paused."""
-        return bool(
-            self._pause_event is not None and self._pause_event.is_set()
-        )
-
-    def wait(self, duration: float) -> bool:
-        """Wait cooperatively for up to ``duration`` seconds.
-
-        Returns ``True`` when a stop was requested before the wait completed.
-        This is intended for sources that want a simple cadence without having
-        to manage their own stop-event plumbing.
-        """
-        deadline = time.monotonic() + max(0.0, float(duration))
-        while not self.stop_requested():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0.0:
-                return False
-            time.sleep(min(remaining, 0.05))
-        return True
-
     def open(self) -> None:
         """Prepare the source before the runtime thread starts."""
-
-    def read_auxiliary(
-        self, alias: str, *, timeout: float = 0.01
-    ) -> Any | None:
-        """Return one stable auxiliary payload when that stream has data."""
-        auxiliary_streams = getattr(self.context, "auxiliary_streams", {})
-        stream = auxiliary_streams.get(alias)
-        if stream is None or stream.count <= 0:
-            return None
-        try:
-            with stream.locked(timeout=timeout):
-                if stream.count <= 0:
-                    return None
-                return stream.read(safe=True)
-        except TimeoutError:
-            return None
 
     @abstractmethod
     def read(self) -> Any | None:
