@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from threading import Event
 from typing import Any, Mapping
 
 from shmpipeline._endpoint_base import _EndpointBase

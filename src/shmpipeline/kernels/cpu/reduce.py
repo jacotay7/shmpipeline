@@ -26,7 +26,11 @@ class ReduceCpuKernel(CpuKernel):
         Reduction operation — one of ``"sum"``, ``"mean"``, ``"max"``,
         ``"min"``.  Default is ``"mean"``.
 
-    Example YAML config::
+    Notes
+    -----
+    Example YAML configuration:
+
+    .. code-block:: yaml
 
         kernels:
           - name: mean_signal
