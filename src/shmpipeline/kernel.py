@@ -6,8 +6,6 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-import numpy as np
-
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.errors import ConfigValidationError
 
@@ -64,10 +62,6 @@ class Kernel(ABC):
     def __init__(self, context: KernelContext) -> None:
         """Store validated kernel context and normalized parameters."""
         self.context = context
-        self.output_buffer = np.empty(
-            self.context.output_spec.shape,
-            dtype=self.context.output_spec.dtype,
-        )
 
     @classmethod
     def validate_config(

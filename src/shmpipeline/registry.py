@@ -15,27 +15,30 @@ from shmpipeline.config import (
 )
 from shmpipeline.errors import ConfigValidationError
 from shmpipeline.kernel import Kernel, KernelContext
-from shmpipeline.kernels.cpu import (
-    AddConstantCpuKernel,
-    AffineTransformCpuKernel,
-    CopyCpuKernel,
-    CustomOperationCpuKernel,
-    ElementwiseAddCpuKernel,
-    ElementwiseDivideCpuKernel,
-    ElementwiseMultiplyCpuKernel,
-    ElementwiseSubtractCpuKernel,
-    FlattenCpuKernel,
-    LeakyIntegratorCpuKernel,
-    RaiseErrorCpuKernel,
-    ScaleCpuKernel,
-    ScaleOffsetCpuKernel,
-    ShackHartmannCentroidCpuKernel,
-    SpotCentroidCpuKernel,
-)
 from shmpipeline.sink import Sink, SinkContext
 from shmpipeline.source import Source, SourceContext
 
 _TORCH_AVAILABLE = find_spec("torch") is not None
+
+_DEFAULT_CPU_KINDS = (
+    "cpu.add_constant",
+    "cpu.affine_transform",
+    "cpu.copy",
+    "cpu.custom_operation",
+    "cpu.elementwise_add",
+    "cpu.elementwise_divide",
+    "cpu.elementwise_multiply",
+    "cpu.elementwise_subtract",
+    "cpu.flatten",
+    "cpu.leaky_integrator",
+    "cpu.raise_error",
+    "cpu.reduce",
+    "cpu.scale",
+    "cpu.scale_offset",
+    "cpu.shack_hartmann_centroid",
+    "cpu.spot_centroid",
+    "cpu.centroid",
+)
 
 if _TORCH_AVAILABLE:
     _DEFAULT_GPU_KINDS = (
@@ -54,6 +57,51 @@ if _TORCH_AVAILABLE:
         "gpu.scale_offset",
         "gpu.shack_hartmann_centroid",
     )
+
+
+def _load_default_cpu_kernel(kind: str) -> type[Kernel]:
+    from shmpipeline.kernels.cpu import (
+        AddConstantCpuKernel,
+        AffineTransformCpuKernel,
+        CopyCpuKernel,
+        CustomOperationCpuKernel,
+        ElementwiseAddCpuKernel,
+        ElementwiseDivideCpuKernel,
+        ElementwiseMultiplyCpuKernel,
+        ElementwiseSubtractCpuKernel,
+        FlattenCpuKernel,
+        LeakyIntegratorCpuKernel,
+        RaiseErrorCpuKernel,
+        ReduceCpuKernel,
+        ScaleCpuKernel,
+        ScaleOffsetCpuKernel,
+        ShackHartmannCentroidCpuKernel,
+        SpotCentroidCpuKernel,
+    )
+
+    _cpu_map: dict[str, type[Kernel]] = {
+        AddConstantCpuKernel.kind: AddConstantCpuKernel,
+        AffineTransformCpuKernel.kind: AffineTransformCpuKernel,
+        CopyCpuKernel.kind: CopyCpuKernel,
+        CustomOperationCpuKernel.kind: CustomOperationCpuKernel,
+        ElementwiseAddCpuKernel.kind: ElementwiseAddCpuKernel,
+        ElementwiseDivideCpuKernel.kind: ElementwiseDivideCpuKernel,
+        ElementwiseMultiplyCpuKernel.kind: ElementwiseMultiplyCpuKernel,
+        ElementwiseSubtractCpuKernel.kind: ElementwiseSubtractCpuKernel,
+        FlattenCpuKernel.kind: FlattenCpuKernel,
+        LeakyIntegratorCpuKernel.kind: LeakyIntegratorCpuKernel,
+        RaiseErrorCpuKernel.kind: RaiseErrorCpuKernel,
+        ReduceCpuKernel.kind: ReduceCpuKernel,
+        ScaleCpuKernel.kind: ScaleCpuKernel,
+        ScaleOffsetCpuKernel.kind: ScaleOffsetCpuKernel,
+        ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
+        "cpu.centroid": ShackHartmannCentroidCpuKernel,
+        SpotCentroidCpuKernel.kind: SpotCentroidCpuKernel,
+    }
+    result = _cpu_map.get(kind)
+    if result is None:
+        raise ConfigValidationError(f"unknown CPU kernel kind: {kind!r}")
+    return result
 
 
 def _load_default_gpu_kernel(kind: str) -> type[Kernel]:
@@ -135,9 +183,10 @@ class KernelRegistry:
     """Resolve kernel kinds to implementation classes.
 
     Registries are the extension point for third-party kernels, sources, and
-    sinks. The default registry contains the built-in CPU kernels, lazily loads
-    GPU kernels when the optional torch dependency is available, and also picks
-    up packaged plugins exposed through entry points.
+    sinks. The default registry lazily loads built-in CPU and GPU kernels on
+    first use, and also picks up packaged plugins exposed through entry points.
+    Lazy loading keeps worker process startup fast: each worker only imports
+    the single kernel kind it actually runs.
     """
 
     def __init__(
@@ -405,37 +454,24 @@ def _sink_kind(sink_cls: type[Sink]) -> str:
     return kind.strip()
 
 
-_DEFAULT_KERNELS: dict[str, type[Kernel]] = {
-    AddConstantCpuKernel.kind: AddConstantCpuKernel,
-    AffineTransformCpuKernel.kind: AffineTransformCpuKernel,
-    CopyCpuKernel.kind: CopyCpuKernel,
-    CustomOperationCpuKernel.kind: CustomOperationCpuKernel,
-    ElementwiseAddCpuKernel.kind: ElementwiseAddCpuKernel,
-    ElementwiseDivideCpuKernel.kind: ElementwiseDivideCpuKernel,
-    ElementwiseMultiplyCpuKernel.kind: ElementwiseMultiplyCpuKernel,
-    ElementwiseSubtractCpuKernel.kind: ElementwiseSubtractCpuKernel,
-    FlattenCpuKernel.kind: FlattenCpuKernel,
-    LeakyIntegratorCpuKernel.kind: LeakyIntegratorCpuKernel,
-    RaiseErrorCpuKernel.kind: RaiseErrorCpuKernel,
-    ScaleCpuKernel.kind: ScaleCpuKernel,
-    ScaleOffsetCpuKernel.kind: ScaleOffsetCpuKernel,
-    SpotCentroidCpuKernel.kind: SpotCentroidCpuKernel,
-    ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
+_DEFAULT_LAZY_KERNELS: dict[str, Callable[[], type[Kernel]]] = {
+    kind: partial(_load_default_cpu_kernel, kind)
+    for kind in _DEFAULT_CPU_KINDS
 }
 
-_DEFAULT_LAZY_KERNELS: dict[str, Callable[[], type[Kernel]]] = {}
-
 if _TORCH_AVAILABLE:
-    _DEFAULT_LAZY_KERNELS = {
-        kind: partial(_load_default_gpu_kernel, kind)
-        for kind in _DEFAULT_GPU_KINDS
-    }
+    _DEFAULT_LAZY_KERNELS.update(
+        {
+            kind: partial(_load_default_gpu_kernel, kind)
+            for kind in _DEFAULT_GPU_KINDS
+        }
+    )
 
 _DEFAULT_LAZY_KERNELS.update(
     _discover_entry_point_loaders(
         "shmpipeline.kernels",
         validator=_kernel_kind,
-        existing_kinds={*_DEFAULT_KERNELS, *_DEFAULT_LAZY_KERNELS},
+        existing_kinds=set(_DEFAULT_LAZY_KERNELS),
     )
 )
 
@@ -454,7 +490,7 @@ _DEFAULT_LAZY_SINKS = _discover_entry_point_loaders(
 )
 
 _DEFAULT_REGISTRY = KernelRegistry(
-    _DEFAULT_KERNELS,
+    {},
     _DEFAULT_LAZY_KERNELS,
     _DEFAULT_SOURCES,
     _DEFAULT_LAZY_SOURCES,

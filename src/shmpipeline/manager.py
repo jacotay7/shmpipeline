@@ -347,8 +347,26 @@ class PipelineManager:
         spawn_method: str = "spawn",
         placement_policy: WorkerPlacementPolicy | None = None,
         registry: KernelRegistry | None = None,
+        worker_start_timeout: float = 10.0,
     ) -> None:
-        """Initialize a manager from a config object or YAML path."""
+        """Initialize a manager from a config object or YAML path.
+
+        Parameters
+        ----------
+        config:
+            Pipeline config object, YAML path, or str path.
+        spawn_method:
+            Multiprocessing start method. Default is ``"spawn"``.
+        placement_policy:
+            CPU affinity policy for worker processes.
+        registry:
+            Custom kernel registry. Defaults to the built-in registry.
+        worker_start_timeout:
+            Seconds to wait for each worker process to report a started event
+            before raising :class:`~shmpipeline.errors.WorkerProcessError`.
+            Increase this when running on loaded systems where Numba JIT
+            compilation takes longer than usual. Default is 10 seconds.
+        """
         if isinstance(config, (str, Path)):
             config = PipelineConfig.from_yaml(config)
         self.config = config
@@ -375,6 +393,8 @@ class PipelineManager:
             source.name: source for source in self.config.sources
         }
         self._sink_configs = {sink.name: sink for sink in self.config.sinks}
+        self._worker_start_timeout = float(worker_start_timeout)
+        self._poll_lock = threading.Lock()
         self._logger.info(
             "manager initialized: spawn_method=%s placement_policy=%s "
             "kernels=%d sources=%d sinks=%d streams=%d",
@@ -627,7 +647,7 @@ class PipelineManager:
                     event_reader=event_reader,
                     cpu_slot=cpu_slot,
                 )
-            self._wait_for_workers_started()
+            self._wait_for_workers_started(timeout=self._worker_start_timeout)
             self._start_sources()
         except BaseException:
             self._stop_runtime_components(timeout=1.0, force=True)
@@ -672,10 +692,18 @@ class PipelineManager:
             controller.start()
             self._sinks[sink_config.name] = controller
 
-    def _wait_for_workers_started(self, *, timeout: float = 5.0) -> None:
-        """Block until all worker processes report a started event."""
-        expected = set(self._workers)
-        end_time = time.monotonic() + timeout
+    def _wait_for_workers_started(
+        self,
+        *,
+        timeout: float | None = None,
+        only: set[str] | None = None,
+    ) -> None:
+        """Block until all (or a named subset of) workers report started."""
+        effective_timeout = (
+            timeout if timeout is not None else self._worker_start_timeout
+        )
+        expected = only if only is not None else set(self._workers)
+        end_time = time.monotonic() + effective_timeout
         while time.monotonic() < end_time:
             self.poll_events()
             started = {
@@ -685,18 +713,20 @@ class PipelineManager:
             }
             if started >= expected:
                 return
-            for worker in self._workers.values():
-                if worker.process.exitcode not in (None, 0):
+            for name in expected:
+                worker = self._workers.get(name)
+                if worker is not None and worker.process.exitcode not in (
+                    None,
+                    0,
+                ):
                     self.raise_if_failed()
             time.sleep(0.01)
-        missing = sorted(
-            expected
-            - {
-                event["kernel"]
-                for event in self._events
-                if event.get("type") == "worker_started"
-            }
-        )
+        started = {
+            event["kernel"]
+            for event in self._events
+            if event.get("type") == "worker_started"
+        }
+        missing = sorted(expected - started)
         raise WorkerProcessError(
             "timed out waiting for workers to start: " + ", ".join(missing)
         )
@@ -822,7 +852,16 @@ class PipelineManager:
         )
 
     def poll_events(self) -> list[dict[str, Any]]:
-        """Drain worker events and update manager failure state."""
+        """Drain worker events and update manager failure state.
+
+        Thread-safe: concurrent calls from multiple threads (e.g. a GUI
+        polling thread and a status endpoint) are serialised internally.
+        """
+        with self._poll_lock:
+            return self._poll_events_locked()
+
+    def _poll_events_locked(self) -> list[dict[str, Any]]:
+        """Inner poll_events implementation; caller must hold _poll_lock."""
         events = drain_events(
             [
                 worker.event_reader
@@ -1021,6 +1060,123 @@ class PipelineManager:
         if candidate_is_generic != existing_is_generic:
             return not candidate_is_generic
         return False
+
+    def restart(self, *, timeout: float | None = None) -> None:
+        """Restart failed or dead worker processes without stopping the pipeline.
+
+        Only the workers that have failed or exited are restarted; healthy
+        workers continue running uninterrupted. Shared-memory streams and
+        metric history are preserved across the restart.
+
+        After a successful restart of all failed workers the pipeline
+        transitions from ``FAILED`` back to ``RUNNING`` (or remains ``PAUSED``
+        if it was paused before failure).
+
+        Parameters
+        ----------
+        timeout:
+            Seconds to wait for restarted workers to report started.
+            Defaults to the manager's ``worker_start_timeout``.
+        """
+        self.poll_events()
+        if self.state not in {
+            PipelineState.RUNNING,
+            PipelineState.PAUSED,
+            PipelineState.FAILED,
+        }:
+            raise StateTransitionError(
+                f"cannot restart workers while state is {self.state.value!r}"
+            )
+
+        failed_names = {f["kernel"] for f in self._failures if f.get("kernel")}
+        dead_names = {
+            name
+            for name, w in self._workers.items()
+            if not w.process.is_alive()
+        }
+        to_restart = failed_names | dead_names
+
+        if not to_restart:
+            self._logger.info("restart called but no failed workers found")
+            return
+
+        effective_timeout = (
+            timeout if timeout is not None else self._worker_start_timeout
+        )
+        cpu_count = max(1, os.cpu_count() or 1)
+        kernel_index = {
+            k.name: i for i, k in enumerate(self.config.kernels)
+        }
+
+        for kernel_name in to_restart:
+            worker = self._workers.get(kernel_name)
+            if worker is not None:
+                worker.stop_event.set()
+                worker.process.join(timeout=1.0)
+                if worker.process.is_alive():
+                    worker.process.kill()
+                    worker.process.join(1.0)
+                if worker.event_reader is not None:
+                    try:
+                        worker.event_reader.close()
+                    except OSError:
+                        pass
+
+            self._failures = [
+                f for f in self._failures if f.get("kernel") != kernel_name
+            ]
+
+            kernel_config = self._kernel_configs[kernel_name]
+            index = kernel_index.get(kernel_name, 0)
+            stop_event = self.context.Event()
+            event_reader, event_writer = self.context.Pipe(duplex=False)
+            cpu_slot = self.placement_policy.cpu_slot_for(
+                kernel=kernel_config,
+                index=index,
+                cpu_count=cpu_count,
+            )
+            process = self.context.Process(
+                target=run_kernel_process,
+                args=(
+                    kernel_config,
+                    self.config.shared_memory,
+                    self._pause_event,
+                    stop_event,
+                    event_writer,
+                    cpu_slot,
+                    self._runtime_registry,
+                ),
+                name=f"shmpipeline-{kernel_name}",
+            )
+            try:
+                process.start()
+            except BaseException:
+                event_reader.close()
+                event_writer.close()
+                raise
+            event_writer.close()
+            self._logger.info(
+                "restarted worker: kernel=%s pid=%s cpu_slot=%s",
+                kernel_name,
+                process.pid,
+                cpu_slot,
+            )
+            self._workers[kernel_name] = _WorkerHandle(
+                name=kernel_name,
+                process=process,
+                stop_event=stop_event,
+                event_reader=event_reader,
+                cpu_slot=cpu_slot,
+            )
+
+        self._wait_for_workers_started(
+            timeout=effective_timeout, only=to_restart
+        )
+
+        if self.state == PipelineState.FAILED and not self._failures:
+            self._transition_state(
+                PipelineState.RUNNING, reason="failed workers restarted"
+            )
 
     def status(self, *, poll: bool = True) -> dict[str, Any]:
         """Return a snapshot of manager state, workers, and failures.

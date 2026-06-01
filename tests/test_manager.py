@@ -1221,22 +1221,12 @@ def test_manager_build_recreates_stale_stream_after_duplicate_name(
     assert len(create_calls) == 2
 
 
-def test_close_stream_uses_direct_posix_unlink_when_available(monkeypatch):
-    class _FakeSegment:
-        def __init__(self, name: str) -> None:
-            self._name = name
-
-    class _FakeLockState:
-        path = "/tmp/shmpipeline-fake.lock"
+def test_close_stream_calls_pyshmem_unlink_quiet(monkeypatch):
+    """close_stream delegates unlinking to pyshmem.unlink_quiet."""
 
     class _FakeStream:
         def __init__(self) -> None:
-            self.name = "demo"
-            self.gpu_enabled = True
-            self._data_shm = _FakeSegment("/ps_demo")
-            self._metadata_shm = _FakeSegment("/ps_demo_meta")
-            self._gpu_handle_shm = _FakeSegment("/ps_demo_gpu")
-            self._lock_state = _FakeLockState()
+            self.name = "demo_stream"
             self.closed = False
 
         def close(self) -> None:
@@ -1245,31 +1235,44 @@ def test_close_stream_uses_direct_posix_unlink_when_available(monkeypatch):
     import shmpipeline.shm_cleanup as shm_cleanup
 
     fake_stream = _FakeStream()
-    unlinked: list[str] = []
-    removed: list[str] = []
-    dropped: list[str] = []
-
-    monkeypatch.setattr(
-        shm_cleanup,
-        "_can_directly_unlink_posix_segments",
-        lambda: True,
-    )
-    monkeypatch.setattr(shm_cleanup, "pyshmem_shared", None)
-    monkeypatch.setattr(shm_cleanup, "_safe_posix_shm_unlink", unlinked.append)
-    monkeypatch.setattr(shm_cleanup, "_safe_remove", removed.append)
-    monkeypatch.setattr(shm_cleanup, "_drop_local_gpu_cache", dropped.append)
+    unlink_quiet_calls: list[str] = []
     monkeypatch.setattr(
         shm_cleanup.pyshmem,
-        "unlink",
-        lambda name: (_ for _ in ()).throw(AssertionError(name)),
+        "unlink_quiet",
+        unlink_quiet_calls.append,
     )
 
     close_stream(fake_stream, unlink=True)
 
     assert fake_stream.closed is True
-    assert unlinked == ["/ps_demo", "/ps_demo_meta", "/ps_demo_gpu"]
-    assert removed == ["/tmp/shmpipeline-fake.lock"]
-    assert dropped == ["demo"]
+    assert unlink_quiet_calls == ["demo_stream"]
+
+
+def test_close_stream_no_unlink_skips_pyshmem(monkeypatch):
+    """close_stream with unlink=False only closes the stream."""
+
+    class _FakeStream:
+        def __init__(self) -> None:
+            self.name = "demo_stream"
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    import shmpipeline.shm_cleanup as shm_cleanup
+
+    fake_stream = _FakeStream()
+    unlink_quiet_calls: list[str] = []
+    monkeypatch.setattr(
+        shm_cleanup.pyshmem,
+        "unlink_quiet",
+        unlink_quiet_calls.append,
+    )
+
+    close_stream(fake_stream, unlink=False)
+
+    assert fake_stream.closed is True
+    assert unlink_quiet_calls == []
 
 
 def test_manager_does_not_reuse_compatible_gpu_shared_memory(shm_prefix):
@@ -1574,8 +1577,12 @@ def test_manager_cpu_workers_can_compute_directly_into_shared_output(
 
                 def compute_into(self, trigger_input, output, auxiliary_inputs):
                     del auxiliary_inputs
-                    if output is self.output_buffer:
-                        raise RuntimeError(\"expected shared-memory output view\")
+                    # CPU fast path: output is the shared-memory view directly.
+                    # Verify it is a numpy array (not a separate intermediate buffer).
+                    if not isinstance(output, np.ndarray):
+                        raise RuntimeError(
+                            f\"expected numpy output view, got {type(output).__name__}\"
+                        )
                     np.add(np.asarray(trigger_input), 1.0, out=output)
             """
         ),

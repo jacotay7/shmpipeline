@@ -82,7 +82,11 @@ def _pin_current_process(cpu_slot: int | None) -> None:
 
 
 def _wait_for_trigger(
-    stream, previous_count: float, *, timeout: float
+    stream,
+    previous_count: float,
+    *,
+    timeout: float,
+    poll_interval: float = 1e-5,
 ) -> float | None:
     """Wait for a trigger stream count to advance beyond the previous count."""
     deadline = time.monotonic() + timeout
@@ -90,7 +94,7 @@ def _wait_for_trigger(
         current = stream.count
         if current > previous_count:
             return current
-        time.sleep(1e-5)
+        time.sleep(poll_interval)
     return None
 
 
@@ -256,6 +260,7 @@ def run_kernel_process(
                 trigger_stream,
                 last_seen_count,
                 timeout=kernel_config.read_timeout,
+                poll_interval=kernel_config.poll_interval,
             )
             if triggered_count is None:
                 continue

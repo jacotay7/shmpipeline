@@ -207,6 +207,7 @@ class KernelConfig:
     parameters: dict[str, Any] = field(default_factory=dict)
     read_timeout: float = 1.0
     pause_sleep: float = 0.01
+    poll_interval: float = 1e-5
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "KernelConfig":
@@ -230,6 +231,7 @@ class KernelConfig:
                 "parameters",
                 "read_timeout",
                 "pause_sleep",
+                "poll_interval",
             },
         )
         name = _normalize_name(data.get("name"), context="kernel name")
@@ -264,6 +266,10 @@ class KernelConfig:
             data.get("pause_sleep", 0.01),
             context=f"pause_sleep for kernel {name!r}",
         )
+        poll_interval = _normalize_positive_float(
+            data.get("poll_interval", 1e-5),
+            context=f"poll_interval for kernel {name!r}",
+        )
         return cls(
             name=name,
             kind=kind,
@@ -274,6 +280,7 @@ class KernelConfig:
             parameters=dict(parameters),
             read_timeout=read_timeout,
             pause_sleep=pause_sleep,
+            poll_interval=poll_interval,
         )
 
     def __post_init__(self) -> None:

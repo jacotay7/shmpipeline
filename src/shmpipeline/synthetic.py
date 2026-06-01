@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import threading
 import time
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -98,6 +99,7 @@ class SyntheticPatternGenerator:
             self.shape
         )
         self._rng = np.random.default_rng(self.spec.seed)
+        self._warn_incompatible_pattern()
 
         if self.storage == "gpu":
             if torch is None:
@@ -123,6 +125,20 @@ class SyntheticPatternGenerator:
             self._torch_generator.manual_seed(self.spec.seed)
         else:
             self._buffer = np.empty(self.shape, dtype=self.dtype)
+
+    def _warn_incompatible_pattern(self) -> None:
+        """Warn when a pattern produces floats that will be truncated."""
+        float_patterns = {"random", "sine", "ramp"}
+        if self.spec.pattern in float_patterns and not np.issubdtype(
+            self.dtype, np.floating
+        ):
+            warnings.warn(
+                f"synthetic pattern {self.spec.pattern!r} produces float "
+                f"values that will be truncated to integer dtype {self.dtype}; "
+                "consider 'constant' or 'impulse' for integer streams",
+                UserWarning,
+                stacklevel=4,
+            )
 
     def next_frame(self):
         """Return the next generated frame, reusing an internal buffer."""

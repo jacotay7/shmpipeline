@@ -19,6 +19,7 @@ from shmpipeline.kernels.cpu.elementwise_subtract import (
 from shmpipeline.kernels.cpu.flatten import FlattenCpuKernel
 from shmpipeline.kernels.cpu.leaky_integrator import LeakyIntegratorCpuKernel
 from shmpipeline.kernels.cpu.raise_error import RaiseErrorCpuKernel
+from shmpipeline.kernels.cpu.reduce import ReduceCpuKernel
 from shmpipeline.kernels.cpu.scale import ScaleCpuKernel
 from shmpipeline.kernels.cpu.scale_offset import ScaleOffsetCpuKernel
 from shmpipeline.kernels.cpu.spot_centroid import SpotCentroidCpuKernel
@@ -36,6 +37,7 @@ __all__ = [
     "ElementwiseSubtractCpuKernel",
     "LeakyIntegratorCpuKernel",
     "RaiseErrorCpuKernel",
+    "ReduceCpuKernel",
     "ScaleCpuKernel",
     "ScaleOffsetCpuKernel",
     "SpotCentroidCpuKernel",

@@ -12,6 +12,7 @@ from shmpipeline.config import PipelineConfig
 from shmpipeline.graph import PipelineGraph, validate_pipeline_config
 from shmpipeline.logging_utils import configure_colored_logging
 from shmpipeline.manager import PipelineManager
+from shmpipeline.registry import get_default_registry
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -113,6 +114,19 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.1,
         help="Manager event polling interval in seconds.",
     )
+
+    subparsers.add_parser(
+        "kinds",
+        help="List registered kernel kinds from the default registry.",
+    )
+    subparsers.add_parser(
+        "sources",
+        help="List registered source kinds from the default registry.",
+    )
+    subparsers.add_parser(
+        "sinks",
+        help="List registered sink kinds from the default registry.",
+    )
     return parser
 
 
@@ -142,6 +156,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             poll_interval=args.poll_interval,
             log_level=args.log_level,
         )
+    if args.command == "kinds":
+        return _run_list_kinds()
+    if args.command == "sources":
+        return _run_list_sources()
+    if args.command == "sinks":
+        return _run_list_sinks()
     parser.error(f"unsupported command: {args.command}")
     return 2
 
@@ -254,6 +274,35 @@ def _run_serve(
     except Exception as exc:
         print(f"Control server failed: {exc}")
         return 1
+    return 0
+
+
+def _run_list_kinds() -> int:
+    registry = get_default_registry()
+    for kind in registry.kinds():
+        print(kind)
+    return 0
+
+
+def _run_list_sources() -> int:
+    registry = get_default_registry()
+    kinds = registry.source_kinds()
+    if not kinds:
+        print("(no source plugins registered)")
+    else:
+        for kind in kinds:
+            print(kind)
+    return 0
+
+
+def _run_list_sinks() -> int:
+    registry = get_default_registry()
+    kinds = registry.sink_kinds()
+    if not kinds:
+        print("(no sink plugins registered)")
+    else:
+        for kind in kinds:
+            print(kind)
     return 0
 
 
