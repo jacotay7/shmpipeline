@@ -1104,9 +1104,7 @@ class PipelineManager:
             timeout if timeout is not None else self._worker_start_timeout
         )
         cpu_count = max(1, os.cpu_count() or 1)
-        kernel_index = {
-            k.name: i for i, k in enumerate(self.config.kernels)
-        }
+        kernel_index = {k.name: i for i, k in enumerate(self.config.kernels)}
 
         for kernel_name in to_restart:
             worker = self._workers.get(kernel_name)

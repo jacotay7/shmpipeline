@@ -6,8 +6,7 @@ import pickle
 import threading
 import time
 import warnings
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pyshmem
@@ -17,9 +16,12 @@ from shmpipeline import PipelineConfig, PipelineManager, PipelineState
 from shmpipeline.config import KernelConfig
 from shmpipeline.errors import StateTransitionError, WorkerProcessError
 from shmpipeline.kernels.cpu.reduce import ReduceCpuKernel
-from shmpipeline.registry import KernelRegistry, get_default_registry
+from shmpipeline.registry import get_default_registry
 from shmpipeline.shm_cleanup import close_stream, unlink_stream_name
-from shmpipeline.synthetic import SyntheticInputConfig, SyntheticPatternGenerator
+from shmpipeline.synthetic import (
+    SyntheticInputConfig,
+    SyntheticPatternGenerator,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
 
@@ -54,8 +56,16 @@ def _make_scale_config(shm_prefix, *, read_timeout=0.1, poll_interval=None):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [4], "dtype": "float32"},
-                {"name": f"{shm_prefix}_output", "shape": [4], "dtype": "float32"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
             ],
             "kernels": [kernel_cfg],
         }
@@ -66,8 +76,16 @@ def _make_reduce_config(shm_prefix, *, operation="mean"):
     return PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [8], "dtype": "float32"},
-                {"name": f"{shm_prefix}_output", "shape": [1], "dtype": "float32"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [8],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [1],
+                    "dtype": "float32",
+                },
             ],
             "kernels": [
                 {
@@ -291,11 +309,19 @@ def test_cpu_kernel_has_no_output_buffer_attribute():
     from shmpipeline.kernels.cpu.scale import ScaleCpuKernel
 
     shm = {
-        "i": SharedMemoryConfig(name="i", shape=(4,), dtype=np.dtype("float32")),
-        "o": SharedMemoryConfig(name="o", shape=(4,), dtype=np.dtype("float32")),
+        "i": SharedMemoryConfig(
+            name="i", shape=(4,), dtype=np.dtype("float32")
+        ),
+        "o": SharedMemoryConfig(
+            name="o", shape=(4,), dtype=np.dtype("float32")
+        ),
     }
     cfg = KernelConfig(
-        name="s", kind="cpu.scale", input="i", output="o", parameters={"factor": 1.0}
+        name="s",
+        kind="cpu.scale",
+        input="i",
+        output="o",
+        parameters={"factor": 1.0},
     )
     kernel = ScaleCpuKernel(KernelContext(config=cfg, shared_memory=shm))
     assert not hasattr(kernel, "output_buffer")
@@ -450,8 +476,16 @@ def test_restart_recovers_from_failed_worker(shm_prefix):
     config = PipelineConfig.from_dict(
         {
             "shared_memory": [
-                {"name": f"{shm_prefix}_input", "shape": [4], "dtype": "float32"},
-                {"name": f"{shm_prefix}_output", "shape": [4], "dtype": "float32"},
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
             ],
             "kernels": [
                 {
@@ -472,12 +506,13 @@ def test_restart_recovers_from_failed_worker(shm_prefix):
         input_stream = manager.get_stream(f"{shm_prefix}_input")
         input_stream.write(np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32))
         deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline and manager.state != PipelineState.FAILED:
+        while (
+            time.monotonic() < deadline
+            and manager.state != PipelineState.FAILED
+        ):
             manager.poll_events()
             time.sleep(0.05)
         assert manager.state == PipelineState.FAILED
-
-        from shmpipeline.kernels.cpu.copy import CopyCpuKernel
 
         manager._runtime_registry = get_default_registry()
         manager._kernel_configs["stage"] = KernelConfig.from_dict(
@@ -505,7 +540,9 @@ def test_synthetic_random_pattern_warns_for_integer_dtype():
     spec = SyntheticInputConfig(stream_name="s", pattern="random")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        SyntheticPatternGenerator(spec, shape=(4,), dtype=np.int32, storage="cpu")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.int32, storage="cpu"
+        )
     assert any(issubclass(w.category, UserWarning) for w in caught)
     assert any("random" in str(w.message) for w in caught)
 
@@ -514,7 +551,9 @@ def test_synthetic_sine_pattern_warns_for_integer_dtype():
     spec = SyntheticInputConfig(stream_name="s", pattern="sine")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        SyntheticPatternGenerator(spec, shape=(4,), dtype=np.uint8, storage="cpu")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.uint8, storage="cpu"
+        )
     assert any(issubclass(w.category, UserWarning) for w in caught)
 
 
@@ -522,7 +561,9 @@ def test_synthetic_ramp_pattern_warns_for_integer_dtype():
     spec = SyntheticInputConfig(stream_name="s", pattern="ramp")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        SyntheticPatternGenerator(spec, shape=(4,), dtype=np.int32, storage="cpu")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.int32, storage="cpu"
+        )
     assert any(issubclass(w.category, UserWarning) for w in caught)
 
 
@@ -530,7 +571,9 @@ def test_synthetic_constant_pattern_no_warning_for_integer():
     spec = SyntheticInputConfig(stream_name="s", pattern="constant")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        SyntheticPatternGenerator(spec, shape=(4,), dtype=np.int32, storage="cpu")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.int32, storage="cpu"
+        )
     user_warnings = [w for w in caught if issubclass(w.category, UserWarning)]
     assert not user_warnings
 
@@ -539,7 +582,9 @@ def test_synthetic_random_pattern_no_warning_for_float_dtype():
     spec = SyntheticInputConfig(stream_name="s", pattern="random")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        SyntheticPatternGenerator(spec, shape=(4,), dtype=np.float32, storage="cpu")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.float32, storage="cpu"
+        )
     user_warnings = [w for w in caught if issubclass(w.category, UserWarning)]
     assert not user_warnings
 
@@ -555,7 +600,9 @@ def test_reduce_kernel_is_registered_in_default_registry():
 
 
 def test_reduce_mean_operation(shm_prefix):
-    manager = PipelineManager(_make_reduce_config(shm_prefix, operation="mean"))
+    manager = PipelineManager(
+        _make_reduce_config(shm_prefix, operation="mean")
+    )
     try:
         manager.build()
         manager.start()
@@ -597,7 +644,9 @@ def test_reduce_max_operation(shm_prefix):
         manager.start()
         input_stream = manager.get_stream(f"{shm_prefix}_input")
         output_stream = manager.get_stream(f"{shm_prefix}_output")
-        payload = np.array([3.0, 7.0, 1.0, 5.0, 2.0, 9.0, 4.0, 6.0], dtype=np.float32)
+        payload = np.array(
+            [3.0, 7.0, 1.0, 5.0, 2.0, 9.0, 4.0, 6.0], dtype=np.float32
+        )
         baseline = output_stream.count
         input_stream.write(payload)
         result = _wait_for_next_write(
@@ -615,7 +664,9 @@ def test_reduce_min_operation(shm_prefix):
         manager.start()
         input_stream = manager.get_stream(f"{shm_prefix}_input")
         output_stream = manager.get_stream(f"{shm_prefix}_output")
-        payload = np.array([3.0, 7.0, 1.0, 5.0, 2.0, 9.0, 4.0, 6.0], dtype=np.float32)
+        payload = np.array(
+            [3.0, 7.0, 1.0, 5.0, 2.0, 9.0, 4.0, 6.0], dtype=np.float32
+        )
         baseline = output_stream.count
         input_stream.write(payload)
         result = _wait_for_next_write(
@@ -648,7 +699,9 @@ def test_reduce_rejects_invalid_operation():
         }
     )
     manager = PipelineManager(config)
-    with pytest.raises(ConfigValidationError, match="unsupported reduce operation"):
+    with pytest.raises(
+        ConfigValidationError, match="unsupported reduce operation"
+    ):
         manager.build()
 
 
@@ -687,10 +740,10 @@ def test_reduce_rejects_non_scalar_output():
 
 
 def test_cli_kinds_command_lists_cpu_scale():
-    from shmpipeline.cli import main
-
     import io
     import sys
+
+    from shmpipeline.cli import main
 
     captured = io.StringIO()
     old_stdout = sys.stdout
@@ -707,10 +760,10 @@ def test_cli_kinds_command_lists_cpu_scale():
 
 
 def test_cli_sources_command_no_plugins():
-    from shmpipeline.cli import main
-
     import io
     import sys
+
+    from shmpipeline.cli import main
 
     captured = io.StringIO()
     old_stdout = sys.stdout
@@ -723,10 +776,10 @@ def test_cli_sources_command_no_plugins():
 
 
 def test_cli_sinks_command_no_plugins():
-    from shmpipeline.cli import main
-
     import io
     import sys
+
+    from shmpipeline.cli import main
 
     captured = io.StringIO()
     old_stdout = sys.stdout
@@ -741,14 +794,15 @@ def test_cli_sinks_command_no_plugins():
 def test_cli_kinds_includes_gpu_kinds_when_torch_available():
     try:
         import torch
-        cuda = torch.cuda.is_available()
+
+        torch.cuda.is_available()
     except ImportError:
         pytest.skip("torch not available")
 
-    from shmpipeline.cli import main
-
     import io
     import sys
+
+    from shmpipeline.cli import main
 
     captured = io.StringIO()
     old_stdout = sys.stdout
