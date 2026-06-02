@@ -183,3 +183,45 @@ def test_cli_serve_delegates_to_control_server(tmp_path, monkeypatch):
         "poll_interval": 0.05,
         "log_level": "info",
     }
+
+
+# ---------------------------------------------------------------------------
+# Plugin introspection subcommands: kinds / sources / sinks
+# ---------------------------------------------------------------------------
+
+
+def test_cli_kinds_command_lists_builtin_cpu_kinds(capsys):
+    result = main(["kinds"])
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "cpu.scale" in output
+    assert "cpu.reduce" in output
+    assert "cpu.copy" in output
+
+
+def test_cli_sources_command_runs(capsys):
+    assert main(["sources"]) == 0
+    capsys.readouterr()
+
+
+def test_cli_sinks_command_runs(capsys):
+    assert main(["sinks"]) == 0
+    capsys.readouterr()
+
+
+def test_cli_kinds_includes_gpu_kinds_when_torch_available(capsys):
+    pytest.importorskip("torch")
+    assert main(["kinds"]) == 0
+    assert "gpu.scale" in capsys.readouterr().out
+
+
+def test_cli_describe_text_emits_human_readable_summary(tmp_path, capsys):
+    config_path = tmp_path / "pipeline.yaml"
+    _write_valid_config(config_path)
+
+    exit_code = main(["describe", str(config_path)])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "scale_stage" in output
+    assert "cpu.scale" in output

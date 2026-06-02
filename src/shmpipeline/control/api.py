@@ -66,8 +66,22 @@ def create_control_app(
     service: ManagerService,
     *,
     token: str | None = None,
+    tokens: dict[str, str] | None = None,
 ) -> FastAPI:
-    """Return a FastAPI app bound to one manager service."""
+    """Return a FastAPI app bound to one manager service.
+
+    Authorization supports three hierarchical scopes:
+
+    * ``read`` — status, snapshot, graph, info, events, and document reads.
+    * ``control`` — runtime control (start/stop/pause/resume, synthetic I/O);
+      implies ``read``.
+    * ``admin`` — build, shutdown, and document writes; implies ``control``.
+
+    Pass ``token`` for a single bearer token that grants full (``admin``)
+    access — the original single-token behaviour.  Pass ``tokens`` as a mapping
+    of scope name to bearer token (e.g. ``{"read": ..., "admin": ...}``) for
+    per-scope credentials.  When neither is given, authentication is disabled.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -79,66 +93,69 @@ def create_control_app(
 
     app = FastAPI(
         title="shmpipeline control plane",
-        version="1.0.1",
+        version="1.0.2",
         lifespan=lifespan,
     )
-    auth_dependencies = [Depends(_require_token(token))]
+    authorizer = _ScopeAuthorizer(token=token, tokens=tokens)
+    read = [Depends(_require_scope(authorizer, "read"))]
+    control = [Depends(_require_scope(authorizer, "control"))]
+    admin = [Depends(_require_scope(authorizer, "admin"))]
 
-    @app.get("/health", dependencies=auth_dependencies)
+    @app.get("/health", dependencies=read)
     def health() -> dict[str, Any]:
         return service.health()
 
-    @app.get("/info", dependencies=auth_dependencies)
+    @app.get("/info", dependencies=read)
     def info() -> dict[str, Any]:
         return service.info()
 
-    @app.get("/document", dependencies=auth_dependencies)
+    @app.get("/document", dependencies=read)
     def document() -> dict[str, Any]:
         return service.document()
 
-    @app.put("/document", dependencies=auth_dependencies)
+    @app.put("/document", dependencies=admin)
     def update_document(payload: dict[str, Any]) -> dict[str, Any]:
         return _call_service(service.update_document, payload)
 
-    @app.post("/document/validate", dependencies=auth_dependencies)
+    @app.post("/document/validate", dependencies=read)
     def validate_document(
         payload: dict[str, Any] | None = Body(default=None),
     ) -> dict[str, Any]:
         return _call_service(service.validate_document, payload)
 
-    @app.post("/document/load", dependencies=auth_dependencies)
+    @app.post("/document/load", dependencies=admin)
     def load_document(payload: LoadDocumentPathRequest) -> dict[str, Any]:
         return _call_service(service.load_document_path, payload.path)
 
-    @app.get("/status", dependencies=auth_dependencies)
+    @app.get("/status", dependencies=read)
     def status() -> dict[str, Any]:
         return service.status()
 
-    @app.get("/snapshot", dependencies=auth_dependencies)
+    @app.get("/snapshot", dependencies=read)
     def snapshot() -> dict[str, Any]:
         return service.snapshot()
 
-    @app.get("/graph", dependencies=auth_dependencies)
+    @app.get("/graph", dependencies=read)
     def graph() -> dict[str, Any]:
         return service.graph()
 
-    @app.post("/commands/build", dependencies=auth_dependencies)
+    @app.post("/commands/build", dependencies=admin)
     def build() -> dict[str, Any]:
         return _call_service(service.build)
 
-    @app.post("/commands/start", dependencies=auth_dependencies)
+    @app.post("/commands/start", dependencies=control)
     def start() -> dict[str, Any]:
         return _call_service(service.start)
 
-    @app.post("/commands/pause", dependencies=auth_dependencies)
+    @app.post("/commands/pause", dependencies=control)
     def pause() -> dict[str, Any]:
         return _call_service(service.pause)
 
-    @app.post("/commands/resume", dependencies=auth_dependencies)
+    @app.post("/commands/resume", dependencies=control)
     def resume() -> dict[str, Any]:
         return _call_service(service.resume)
 
-    @app.post("/commands/stop", dependencies=auth_dependencies)
+    @app.post("/commands/stop", dependencies=control)
     def stop(payload: StopRequest) -> dict[str, Any]:
         return _call_service(
             service.stop,
@@ -146,7 +163,7 @@ def create_control_app(
             force=payload.force,
         )
 
-    @app.post("/commands/shutdown", dependencies=auth_dependencies)
+    @app.post("/commands/shutdown", dependencies=admin)
     def shutdown(payload: ShutdownRequest) -> dict[str, Any]:
         return _call_service(
             service.shutdown,
@@ -154,14 +171,14 @@ def create_control_app(
             force=payload.force,
         )
 
-    @app.post("/synthetic/start", dependencies=auth_dependencies)
+    @app.post("/synthetic/start", dependencies=control)
     def start_synthetic(payload: SyntheticStartRequest) -> dict[str, Any]:
         return _call_service(
             service.start_synthetic_input,
             payload.model_dump(exclude_none=True),
         )
 
-    @app.post("/synthetic/stop", dependencies=auth_dependencies)
+    @app.post("/synthetic/stop", dependencies=control)
     def stop_synthetic(payload: SyntheticStopRequest) -> dict[str, Any]:
         return _call_service(
             service.stop_synthetic_input,
@@ -169,7 +186,7 @@ def create_control_app(
             timeout=payload.timeout,
         )
 
-    @app.get("/events", dependencies=auth_dependencies)
+    @app.get("/events", dependencies=read)
     def events(
         last_event_id: str | None = Header(
             default=None,
@@ -232,18 +249,19 @@ def run_control_server(
     host: str = "127.0.0.1",
     port: int = 8765,
     token: str | None = None,
+    tokens: dict[str, str] | None = None,
     poll_interval: float = 0.1,
     log_level: str = "info",
 ) -> None:
     """Run the default HTTP control plane for one pipeline config."""
     from shmpipeline.control.discovery import LocalControlServerRegistration
 
-    if not _is_local_host(host) and token is None:
+    if not _is_local_host(host) and token is None and not tokens:
         raise ValueError(
             "refusing to bind to a non-local interface without a bearer token"
         )
     service = ManagerService(config, poll_interval=poll_interval)
-    app = create_control_app(service, token=token)
+    app = create_control_app(service, token=token, tokens=tokens)
     registration = LocalControlServerRegistration(
         host=host,
         port=port,
@@ -305,17 +323,62 @@ def _is_local_host(host: str) -> bool:
         return False
 
 
-def _require_token(expected_token: str | None):
+_SCOPE_LEVELS = {"read": 0, "control": 1, "admin": 2}
+
+
+class _ScopeAuthorizer:
+    """Resolve bearer tokens to hierarchical control-plane scope levels."""
+
+    def __init__(
+        self,
+        *,
+        token: str | None = None,
+        tokens: dict[str, str] | None = None,
+    ) -> None:
+        # Map each configured bearer token to the highest scope it grants.
+        self._token_levels: dict[str, int] = {}
+        if token is not None:
+            self._token_levels[token] = _SCOPE_LEVELS["admin"]
+        for scope, value in (tokens or {}).items():
+            if scope not in _SCOPE_LEVELS:
+                raise ValueError(
+                    f"unknown control-plane scope: {scope!r}; "
+                    f"expected one of {sorted(_SCOPE_LEVELS)}"
+                )
+            if value is None:
+                continue
+            level = _SCOPE_LEVELS[scope]
+            self._token_levels[value] = max(
+                self._token_levels.get(value, -1), level
+            )
+        self.enabled = bool(self._token_levels)
+
+    def granted_level(self, authorization: str | None) -> int | None:
+        """Return the scope level a request's bearer token grants, if any."""
+        prefix = "Bearer "
+        if authorization is None or not authorization.startswith(prefix):
+            return None
+        return self._token_levels.get(authorization[len(prefix) :])
+
+
+def _require_scope(authorizer: _ScopeAuthorizer, scope: str):
+    required = _SCOPE_LEVELS[scope]
+
     def authorize(
         authorization: str | None = Header(default=None),
     ) -> None:
-        if expected_token is None:
+        if not authorizer.enabled:
             return
-        expected_value = f"Bearer {expected_token}"
-        if authorization != expected_value:
+        level = authorizer.granted_level(authorization)
+        if level is None:
             raise HTTPException(
                 status_code=401,
                 detail="missing or invalid bearer token",
+            )
+        if level < required:
+            raise HTTPException(
+                status_code=403,
+                detail=f"operation requires '{scope}' scope",
             )
 
     return authorize

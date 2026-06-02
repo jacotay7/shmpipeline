@@ -232,10 +232,10 @@ def test_affine_kernel_rejects_incompatible_shapes():
         manager.build()
 
 
-def test_kernel_config_rejects_legacy_inputs_outputs_keys():
+def test_kernel_config_rejects_legacy_inputs_key():
     with pytest.raises(
         ConfigValidationError,
-        match="must use 'input', 'output', and optional 'auxiliary'",
+        match="'inputs' is not supported",
     ):
         PipelineConfig.from_dict(
             {
@@ -258,7 +258,7 @@ def test_kernel_config_rejects_legacy_inputs_outputs_keys():
                         "name": "copy",
                         "kind": "cpu.copy",
                         "inputs": ["input_frame"],
-                        "outputs": ["output_frame"],
+                        "output": "output_frame",
                     }
                 ],
             }
@@ -453,3 +453,207 @@ def test_custom_operation_rejects_unsupported_function():
             )
         )
         manager.build()
+
+
+# ---------------------------------------------------------------------------
+# KernelConfig.poll_interval
+# ---------------------------------------------------------------------------
+
+
+def _kernel_dict(**overrides):
+    base = {
+        "name": "k",
+        "kind": "cpu.scale",
+        "input": "i",
+        "output": "o",
+        "parameters": {"factor": 1.0},
+    }
+    base.update(overrides)
+    # Allow callers to drop a default key by passing it as None (e.g. to
+    # supply 'outputs' instead of 'output').
+    return {key: value for key, value in base.items() if value is not None}
+
+
+def test_kernel_config_poll_interval_default():
+    from shmpipeline.config import KernelConfig
+
+    config = KernelConfig.from_dict(_kernel_dict())
+    assert config.poll_interval == pytest.approx(1e-5)
+
+
+def test_kernel_config_poll_interval_custom():
+    from shmpipeline.config import KernelConfig
+
+    config = KernelConfig.from_dict(_kernel_dict(poll_interval=0.001))
+    assert config.poll_interval == pytest.approx(0.001)
+
+
+def test_kernel_config_poll_interval_must_be_positive():
+    from shmpipeline.config import KernelConfig
+
+    with pytest.raises(ConfigValidationError, match="poll_interval"):
+        KernelConfig.from_dict(_kernel_dict(poll_interval=-0.001))
+
+
+# ---------------------------------------------------------------------------
+# Source/sink plugin timeout fields
+# ---------------------------------------------------------------------------
+
+
+def test_source_config_read_timeout_defaults_to_none():
+    from shmpipeline.config import SourceConfig
+
+    config = SourceConfig.from_dict(
+        {"name": "s", "kind": "x.source", "stream": "i"}
+    )
+    assert config.read_timeout is None
+
+
+def test_source_config_read_timeout_parsed_and_validated():
+    from shmpipeline.config import SourceConfig
+
+    config = SourceConfig.from_dict(
+        {"name": "s", "kind": "x.source", "stream": "i", "read_timeout": 0.25}
+    )
+    assert config.read_timeout == pytest.approx(0.25)
+    with pytest.raises(ConfigValidationError, match="read_timeout"):
+        SourceConfig.from_dict(
+            {
+                "name": "s",
+                "kind": "x.source",
+                "stream": "i",
+                "read_timeout": -1.0,
+            }
+        )
+
+
+def test_sink_config_consume_timeout_defaults_to_none():
+    from shmpipeline.config import SinkConfig
+
+    config = SinkConfig.from_dict(
+        {"name": "s", "kind": "x.sink", "stream": "o"}
+    )
+    assert config.consume_timeout is None
+
+
+def test_sink_config_consume_timeout_parsed_and_validated():
+    from shmpipeline.config import SinkConfig
+
+    config = SinkConfig.from_dict(
+        {"name": "s", "kind": "x.sink", "stream": "o", "consume_timeout": 0.5}
+    )
+    assert config.consume_timeout == pytest.approx(0.5)
+    with pytest.raises(ConfigValidationError, match="consume_timeout"):
+        SinkConfig.from_dict(
+            {
+                "name": "s",
+                "kind": "x.sink",
+                "stream": "o",
+                "consume_timeout": 0.0,
+            }
+        )
+
+
+# ---------------------------------------------------------------------------
+# Multi-output kernels
+# ---------------------------------------------------------------------------
+
+
+def test_kernel_config_single_output_reports_all_outputs():
+    from shmpipeline.config import KernelConfig
+
+    config = KernelConfig.from_dict(_kernel_dict())
+    assert config.output == "o"
+    assert config.all_outputs == ("o",)
+
+
+def test_kernel_config_accepts_outputs_list():
+    from shmpipeline.config import KernelConfig
+
+    config = KernelConfig.from_dict(
+        _kernel_dict(output=None, outputs=["a", "b"])
+    )
+    assert config.output == "a"
+    assert config.all_outputs == ("a", "b")
+
+
+def test_kernel_config_rejects_both_output_and_outputs():
+    from shmpipeline.config import KernelConfig
+
+    with pytest.raises(ConfigValidationError, match="either 'output' or"):
+        KernelConfig.from_dict(_kernel_dict(outputs=["a", "b"]))
+
+
+def test_kernel_config_rejects_duplicate_outputs():
+    from shmpipeline.config import KernelConfig
+
+    with pytest.raises(ConfigValidationError, match="same output stream"):
+        KernelConfig.from_dict(_kernel_dict(output=None, outputs=["a", "a"]))
+
+
+def test_kernel_config_rejects_input_in_outputs():
+    from shmpipeline.config import KernelConfig
+
+    with pytest.raises(ConfigValidationError, match="both input and output"):
+        KernelConfig.from_dict(
+            _kernel_dict(input="a", output=None, outputs=["a", "b"])
+        )
+
+
+# ---------------------------------------------------------------------------
+# YAML config error messages carry source file and line numbers
+# ---------------------------------------------------------------------------
+
+
+def test_from_yaml_error_includes_line_number_for_bad_reference(tmp_path):
+    config_path = tmp_path / "pipeline.yaml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            shared_memory:
+              - name: in
+                shape: [4]
+                dtype: float32
+              - name: out
+                shape: [4]
+                dtype: float32
+            kernels:
+              - name: bad
+                kind: cpu.scale
+                input: in
+                output: missing
+                parameters: {factor: 2.0}
+            """
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError) as excinfo:
+        PipelineConfig.from_yaml(config_path)
+    message = str(excinfo.value)
+    assert "pipeline.yaml" in message
+    assert "line" in message
+
+
+def test_from_yaml_error_includes_line_number_for_bad_dtype(tmp_path):
+    config_path = tmp_path / "pipeline.yaml"
+    config_path.write_text(
+        textwrap.dedent(
+            """
+            shared_memory:
+              - name: in
+                shape: [4]
+                dtype: not_a_real_dtype
+            kernels: []
+            sources:
+              - name: src
+                kind: x.source
+                stream: in
+            """
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigValidationError) as excinfo:
+        PipelineConfig.from_yaml(config_path)
+    message = str(excinfo.value)
+    assert "pipeline.yaml" in message
+    assert "line 3" in message

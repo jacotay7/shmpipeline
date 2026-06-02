@@ -165,3 +165,116 @@ def test_manager_synthetic_input_drives_gpu_pipeline(shm_prefix):
         assert output_stream.count > baseline
     finally:
         manager.shutdown(force=True)
+
+
+# ---------------------------------------------------------------------------
+# Pattern vs stream-dtype validation warnings
+# ---------------------------------------------------------------------------
+
+
+def test_synthetic_random_pattern_warns_for_integer_dtype():
+    import warnings
+
+    spec = SyntheticInputConfig(stream_name="s", pattern="random")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.int32, storage="cpu"
+        )
+    assert any(issubclass(w.category, UserWarning) for w in caught)
+    assert any("random" in str(w.message) for w in caught)
+
+
+def test_synthetic_sine_pattern_warns_for_integer_dtype():
+    import warnings
+
+    spec = SyntheticInputConfig(stream_name="s", pattern="sine")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.uint8, storage="cpu"
+        )
+    assert any(issubclass(w.category, UserWarning) for w in caught)
+
+
+def test_synthetic_ramp_pattern_warns_for_integer_dtype():
+    import warnings
+
+    spec = SyntheticInputConfig(stream_name="s", pattern="ramp")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.int32, storage="cpu"
+        )
+    assert any(issubclass(w.category, UserWarning) for w in caught)
+
+
+def test_synthetic_constant_pattern_no_warning_for_integer():
+    import warnings
+
+    spec = SyntheticInputConfig(stream_name="s", pattern="constant")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.int32, storage="cpu"
+        )
+    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+
+
+def test_synthetic_random_pattern_no_warning_for_float_dtype():
+    import warnings
+
+    spec = SyntheticInputConfig(stream_name="s", pattern="random")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        SyntheticPatternGenerator(
+            spec, shape=(4,), dtype=np.float32, storage="cpu"
+        )
+    assert not [w for w in caught if issubclass(w.category, UserWarning)]
+
+
+# ---------------------------------------------------------------------------
+# CPU pattern generation for every supported pattern
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "pattern", ["constant", "random", "ramp", "sine", "impulse"]
+)
+def test_synthetic_pattern_generator_next_frame_cpu(pattern):
+    spec = SyntheticInputConfig(
+        stream_name="s",
+        pattern=pattern,
+        constant=2.0,
+        amplitude=1.0,
+        offset=0.5,
+        period=8.0,
+        impulse_interval=2,
+        seed=1,
+    )
+    generator = SyntheticPatternGenerator(
+        spec, shape=(4,), dtype=np.float32, storage="cpu"
+    )
+    frame_a = generator.next_frame()
+    frame_b = generator.next_frame()
+    assert np.asarray(frame_a).shape == (4,)
+    assert np.asarray(frame_b).shape == (4,)
+    assert np.all(np.isfinite(np.asarray(frame_a)))
+
+
+def test_synthetic_constant_pattern_is_deterministic():
+    spec = SyntheticInputConfig(
+        stream_name="s", pattern="constant", constant=7.0
+    )
+    generator = SyntheticPatternGenerator(
+        spec, shape=(3,), dtype=np.float32, storage="cpu"
+    )
+    np.testing.assert_allclose(generator.next_frame(), [7.0, 7.0, 7.0])
+    np.testing.assert_allclose(generator.next_frame(), [7.0, 7.0, 7.0])
+
+
+def test_available_synthetic_patterns_lists_known_patterns():
+    from shmpipeline.synthetic import available_synthetic_patterns
+
+    patterns = available_synthetic_patterns()
+    assert {"constant", "random", "ramp", "sine", "impulse"} <= set(patterns)

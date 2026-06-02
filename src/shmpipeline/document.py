@@ -96,11 +96,14 @@ def config_to_document(config: PipelineConfig) -> Document:
             "name": kernel.name,
             "kind": kernel.kind,
             "input": kernel.input,
-            "output": kernel.output,
             "parameters": deepcopy(kernel.parameters),
             "read_timeout": kernel.read_timeout,
             "pause_sleep": kernel.pause_sleep,
         }
+        if len(kernel.all_outputs) > 1:
+            item["outputs"] = list(kernel.all_outputs)
+        else:
+            item["output"] = kernel.output
         if kernel.operation is not None:
             item["operation"] = kernel.operation
         if kernel.auxiliary:

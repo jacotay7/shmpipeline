@@ -364,3 +364,192 @@ def test_pid_exists_uses_windows_query_helper(monkeypatch):
 
     assert discovery_module._pid_exists(4321) is True
     assert calls == [4321]
+
+
+# ---------------------------------------------------------------------------
+# Role-based authorization scopes (read / control / admin)
+# ---------------------------------------------------------------------------
+
+
+def _scoped_client(tmp_path):
+    config_path = tmp_path / "pipeline.yaml"
+    _write_valid_config(config_path)
+    service = ManagerService(config_path, poll_interval=0.01)
+    app = create_control_app(
+        service, tokens={"read": "R", "control": "C", "admin": "A"}
+    )
+    return service, app
+
+
+def _auth(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_scopes_read_token_allows_status_but_denies_build(tmp_path):
+    service, app = _scoped_client(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/status", headers=_auth("R")).status_code == 200
+        denied = client.post("/commands/build", headers=_auth("R"))
+        assert denied.status_code == 403
+    service.shutdown(force=True)
+
+
+def test_scopes_control_token_denies_admin_operations(tmp_path):
+    service, app = _scoped_client(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/status", headers=_auth("C")).status_code == 200
+        assert (
+            client.post("/commands/build", headers=_auth("C")).status_code
+            == 403
+        )
+    service.shutdown(force=True)
+
+
+def test_scopes_admin_token_has_full_access(tmp_path):
+    service, app = _scoped_client(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/status", headers=_auth("A")).status_code == 200
+        assert (
+            client.post("/commands/build", headers=_auth("A")).status_code
+            == 200
+        )
+    service.shutdown(force=True)
+
+
+def test_scopes_missing_or_unknown_token_is_unauthorized(tmp_path):
+    service, app = _scoped_client(tmp_path)
+    with TestClient(app) as client:
+        assert client.get("/status").status_code == 401
+        assert client.get("/status", headers=_auth("nope")).status_code == 401
+    service.shutdown(force=True)
+
+
+def test_unknown_scope_name_is_rejected():
+    from shmpipeline.control.api import _ScopeAuthorizer
+
+    with pytest.raises(ValueError, match="unknown control-plane scope"):
+        _ScopeAuthorizer(tokens={"superuser": "x"})
+
+
+# ---------------------------------------------------------------------------
+# SSE client auto-reconnect with exponential backoff
+# ---------------------------------------------------------------------------
+
+
+def test_stream_events_reconnects_and_resumes_from_last_id():
+    class _FakeClient(RemoteManagerClient):
+        def __init__(self):
+            self._token = None
+            self.requested_ids: list[int | None] = []
+            self.attempt = 0
+
+        def iter_events(self, *, last_event_id=None):
+            self.attempt += 1
+            self.requested_ids.append(last_event_id)
+            if self.attempt == 1:
+                yield {"id": 1, "event": "message", "data": {"x": 1}}
+                raise RemoteManagerError("connection dropped")
+            yield {"id": 2, "event": "message", "data": {"x": 2}}
+            yield {"id": 3, "event": "message", "data": {"x": 3}}
+
+    from shmpipeline.control.client import RemoteManagerError
+
+    client = _FakeClient()
+    sleeps: list[float] = []
+    seen: list[int] = []
+    for event in client.stream_events(
+        sleeper=sleeps.append,
+        should_continue=lambda: client.attempt < 2,
+    ):
+        seen.append(event["id"])
+
+    assert seen == [1, 2, 3]
+    # Reconnect resumes from the last id observed before the drop.
+    assert client.requested_ids == [None, 1]
+    assert sleeps and sleeps[0] == pytest.approx(0.5)
+
+
+def test_stream_events_no_reconnect_raises_on_drop():
+    from shmpipeline.control.client import RemoteManagerError
+
+    class _FailingClient(RemoteManagerClient):
+        def __init__(self):
+            self._token = None
+
+        def iter_events(self, *, last_event_id=None):
+            raise RemoteManagerError("dropped")
+            yield  # pragma: no cover - makes this a generator
+
+    client = _FailingClient()
+    with pytest.raises(RemoteManagerError):
+        list(client.stream_events(reconnect=False))
+
+
+# ---------------------------------------------------------------------------
+# SSE /events endpoint round-trip and helpers
+# ---------------------------------------------------------------------------
+
+
+def test_iter_events_parses_sse_fields():
+    """iter_events decodes id/event/data SSE frames into event dicts.
+
+    Driven with a fake transport instead of the live infinite /events stream
+    so the test terminates deterministically.
+    """
+
+    class _FakeResponse:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            yield "id: 1"
+            yield "event: snapshot"
+            yield 'data: {"state": "running"}'
+            yield ""
+            yield ": keepalive"
+            yield "event: worker_metrics"
+            yield 'data: {"kernel": "k"}'
+            yield ""
+
+    class _FakeStreamCtx:
+        def __enter__(self):
+            return _FakeResponse()
+
+        def __exit__(self, *exc):
+            return False
+
+    class _FakeHttpx:
+        def stream(self, method, path, headers=None):
+            return _FakeStreamCtx()
+
+    client = RemoteManagerClient("http://testserver", client=_FakeHttpx())
+    events = list(client.iter_events())
+    assert events[0] == {
+        "id": 1,
+        "event": "snapshot",
+        "data": {"state": "running"},
+    }
+    assert events[1]["event"] == "worker_metrics"
+    assert events[1]["data"] == {"kernel": "k"}
+
+
+def test_encode_sse_formats_id_event_and_data():
+    from shmpipeline.control.api import _encode_sse
+
+    encoded = _encode_sse(
+        {"id": 5, "event": "snapshot", "data": {"state": "running"}}
+    )
+    assert "id: 5" in encoded
+    assert "event: snapshot" in encoded
+    assert "data: " in encoded
+    assert encoded.endswith("\n\n")
+
+
+def test_is_local_host_recognizes_loopback():
+    from shmpipeline.control.api import _is_local_host
+
+    assert _is_local_host("localhost")
+    assert _is_local_host("127.0.0.1")
+    assert not _is_local_host("203.0.113.5")

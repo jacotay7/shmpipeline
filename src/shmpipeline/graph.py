@@ -49,7 +49,8 @@ class PipelineGraph:
             stream_name: [] for stream_name in self._shared_by_name
         }
         for kernel in config.kernels:
-            self._kernel_producers[kernel.output].append(kernel.name)
+            for output_name in kernel.all_outputs:
+                self._kernel_producers[output_name].append(kernel.name)
             self._kernel_consumers[kernel.input].append(kernel.name)
             for binding in kernel.auxiliary:
                 self._kernel_consumers[binding.name].append(kernel.name)
@@ -123,14 +124,15 @@ class PipelineGraph:
                         stream=binding.name,
                     )
                 )
-            edges.append(
-                GraphEdge(
-                    source=kernel.name,
-                    target=kernel.output,
-                    role="output",
-                    stream=kernel.output,
+            for output_name in kernel.all_outputs:
+                edges.append(
+                    GraphEdge(
+                        source=kernel.name,
+                        target=output_name,
+                        role="output",
+                        stream=output_name,
+                    )
                 )
-            )
         for sink in self.config.sinks:
             for binding in sink.auxiliary:
                 edges.append(
@@ -205,7 +207,9 @@ class PipelineGraph:
     def downstream_kernels(self, kernel_name: str) -> tuple[str, ...]:
         """Return kernels that consume the target kernel's output."""
         kernel = self._kernels_by_name[kernel_name]
-        downstream = set(self._kernel_consumers[kernel.output])
+        downstream: set[str] = set()
+        for output_name in kernel.all_outputs:
+            downstream.update(self._kernel_consumers[output_name])
         downstream.discard(kernel_name)
         return tuple(sorted(downstream))
 
@@ -283,6 +287,7 @@ class PipelineGraph:
                     "kind": kernel.kind,
                     "input": kernel.input,
                     "output": kernel.output,
+                    "outputs": list(kernel.all_outputs),
                     "auxiliary": kernel.auxiliary_by_alias,
                     "upstream_kernels": self.upstream_kernels(kernel.name),
                     "downstream_kernels": self.downstream_kernels(kernel.name),
@@ -372,10 +377,11 @@ class PipelineGraph:
                 downstream = self.downstream_kernels(kernel.name) or (
                     "terminal",
                 )
+                output_text = ", ".join(kernel.all_outputs)
                 lines.append(
                     "- "
                     f"{kernel.name} ({kernel.kind}) "
-                    f"input={kernel.input} output={kernel.output} "
+                    f"input={kernel.input} output={output_text} "
                     f"auxiliary={auxiliary_text} "
                     f"upstream={', '.join(upstream)} "
                     f"downstream={', '.join(downstream)}"

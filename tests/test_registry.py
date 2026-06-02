@@ -39,3 +39,48 @@ def test_discover_entry_point_loaders_registers_source_plugins(monkeypatch):
 
     assert set(loaders) == {"test.entry_source"}
     assert loaders["test.entry_source"]() is _EntryPointSource
+
+
+# ---------------------------------------------------------------------------
+# Registry picklability and lazy CPU kernel loading
+# ---------------------------------------------------------------------------
+
+
+def test_default_registry_is_picklable():
+    """The default registry must be picklable for worker spawning."""
+    import pickle
+
+    from shmpipeline.registry import get_default_registry
+
+    registry = get_default_registry()
+    restored = pickle.loads(pickle.dumps(registry))
+    assert set(restored.kinds()) == set(registry.kinds())
+
+
+def test_extended_registry_with_class_is_picklable():
+    import pickle
+
+    from shmpipeline.kernels.cpu.scale import ScaleCpuKernel
+    from shmpipeline.registry import get_default_registry
+
+    registry = get_default_registry().extended(ScaleCpuKernel, replace=True)
+    restored = pickle.loads(pickle.dumps(registry))
+    assert "cpu.scale" in restored.kinds()
+
+
+def test_registry_lazy_cpu_kernel_loads_on_first_access():
+    from shmpipeline.kernels.cpu.scale import ScaleCpuKernel
+    from shmpipeline.registry import get_default_registry
+
+    registry = get_default_registry()
+    assert "cpu.scale" in registry.kinds()
+    assert registry.get("cpu.scale") is ScaleCpuKernel
+
+
+def test_registry_lazy_cpu_reduce_is_registered():
+    from shmpipeline.kernels.cpu.reduce import ReduceCpuKernel
+    from shmpipeline.registry import get_default_registry
+
+    registry = get_default_registry()
+    assert "cpu.reduce" in registry.kinds()
+    assert registry.get("cpu.reduce") is ReduceCpuKernel

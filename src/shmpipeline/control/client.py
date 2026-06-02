@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, is_dataclass
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import httpx
 
@@ -229,6 +230,51 @@ class RemoteManagerClient:
                     event_name = value
                 elif field == "data":
                     data_lines.append(value)
+
+    def stream_events(
+        self,
+        *,
+        last_event_id: int | None = None,
+        reconnect: bool = True,
+        initial_backoff: float = 0.5,
+        max_backoff: float = 30.0,
+        backoff_factor: float = 2.0,
+        sleeper: Callable[[float], None] | None = None,
+        should_continue: Callable[[], bool] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield SSE events, transparently reconnecting after drops.
+
+        Wraps :meth:`iter_events` with exponential backoff so a consumer (for
+        example a GUI viewer) keeps receiving events across control-server
+        restarts or transient network failures.  The last observed event id is
+        tracked and replayed via ``Last-Event-ID`` on each reconnect so no
+        events are missed across a gap.  The backoff resets to
+        ``initial_backoff`` after each successfully received event.
+
+        Set ``reconnect=False`` to fall back to single-connection behaviour
+        (the stream ends or raises on the first drop).  ``should_continue`` is
+        polled between attempts so callers can stop the loop cleanly.
+        """
+        sleep = sleeper if sleeper is not None else time.sleep
+        last_id = last_event_id
+        backoff = initial_backoff
+        while should_continue is None or should_continue():
+            try:
+                for event in self.iter_events(last_event_id=last_id):
+                    event_id = event.get("id")
+                    if event_id is not None:
+                        last_id = event_id
+                    backoff = initial_backoff
+                    yield event
+            except (RemoteManagerError, httpx.HTTPError):
+                if not reconnect:
+                    raise
+            if not reconnect:
+                return
+            if should_continue is not None and not should_continue():
+                return
+            sleep(min(backoff, max_backoff))
+            backoff = min(backoff * backoff_factor, max_backoff)
 
     def _request_json(
         self,

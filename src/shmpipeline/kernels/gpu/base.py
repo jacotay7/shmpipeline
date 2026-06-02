@@ -46,11 +46,17 @@ class GpuKernel(Kernel):
     storage = "gpu"
 
     def __init__(self, context) -> None:
-        """Allocate the reusable output buffer directly on the target GPU."""
+        """Allocate one reusable output buffer per output on the target GPU."""
         self.context = context
         self.device = torch.device(context.output_spec.gpu_device or "cuda")
-        self.output_buffer = torch.empty(
-            self.context.output_spec.shape,
-            dtype=torch_dtype_from_numpy(self.context.output_spec.dtype),
-            device=self.device,
-        )
+        self.output_buffers = [
+            torch.empty(
+                spec.shape,
+                dtype=torch_dtype_from_numpy(spec.dtype),
+                device=torch.device(spec.gpu_device or "cuda"),
+            )
+            for spec in context.output_specs
+        ]
+        # Primary output buffer retained for single-output kernels and the
+        # default compute_into path.
+        self.output_buffer = self.output_buffers[0]

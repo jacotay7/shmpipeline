@@ -832,3 +832,183 @@ def test_raise_error_gpu_kernel_raises_configured_message():
             _empty_output((1,), storage="gpu"),
             {},
         )
+
+
+# ---------------------------------------------------------------------------
+# cpu.reduce kernel
+# ---------------------------------------------------------------------------
+
+
+def test_reduce_kernel_is_registered_in_default_registry():
+    from shmpipeline.registry import get_default_registry
+
+    assert "cpu.reduce" in get_default_registry().kinds()
+
+
+@pytest.mark.parametrize(
+    "operation,expected",
+    [
+        ("sum", 28.0),
+        ("mean", 3.5),
+        ("max", 7.0),
+        ("min", 0.0),
+    ],
+)
+def test_reduce_kernel_operations(operation, expected):
+    from shmpipeline.kernels.cpu.reduce import ReduceCpuKernel
+
+    kernel = _instantiate_kernel(
+        ReduceCpuKernel,
+        input_shape=(8,),
+        output_shape=(1,),
+        parameters={"operation": operation},
+    )
+    output = np.empty(1, dtype=np.float32)
+    payload = np.arange(8, dtype=np.float32)
+    kernel.compute_into(payload, output, {})
+    np.testing.assert_allclose(output, [expected], rtol=1e-6)
+
+
+def test_reduce_kernel_rejects_invalid_operation():
+    from shmpipeline.kernels.cpu.reduce import ReduceCpuKernel
+
+    with pytest.raises(
+        ConfigValidationError, match="unsupported reduce operation"
+    ):
+        _instantiate_kernel(
+            ReduceCpuKernel,
+            input_shape=(8,),
+            output_shape=(1,),
+            parameters={"operation": "product"},
+        )
+
+
+def test_reduce_kernel_rejects_non_scalar_output():
+    from shmpipeline.kernels.cpu.reduce import ReduceCpuKernel
+
+    with pytest.raises(ConfigValidationError, match="scalar"):
+        _instantiate_kernel(
+            ReduceCpuKernel,
+            input_shape=(8,),
+            output_shape=(4,),
+            parameters={"operation": "mean"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# CPU kernels do not allocate an unused output_buffer (GPU kernels do)
+# ---------------------------------------------------------------------------
+
+
+def test_cpu_kernel_has_no_output_buffer_attribute():
+    kernel = _instantiate_kernel(
+        ScaleCpuKernel,
+        input_shape=(4,),
+        output_shape=(4,),
+        parameters={"factor": 1.0},
+    )
+    assert not hasattr(kernel, "output_buffer")
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_gpu_kernel_still_has_output_buffer():
+    from shmpipeline.kernels.gpu.scale import ScaleGpuKernel
+
+    kernel = _instantiate_kernel(
+        ScaleGpuKernel,
+        input_shape=(4,),
+        output_shape=(4,),
+        parameters={"factor": 1.0},
+        storage="gpu",
+    )
+    assert hasattr(kernel, "output_buffer")
+
+
+# ---------------------------------------------------------------------------
+# Multi-output kernel ABC behaviour
+# ---------------------------------------------------------------------------
+
+
+def test_compute_into_multiple_defaults_to_single_output():
+    """The default compute_into_multiple forwards the first output buffer."""
+    kernel = _instantiate_kernel(
+        ScaleCpuKernel,
+        input_shape=(4,),
+        output_shape=(4,),
+        parameters={"factor": 2.0},
+    )
+    output = np.empty(4, dtype=np.float32)
+    payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+    kernel.compute_into_multiple(payload, [output], {})
+    np.testing.assert_allclose(output, payload * 2.0)
+
+
+def test_multi_output_kernel_writes_all_outputs():
+    from shmpipeline.kernel import Kernel
+
+    class _Splitter(Kernel):
+        kind = "test.splitter_unit"
+        storage = "cpu"
+        auxiliary_arity = 0
+        output_arity = 2
+
+        def compute_into_multiple(self, trigger_input, outputs, aux):
+            outputs[0][...] = trigger_input * 2.0
+            outputs[1][...] = trigger_input + 1.0
+
+    config = KernelConfig.from_dict(
+        {
+            "name": "split",
+            "kind": "test.splitter_unit",
+            "input": "input",
+            "outputs": ["out_a", "out_b"],
+        }
+    )
+    shared_memory = _make_shared_memory(
+        [
+            {"name": "input", "shape": [3], "dtype": "float32"},
+            {"name": "out_a", "shape": [3], "dtype": "float32"},
+            {"name": "out_b", "shape": [3], "dtype": "float32"},
+        ]
+    )
+    _Splitter.validate_config(config, shared_memory)
+    kernel = _Splitter(
+        KernelContext(config=config, shared_memory=shared_memory)
+    )
+    payload = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+    out_a = np.empty(3, dtype=np.float32)
+    out_b = np.empty(3, dtype=np.float32)
+    kernel.compute_into_multiple(payload, [out_a, out_b], {})
+    np.testing.assert_allclose(out_a, payload * 2.0)
+    np.testing.assert_allclose(out_b, payload + 1.0)
+
+
+def test_output_arity_mismatch_is_rejected():
+    from shmpipeline.kernel import Kernel
+
+    class _DualOut(Kernel):
+        kind = "test.dual_out_unit"
+        storage = "cpu"
+        auxiliary_arity = 0
+        output_arity = 2
+
+        def compute_into_multiple(self, trigger_input, outputs, aux):
+            for out in outputs:
+                out[...] = trigger_input
+
+    config = KernelConfig.from_dict(
+        {
+            "name": "dual",
+            "kind": "test.dual_out_unit",
+            "input": "input",
+            "output": "only_one",
+        }
+    )
+    shared_memory = _make_shared_memory(
+        [
+            {"name": "input", "shape": [3], "dtype": "float32"},
+            {"name": "only_one", "shape": [3], "dtype": "float32"},
+        ]
+    )
+    with pytest.raises(ConfigValidationError, match="output stream"):
+        _DualOut.validate_config(config, shared_memory)

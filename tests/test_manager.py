@@ -23,6 +23,7 @@ from shmpipeline import (
 from shmpipeline.errors import WorkerProcessError
 from shmpipeline.logging_utils import ColorFormatter
 from shmpipeline.shm_cleanup import close_stream
+from shmpipeline.source import Source
 
 try:
     import torch
@@ -2157,3 +2158,545 @@ def test_manager_runs_basic_ao_pipeline_and_verifies_all_stages(shm_prefix):
         )
 
     manager.shutdown()
+
+
+# ===========================================================================
+# worker_start_timeout configuration
+# ===========================================================================
+
+
+def _simple_copy_config(prefix):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{prefix}_input", "shape": [1], "dtype": "float32"},
+                {"name": f"{prefix}_output", "shape": [1], "dtype": "float32"},
+            ],
+            "kernels": [
+                {
+                    "name": "k",
+                    "kind": "cpu.copy",
+                    "input": f"{prefix}_input",
+                    "output": f"{prefix}_output",
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+
+
+def _scale_config(prefix, *, poll_interval=None):
+    kernel = {
+        "name": "stage",
+        "kind": "cpu.scale",
+        "input": f"{prefix}_input",
+        "output": f"{prefix}_output",
+        "parameters": {"factor": 2.0},
+        "read_timeout": 0.1,
+    }
+    if poll_interval is not None:
+        kernel["poll_interval"] = poll_interval
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": f"{prefix}_input", "shape": [4], "dtype": "float32"},
+                {"name": f"{prefix}_output", "shape": [4], "dtype": "float32"},
+            ],
+            "kernels": [kernel],
+        }
+    )
+
+
+def test_manager_accepts_worker_start_timeout(shm_prefix):
+    manager = PipelineManager(
+        _simple_copy_config(shm_prefix), worker_start_timeout=15.0
+    )
+    assert manager._worker_start_timeout == 15.0
+
+
+def test_manager_default_worker_start_timeout_is_ten_seconds(shm_prefix):
+    manager = PipelineManager(_simple_copy_config(shm_prefix))
+    assert manager._worker_start_timeout == 10.0
+
+
+def test_manager_uses_custom_worker_start_timeout(shm_prefix, monkeypatch):
+    import shmpipeline.manager as manager_module
+
+    timeouts_seen: list[float] = []
+    original = manager_module.PipelineManager._wait_for_workers_started
+
+    def _probe(self, *, timeout=None, only=None):
+        timeouts_seen.append(timeout)
+        return original(self, timeout=timeout, only=only)
+
+    monkeypatch.setattr(
+        manager_module.PipelineManager, "_wait_for_workers_started", _probe
+    )
+    manager = PipelineManager(
+        _scale_config(shm_prefix), worker_start_timeout=7.5
+    )
+    try:
+        manager.build()
+        manager.start()
+    finally:
+        manager.shutdown(force=True)
+    assert any(t == pytest.approx(7.5) for t in timeouts_seen)
+
+
+# ===========================================================================
+# restart()
+# ===========================================================================
+
+
+def test_restart_raises_when_not_running(shm_prefix):
+    from shmpipeline.errors import StateTransitionError
+
+    manager = PipelineManager(_scale_config(shm_prefix))
+    with pytest.raises(StateTransitionError):
+        manager.restart()
+
+
+def test_restart_noop_when_no_failures(shm_prefix):
+    manager = PipelineManager(_scale_config(shm_prefix))
+    try:
+        manager.build()
+        manager.start()
+        manager.restart()
+        assert manager.state == PipelineState.RUNNING
+    finally:
+        manager.shutdown(force=True)
+
+
+def test_restart_recovers_from_failed_worker(shm_prefix):
+    from shmpipeline.config import KernelConfig
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "stage",
+                    "kind": "cpu.raise_error",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                    "parameters": {"message": "intentional test error"},
+                    "read_timeout": 0.1,
+                }
+            ],
+        }
+    )
+    manager = PipelineManager(config)
+    try:
+        manager.build()
+        manager.start()
+        manager.get_stream(f"{shm_prefix}_input").write(
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        )
+        deadline = time.monotonic() + 5.0
+        while (
+            time.monotonic() < deadline
+            and manager.state != PipelineState.FAILED
+        ):
+            manager.poll_events()
+            time.sleep(0.05)
+        assert manager.state == PipelineState.FAILED
+
+        manager._runtime_registry = get_default_registry()
+        manager._kernel_configs["stage"] = KernelConfig.from_dict(
+            {
+                "name": "stage",
+                "kind": "cpu.copy",
+                "input": f"{shm_prefix}_input",
+                "output": f"{shm_prefix}_output",
+                "read_timeout": 0.1,
+            }
+        )
+        manager.restart()
+        assert manager.state == PipelineState.RUNNING
+        assert manager._failures == []
+    finally:
+        manager.shutdown(force=True)
+
+
+# ===========================================================================
+# Thread-safe poll_events / status
+# ===========================================================================
+
+
+def test_poll_events_is_thread_safe(shm_prefix):
+    import threading
+
+    manager = PipelineManager(_scale_config(shm_prefix))
+    try:
+        manager.build()
+        manager.start()
+        manager.get_stream(f"{shm_prefix}_input").write(
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        )
+        errors: list[Exception] = []
+        stop_flag = threading.Event()
+
+        def _poll_loop():
+            while not stop_flag.is_set():
+                try:
+                    manager.status()
+                except Exception as exc:  # pragma: no cover - failure path
+                    errors.append(exc)
+                    stop_flag.set()
+                time.sleep(1e-4)
+
+        threads = [threading.Thread(target=_poll_loop) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        time.sleep(0.5)
+        stop_flag.set()
+        for thread in threads:
+            thread.join(timeout=2.0)
+        assert not errors
+    finally:
+        manager.shutdown(force=True)
+
+
+# ===========================================================================
+# raise_if_failed uses accurate component_type
+# ===========================================================================
+
+
+def test_raise_if_failed_uses_source_component_type(shm_prefix):
+    manager = PipelineManager(_scale_config(shm_prefix))
+    manager._failures.append(
+        {
+            "type": "source_failed",
+            "kernel": "my_source",
+            "component_type": "source",
+            "error": "read error",
+        }
+    )
+    with pytest.raises(WorkerProcessError, match="source 'my_source' failed"):
+        manager.raise_if_failed()
+
+
+def test_raise_if_failed_uses_sink_component_type(shm_prefix):
+    manager = PipelineManager(_scale_config(shm_prefix))
+    manager._failures.append(
+        {
+            "type": "sink_failed",
+            "kernel": "my_sink",
+            "component_type": "sink",
+            "error": "write error",
+        }
+    )
+    with pytest.raises(WorkerProcessError, match="sink 'my_sink' failed"):
+        manager.raise_if_failed()
+
+
+# ===========================================================================
+# Source/sink plugin call timeout enforcement (#23)
+# ===========================================================================
+
+
+def test_call_with_optional_timeout_runs_inline_without_timeout():
+    import shmpipeline.manager as manager_module
+
+    result = manager_module._call_with_optional_timeout(
+        lambda: 42, timeout=None, executor=None, label="x"
+    )
+    assert result == 42
+
+
+def test_call_with_optional_timeout_raises_on_slow_call():
+    import concurrent.futures
+
+    import shmpipeline.manager as manager_module
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        with pytest.raises(TimeoutError, match="timeout"):
+            manager_module._call_with_optional_timeout(
+                lambda: time.sleep(2.0),
+                timeout=0.1,
+                executor=executor,
+                label="slow read",
+            )
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+class _SlowSource(Source):
+    """A source whose read() blocks far longer than its configured timeout."""
+
+    kind = "test.slow_source"
+    storage = "cpu"
+
+    def open(self):
+        pass
+
+    def read(self):
+        time.sleep(5.0)
+        return np.ones(4, dtype=np.float32)
+
+    def close(self):
+        pass
+
+
+def test_source_read_timeout_surfaces_as_failure(shm_prefix):
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                }
+            ],
+            "sources": [
+                {
+                    "name": "src",
+                    "kind": "test.slow_source",
+                    "stream": f"{shm_prefix}_input",
+                    "read_timeout": 0.2,
+                }
+            ],
+        }
+    )
+    registry = get_default_registry().extended(sources=(_SlowSource,))
+    manager = PipelineManager(config, registry=registry)
+    try:
+        manager.build()
+        manager.start()
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and not manager._failures:
+            manager.poll_events()
+            time.sleep(0.05)
+        assert any(
+            "timeout" in failure.get("error", "")
+            for failure in manager._failures
+        )
+    finally:
+        manager.shutdown(force=True)
+
+
+# ===========================================================================
+# benchmark()
+# ===========================================================================
+
+
+def test_benchmark_requires_running_pipeline(shm_prefix):
+    from shmpipeline.errors import StateTransitionError
+
+    manager = PipelineManager(_scale_config(shm_prefix))
+    with pytest.raises(StateTransitionError, match="RUNNING"):
+        manager.benchmark(duration_s=0.1)
+
+
+def test_benchmark_reports_throughput_and_latency(shm_prefix):
+    from shmpipeline.synthetic import SyntheticInputConfig
+
+    manager = PipelineManager(_scale_config(shm_prefix, poll_interval=1e-5))
+    try:
+        manager.build()
+        manager.start()
+        report = manager.benchmark(
+            duration_s=0.6,
+            warmup_s=0.2,
+            source=SyntheticInputConfig(
+                stream_name=f"{shm_prefix}_input",
+                pattern="random",
+                rate_hz=300.0,
+            ),
+        )
+        assert report["frames"] > 0
+        assert report["throughput_hz"] > 0
+        assert report["latency_ms"]["p50"] is not None
+        assert "stage" in report["workers"]
+    finally:
+        manager.shutdown(force=True)
+
+
+# ===========================================================================
+# add_kernel() hot-reload
+# ===========================================================================
+
+
+def test_add_kernel_requires_running_pipeline(shm_prefix):
+    from shmpipeline.errors import StateTransitionError
+
+    manager = PipelineManager(_scale_config(shm_prefix))
+    with pytest.raises(StateTransitionError, match="RUNNING or PAUSED"):
+        manager.add_kernel(
+            {
+                "name": "extra",
+                "kind": "cpu.copy",
+                "input": f"{shm_prefix}_output",
+                "output": f"{shm_prefix}_extra",
+            },
+            shared_memory=[
+                {
+                    "name": f"{shm_prefix}_extra",
+                    "shape": [4],
+                    "dtype": "float32",
+                }
+            ],
+        )
+
+
+def test_add_kernel_rejects_duplicate_node_name(shm_prefix):
+    from shmpipeline.errors import ConfigValidationError
+
+    manager = PipelineManager(_scale_config(shm_prefix))
+    try:
+        manager.build()
+        manager.start()
+        with pytest.raises(ConfigValidationError, match="already exists"):
+            manager.add_kernel(
+                {
+                    "name": "stage",  # already used by the scale kernel
+                    "kind": "cpu.copy",
+                    "input": f"{shm_prefix}_output",
+                    "output": f"{shm_prefix}_extra",
+                },
+                shared_memory=[
+                    {
+                        "name": f"{shm_prefix}_extra",
+                        "shape": [4],
+                        "dtype": "float32",
+                    }
+                ],
+            )
+    finally:
+        manager.shutdown(force=True)
+
+
+def test_add_kernel_hot_reloads_new_stage(shm_prefix):
+    manager = PipelineManager(_scale_config(shm_prefix))
+    try:
+        manager.build()
+        manager.start()
+        manager.add_kernel(
+            {
+                "name": "addc",
+                "kind": "cpu.add_constant",
+                "input": f"{shm_prefix}_output",
+                "output": f"{shm_prefix}_final",
+                "parameters": {"constant": 10.0},
+                "read_timeout": 0.2,
+            },
+            shared_memory=[
+                {
+                    "name": f"{shm_prefix}_final",
+                    "shape": [4],
+                    "dtype": "float32",
+                }
+            ],
+        )
+        assert "addc" in manager._workers
+        final = manager.get_stream(f"{shm_prefix}_final")
+        baseline = final.count
+        manager.get_stream(f"{shm_prefix}_input").write(
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        )
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and final.count <= baseline:
+            manager.poll_events()
+            time.sleep(0.02)
+        np.testing.assert_allclose(final.read(), [12.0, 14.0, 16.0, 18.0])
+        manager.raise_if_failed()
+    finally:
+        manager.shutdown(force=True)
+
+
+# ===========================================================================
+# Multi-output kernels end-to-end (#11)
+# ===========================================================================
+
+
+def test_manager_runs_multi_output_kernel(tmp_path, shm_prefix, monkeypatch):
+    module_name = f"custom_split_kernel_{shm_prefix}"
+    module_path = tmp_path / f"{module_name}.py"
+    module_path.write_text(
+        textwrap.dedent(
+            """
+            from shmpipeline.kernel import Kernel
+
+
+            class SplitCpuKernel(Kernel):
+                kind = "test.split"
+                storage = "cpu"
+                auxiliary_arity = 0
+                output_arity = 2
+
+                def compute_into_multiple(self, trigger_input, outputs, aux):
+                    outputs[0][...] = trigger_input * 2.0
+                    outputs[1][...] = trigger_input + 100.0
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+    sys.modules.pop(module_name, None)
+    module = importlib.import_module(module_name)
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_out_a",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_out_b",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "split",
+                    "kind": "test.split",
+                    "input": f"{shm_prefix}_input",
+                    "outputs": [f"{shm_prefix}_out_a", f"{shm_prefix}_out_b"],
+                    "read_timeout": 0.2,
+                }
+            ],
+        }
+    )
+    registry = get_default_registry().extended(module.SplitCpuKernel)
+    manager = PipelineManager(config, registry=registry)
+    try:
+        manager.build()
+        manager.start()
+        out_a = manager.get_stream(f"{shm_prefix}_out_a")
+        out_b = manager.get_stream(f"{shm_prefix}_out_b")
+        base_a, base_b = out_a.count, out_b.count
+        manager.get_stream(f"{shm_prefix}_input").write(
+            np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        )
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline and (
+            out_a.count <= base_a or out_b.count <= base_b
+        ):
+            manager.poll_events()
+            time.sleep(0.02)
+        np.testing.assert_allclose(out_a.read(), [2.0, 4.0, 6.0, 8.0])
+        np.testing.assert_allclose(out_b.read(), [101.0, 102.0, 103.0, 104.0])
+        manager.raise_if_failed()
+    finally:
+        manager.shutdown(force=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from ipaddress import ip_address
-from typing import Any
+from typing import Any, Callable, Iterator
 from urllib.parse import urlparse
 
 from shmpipeline.control import RemoteManagerClient
@@ -163,6 +163,24 @@ class RemotePipelineSession:
         snapshot = self._client.shutdown(unlink=unlink, force=force)
         self._last_status = snapshot
         return snapshot
+
+    def stream_events(
+        self,
+        *,
+        last_event_id: int | None = None,
+        reconnect: bool = True,
+        should_continue: Callable[[], bool] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield control-plane events, auto-reconnecting after server drops.
+
+        Used by GUI viewers so the live feed resumes automatically when the
+        control server restarts, without the user reconnecting by hand.
+        """
+        return self._client.stream_events(
+            last_event_id=last_event_id,
+            reconnect=reconnect,
+            should_continue=should_continue,
+        )
 
     def synthetic_input_status(self) -> dict[str, Any]:
         return self.status().get("synthetic_sources", {})

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -10,6 +11,59 @@ import numpy as np
 import yaml
 
 from shmpipeline.errors import ConfigValidationError
+
+
+class _LineAnnotatedDict(dict):
+    """A ``dict`` that remembers the 1-based YAML line it was parsed from."""
+
+    __line__: int | None = None
+
+
+class _LineMarkLoader(yaml.SafeLoader):
+    """YAML loader that annotates every mapping with its source line."""
+
+
+def _construct_line_mapping(loader: _LineMarkLoader, node: yaml.Node):
+    mapping = _LineAnnotatedDict(
+        yaml.SafeLoader.construct_mapping(loader, node, deep=True)
+    )
+    mapping.__line__ = node.start_mark.line + 1
+    return mapping
+
+
+_LineMarkLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
+    _construct_line_mapping,
+)
+
+
+def _index_config_lines(raw: Any) -> dict[str, int]:
+    """Map each named config entry to the YAML line it was declared on."""
+    index: dict[str, int] = {}
+    if not isinstance(raw, Mapping):
+        return index
+    for section in ("shared_memory", "kernels", "sources", "sinks"):
+        entries = raw.get(section)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                continue
+            name = entry.get("name")
+            line = getattr(entry, "__line__", None)
+            if isinstance(name, str) and line is not None:
+                index.setdefault(name.strip(), line)
+    return index
+
+
+def _augment_error_with_line(message: str, raw: Any, path: Path) -> str:
+    """Append the source file and (when resolvable) line to an error message."""
+    index = _index_config_lines(raw)
+    for token in re.findall(r"'([^']*)'", message):
+        line = index.get(token.strip())
+        if line is not None:
+            return f"{message} (in {path}, line {line})"
+    return f"{message} (in {path})"
 
 
 def _expect_mapping(value: Any, *, context: str) -> Mapping[str, Any]:
@@ -104,6 +158,15 @@ def _normalize_positive_float(value: Any, *, context: str) -> float:
     if normalized <= 0.0:
         raise ConfigValidationError(f"{context} must be positive")
     return normalized
+
+
+def _normalize_optional_positive_float(
+    value: Any, *, context: str
+) -> float | None:
+    """Return a positive float, or ``None`` when the value is unset."""
+    if value is None:
+        return None
+    return _normalize_positive_float(value, context=context)
 
 
 @dataclass(frozen=True)
@@ -208,15 +271,20 @@ class KernelConfig:
     read_timeout: float = 1.0
     pause_sleep: float = 0.01
     poll_interval: float = 1e-5
+    outputs: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "KernelConfig":
         """Build a normalized kernel configuration from a mapping."""
         data = _expect_mapping(raw, context="kernel entry")
-        if "inputs" in data or "outputs" in data:
+        if "inputs" in data:
             raise ConfigValidationError(
-                "kernel entry must use 'input', 'output', and optional "
-                "'auxiliary'; 'inputs' and 'outputs' are not supported"
+                "kernel entry must use 'input' (single trigger stream); "
+                "'inputs' is not supported"
+            )
+        if "output" in data and "outputs" in data:
+            raise ConfigValidationError(
+                "kernel entry must use either 'output' or 'outputs', not both"
             )
         _reject_unexpected_keys(
             data,
@@ -226,6 +294,7 @@ class KernelConfig:
                 "kind",
                 "input",
                 "output",
+                "outputs",
                 "auxiliary",
                 "operation",
                 "parameters",
@@ -239,12 +308,19 @@ class KernelConfig:
             data.get("kind"), context=f"kind for kernel {name}"
         )
         input_name = data.get("input")
-        output_name = data.get("output")
         auxiliary_raw = data.get("auxiliary", ())
         input_name = _normalize_name(input_name, context=f"input for {name}")
-        output_name = _normalize_name(
-            output_name, context=f"output for {name}"
-        )
+        if "outputs" in data:
+            outputs = _normalize_names(
+                data.get("outputs"), context=f"outputs for {name}"
+            )
+        else:
+            outputs = (
+                _normalize_name(
+                    data.get("output"), context=f"output for {name}"
+                ),
+            )
+        output_name = outputs[0]
         auxiliary = _normalize_auxiliary_bindings(
             auxiliary_raw,
             context=f"auxiliary for {name}",
@@ -281,11 +357,18 @@ class KernelConfig:
             read_timeout=read_timeout,
             pause_sleep=pause_sleep,
             poll_interval=poll_interval,
+            outputs=tuple(outputs),
         )
 
     def __post_init__(self) -> None:
         """Validate basic kernel wiring constraints."""
-        if self.input == self.output:
+        all_outputs = self.all_outputs
+        if len(set(all_outputs)) != len(all_outputs):
+            raise ConfigValidationError(
+                f"kernel {self.name!r} cannot declare the same output stream "
+                "more than once"
+            )
+        if self.input in all_outputs:
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot use the same shared memory for "
                 "both input and output"
@@ -304,7 +387,7 @@ class KernelConfig:
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot reuse the trigger input as auxiliary"
             )
-        if self.output in auxiliary_names:
+        if any(output in auxiliary_names for output in all_outputs):
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot reuse the output as auxiliary"
             )
@@ -313,6 +396,16 @@ class KernelConfig:
     def all_inputs(self) -> tuple[str, ...]:
         """Return the trigger input followed by ordered auxiliary streams."""
         return (self.input, *self.auxiliary_names)
+
+    @property
+    def all_outputs(self) -> tuple[str, ...]:
+        """Return every output stream in declaration order.
+
+        Single-output kernels report ``(output,)``; multi-output kernels
+        configured with ``outputs:`` report the full ordered tuple.  The
+        primary :attr:`output` is always ``all_outputs[0]``.
+        """
+        return self.outputs if self.outputs else (self.output,)
 
     @property
     def auxiliary_names(self) -> tuple[str, ...]:
@@ -344,6 +437,7 @@ class SourceConfig:
     auxiliary: tuple[AuxiliaryBinding, ...] = field(default_factory=tuple)
     parameters: dict[str, Any] = field(default_factory=dict)
     poll_interval: float = 0.01
+    read_timeout: float | None = None
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SourceConfig":
@@ -359,6 +453,7 @@ class SourceConfig:
                 "auxiliary",
                 "parameters",
                 "poll_interval",
+                "read_timeout",
             },
         )
         name = _normalize_name(data.get("name"), context="source name")
@@ -380,6 +475,10 @@ class SourceConfig:
             data.get("poll_interval", 0.01),
             context=f"poll_interval for source {name!r}",
         )
+        read_timeout = _normalize_optional_positive_float(
+            data.get("read_timeout"),
+            context=f"read_timeout for source {name!r}",
+        )
         return cls(
             name=name,
             kind=kind,
@@ -387,6 +486,7 @@ class SourceConfig:
             auxiliary=auxiliary,
             parameters=parameters,
             poll_interval=poll_interval,
+            read_timeout=read_timeout,
         )
 
     @property
@@ -420,6 +520,7 @@ class SinkConfig:
     parameters: dict[str, Any] = field(default_factory=dict)
     read_timeout: float = 1.0
     pause_sleep: float = 0.01
+    consume_timeout: float | None = None
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SinkConfig":
@@ -436,6 +537,7 @@ class SinkConfig:
                 "parameters",
                 "read_timeout",
                 "pause_sleep",
+                "consume_timeout",
             },
         )
         name = _normalize_name(data.get("name"), context="sink name")
@@ -461,6 +563,10 @@ class SinkConfig:
             data.get("pause_sleep", 0.01),
             context=f"pause_sleep for sink {name!r}",
         )
+        consume_timeout = _normalize_optional_positive_float(
+            data.get("consume_timeout"),
+            context=f"consume_timeout for sink {name!r}",
+        )
         return cls(
             name=name,
             kind=kind,
@@ -469,6 +575,7 @@ class SinkConfig:
             parameters=parameters,
             read_timeout=read_timeout,
             pause_sleep=pause_sleep,
+            consume_timeout=consume_timeout,
         )
 
     @property
@@ -552,8 +659,15 @@ class PipelineConfig:
     def from_yaml(cls, path: str | Path) -> "PipelineConfig":
         """Load a pipeline configuration from a YAML file."""
         config_path = Path(path)
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        return cls.from_dict(raw)
+        raw = yaml.load(
+            config_path.read_text(encoding="utf-8"), Loader=_LineMarkLoader
+        )
+        try:
+            return cls.from_dict(raw)
+        except ConfigValidationError as exc:
+            raise ConfigValidationError(
+                _augment_error_with_line(str(exc), raw, config_path)
+            ) from exc
 
     def __post_init__(self) -> None:
         """Validate name uniqueness and shared-memory references."""
@@ -588,7 +702,7 @@ class PipelineConfig:
         for kernel in self.kernels:
             missing = [
                 name
-                for name in (*kernel.all_inputs, kernel.output)
+                for name in (*kernel.all_inputs, *kernel.all_outputs)
                 if name not in available
             ]
             if missing:

@@ -69,7 +69,8 @@ kernels:
   - name: my_kernel
     kind: cpu.scale         # or gpu.scale
     input: input_stream
-    output: output_stream
+    output: output_stream   # single output
+    # outputs: [out_a, out_b]   # multi-output form (mutually exclusive with output)
     # auxiliary: {alias: stream_name}  # or list form
     parameters: {factor: 2.0}
     read_timeout: 1.0       # seconds
@@ -82,6 +83,7 @@ sources:                    # optional external data providers
     stream: input_stream
     parameters: {}
     poll_interval: 0.01
+    # read_timeout: 0.5     # optional: fail the source if read() blocks longer
 
 sinks:                      # optional data consumers
   - name: my_sink
@@ -89,7 +91,12 @@ sinks:                      # optional data consumers
     stream: output_stream
     parameters: {}
     read_timeout: 1.0
+    # consume_timeout: 0.5  # optional: fail the sink if consume() blocks longer
 ```
+
+A kernel uses **either** `output:` (single stream) **or** `outputs:` (an
+ordered list for multi-output kernels) — never both. `output` always equals the
+first of `outputs`.
 
 ## Writing a Custom Kernel
 
@@ -113,6 +120,30 @@ class MyKernel(Kernel):
 ```
 
 **Note on output_buffer**: GPU kernels (`GpuKernel` subclasses) receive a private CUDA tensor (`self.output_buffer`) as the `output` argument, which is then copied to the shared CUDA IPC tensor. CPU kernels write directly into the shared-memory view and do **not** have `self.output_buffer`. Custom CPU kernels that need intermediate buffers should allocate them in `__init__` explicitly.
+
+### Multi-output kernels
+
+A kernel may declare more than one output stream via `outputs: [a, b, ...]` and
+set the class attribute `output_arity` (default `1`; use the matching int, or
+`None` for any number). Override `compute_into_multiple` instead of
+`compute_into`:
+
+```python
+class SplitKernel(Kernel):
+    kind = "mypackage.split"
+    storage = "cpu"
+    output_arity = 2
+
+    def compute_into_multiple(self, trigger_input, outputs, auxiliary_inputs):
+        # `outputs` aligns positionally with KernelConfig.all_outputs.
+        outputs[0][...] = trigger_input * 2.0
+        outputs[1][...] = trigger_input + 1.0
+```
+
+The base `Kernel.compute_into_multiple` forwards `outputs[0]` to
+`compute_into`, so single-output kernels need no changes. For CPU kernels each
+output view is the zero-copy locked shared-memory buffer; GPU kernels receive
+one private `output_buffer` per output (via `self.output_buffers`).
 
 Register via pyproject.toml entry point:
 ```toml
@@ -244,6 +275,46 @@ manager.state  # → RUNNING (if all failures resolved)
 - After restart, `manager._failures` is cleared for the restarted workers.
 - Accepts an optional `timeout` parameter (defaults to `worker_start_timeout`).
 
+## add_kernel() — Hot-reload
+
+`PipelineManager.add_kernel(kernel, *, shared_memory=(), timeout=None)` spawns a
+new worker for an additional kernel on a **running** (or paused) pipeline,
+creating any new streams it needs, without stopping existing workers:
+
+```python
+manager.add_kernel(
+    {"name": "post", "kind": "cpu.add_constant",
+     "input": "out", "output": "final", "parameters": {"constant": 10.0}},
+    shared_memory=[{"name": "final", "shape": [4], "dtype": "float32"}],
+)
+```
+
+- Requires state `RUNNING` or `PAUSED`.
+- The candidate config is fully re-validated (references, name uniqueness, graph
+  producer rules, kernel arity/storage) before anything is committed.
+- Only genuinely new streams are created; existing names are referenced as-is.
+- On a spawn failure the partial change is rolled back (worker, new streams, and
+  config) so the live pipeline is left intact.
+
+## benchmark() Mode
+
+`PipelineManager.benchmark(*, duration_s, source=None, output_stream=None,
+warmup_s=0.5, poll_interval=1e-4)` drives a **running** pipeline and measures
+throughput and per-frame latency at a terminal output stream:
+
+```python
+report = manager.benchmark(
+    duration_s=5.0,
+    source=SyntheticInputConfig(stream_name="input", pattern="random", rate_hz=1000.0),
+)
+# report -> {throughput_hz, frames, latency_ms: {min,mean,max,p50,p90,p99}, workers: {...}}
+```
+
+- Optionally starts a synthetic source for the run and stops it afterwards.
+- `output_stream` defaults to the graph's single terminal output (specify it
+  explicitly when there is more than one).
+- Raises if a worker failed during the run.
+
 ## Thread Safety
 
 `poll_events()` and `status()` are thread-safe — concurrent calls from multiple threads (e.g., a GUI polling thread and a REST endpoint) are serialised internally via a `threading.Lock`.
@@ -283,6 +354,28 @@ shmpipeline sinks     # list all registered sink kinds
 
 Install with `pip install shmpipeline[control]`. Exposes a FastAPI REST API and Server-Sent Events endpoint. The GUI (`shmpipeline-gui`) and `shmpipeline-control-gui` require `pip install shmpipeline[gui]`.
 
+### Authorization scopes
+
+`create_control_app(service, *, token=None, tokens=None)` supports three
+hierarchical scopes:
+
+- `read` — status, snapshot, graph, info, events, document reads.
+- `control` — start/stop/pause/resume and synthetic I/O (implies `read`).
+- `admin` — build, shutdown, and document writes (implies `control`).
+
+Pass a single `token=` for full (`admin`) access — the original behaviour — or
+`tokens={"read": ..., "control": ..., "admin": ...}` for per-scope credentials.
+A request presenting a token gets that scope plus all lower ones; a missing or
+unknown bearer token yields `401`, an under-privileged one yields `403`. With
+neither `token` nor `tokens`, authentication is disabled.
+
+### SSE auto-reconnect
+
+`RemoteManagerClient.stream_events(...)` wraps `iter_events` with exponential
+backoff, transparently reconnecting after a control-server restart or transient
+network drop and resuming from the last seen event id via `Last-Event-ID`. The
+GUI session exposes it as `RemotePipelineSession.stream_events`.
+
 ## Project Structure
 
 ```
@@ -317,16 +410,18 @@ src/shmpipeline/
       _common.py        # torch helpers
       ...
 tests/
-  conftest.py              # shm_prefix fixture (auto-cleanup)
-  test_config.py
+  conftest.py              # shm_prefix fixture (auto-cleanup) + slow-test auto-forking
+  test_config.py           # config models, multi-output, YAML line numbers
   test_graph.py
-  test_improvements.py     # tests for IMPROVEMENTS.md features
-  test_kernels.py
-  test_manager.py          # Integration tests — spawn many worker processes
-  test_registry.py
+  test_document.py         # editable-document helpers
+  test_runtime.py          # in-process unit tests of worker-runtime helpers
+  test_shm_cleanup.py      # pyshmem.unlink_quiet teardown
+  test_kernels.py          # kernel compute, cpu.reduce, multi-output ABC
+  test_manager.py          # Integration tests — spawn workers; restart/benchmark/add_kernel
+  test_registry.py         # registry, picklability, lazy loading
   test_synthetic.py
   test_cli.py
-  test_control.py
+  test_control.py          # control plane, auth scopes, SSE reconnect
   test_observatory_example.py
   test_gui_*.py            # requires PySide6
 ```
@@ -340,18 +435,46 @@ python -m pytest tests/ --ignore=tests/test_gui_app.py --ignore=tests/test_gui_m
 # Single test module
 python -m pytest tests/test_manager.py -q
 
-# Improvement-specific tests
-python -m pytest tests/test_improvements.py -q
-
 # Integration tests can be slow (spawn worker processes)
 # Run test_manager.py in isolation for reliable results
 ```
 
+**Test isolation**: the heavy spawn-based integration tests are marked
+`@pytest.mark.slow` and CI runs them in a **separate `pytest` invocation**
+(`pytest -m "not slow"` for the main run, then `pytest -m slow`). Running them
+in their own process keeps accumulated C-level numba/CUDA JIT state from
+exhausting memory partway through the session. Locally, do the same on
+memory-constrained machines:
+
+```bash
+python -m pytest -m "not slow" -q     # fast + light integration tests
+python -m pytest -m slow -q           # heavy spawn-based integration tests
+```
+
 **Test note**: `test_manager_runs_basic_ao_pipeline_and_verifies_all_stages` and other integration tests that spawn many worker processes may fail with `MemoryError` when run as part of the full suite on memory-constrained machines (many `spawn`-based worker subprocesses exhaust page table or mmap slot limits). Run in isolation or increase system `vm.max_map_count` if this occurs.
+
+## Definition of Done — coverage & lint
+
+Every change must leave the repository green on both gates that CI enforces
+(`.github/workflows/ci.yml`):
+
+1. **Lint** — `ruff check .` and `ruff format --check .` must pass. Run
+   `ruff format .` before committing.
+2. **Coverage** — `pytest --cov=shmpipeline` must stay at or above the
+   **80%** floor (`fail_under = 80` in `[tool.coverage.report]`). New code must
+   ship with tests in the appropriate `tests/test_*.py` module (do not create
+   ad-hoc "misc" test files).
+
+The coverage gate excludes code that headless CI cannot meaningfully exercise —
+GPU kernels (`kernels/gpu/*`, no CUDA on CI) and the PySide6 GUI
+(`gui/*`) — configured via `omit` in `[tool.coverage.run]`. Everything else
+(core library + control plane) counts toward the 80% floor. The full suite
+(including GUI tests) still runs in the matrix `test` job; the dedicated
+`coverage` job is what enforces the threshold.
 
 ## Package Info
 
-- Package name on PyPI: `shmpipeline` (v1.0.1)
+- Package name on PyPI: `shmpipeline` (v1.0.2)
 - License: GPL-3.0-only
 - Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.0.0`, `PyYAML>=6.0`
 - Optional extras: `gpu` (torch), `control` (fastapi/uvicorn/httpx), `gui` (PySide6/pyqtgraph)

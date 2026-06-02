@@ -98,13 +98,13 @@ def _wait_for_trigger(
     return None
 
 
-def _read_locked_inputs_and_output(
+def _read_locked_inputs_and_outputs(
     kernel_config: KernelConfig,
     trigger_stream: Any,
     auxiliary_streams: dict[str, Any],
-    output_stream: Any,
+    output_streams: dict[str, Any],
 ):
-    """Read a consistent set of inputs and the output view under locks.
+    """Read a consistent set of inputs and the output views under locks.
 
     Lock acquisition can legitimately fail under load when an external writer
     is updating the trigger stream. That is treated as transient backpressure,
@@ -117,7 +117,7 @@ def _read_locked_inputs_and_output(
     locked_streams = {
         kernel_config.input: trigger_stream,
         **auxiliary_streams,
-        kernel_config.output: output_stream,
+        **output_streams,
     }
     with ExitStack() as stack:
         for name in sorted(locked_streams):
@@ -131,8 +131,11 @@ def _read_locked_inputs_and_output(
             name: _read_worker_input(stream)
             for name, stream in auxiliary_streams.items()
         }
-        output_view = output_stream.read(safe=False)
-        return current_count, trigger_input, auxiliary_inputs, output_view
+        output_views = {
+            name: stream.read(safe=False)
+            for name, stream in output_streams.items()
+        }
+        return current_count, trigger_input, auxiliary_inputs, output_views
 
 
 def _read_worker_input(stream: Any):
@@ -168,29 +171,38 @@ def _write_worker_output(
     output_stream._finish_write()
 
 
-def _compute_and_publish_output(
+def _compute_and_publish_outputs(
     kernel: Any,
     trigger_input: Any,
     auxiliary_inputs: Mapping[str, Any],
-    output_stream: Any,
-    output_view: Any,
+    ordered_output_names: tuple[str, ...],
+    output_streams: dict[str, Any],
+    output_views: dict[str, Any],
 ) -> None:
-    """Compute one kernel result and publish it to the output stream.
+    """Compute one kernel result and publish it to all output streams.
 
-    CPU kernels use a zero-copy fast path: compute_into writes directly into
-    the locked output_view (the shared-memory buffer itself).  GPU kernels
-    write into kernel.output_buffer first, then copy into the CUDA IPC tensor.
+    CPU kernels use a zero-copy fast path: ``compute_into_multiple`` writes
+    directly into the locked output views (the shared-memory buffers
+    themselves).  GPU kernels write into ``kernel.output_buffers`` first, then
+    copy each into the corresponding CUDA IPC tensor.
     """
-    if getattr(kernel, "storage", None) == "cpu" and isinstance(
-        output_view, np.ndarray
-    ):
-        output_stream._mark_write_started()
-        kernel.compute_into(trigger_input, output_view, auxiliary_inputs)
-        output_stream._finish_write()
+    if getattr(kernel, "storage", None) == "cpu":
+        ordered_views = [output_views[name] for name in ordered_output_names]
+        for name in ordered_output_names:
+            output_streams[name]._mark_write_started()
+        kernel.compute_into_multiple(
+            trigger_input, ordered_views, auxiliary_inputs
+        )
+        for name in ordered_output_names:
+            output_streams[name]._finish_write()
         return
 
-    kernel.compute_into(trigger_input, kernel.output_buffer, auxiliary_inputs)
-    _write_worker_output(output_stream, output_view, kernel.output_buffer)
+    output_buffers = getattr(kernel, "output_buffers", [kernel.output_buffer])
+    kernel.compute_into_multiple(
+        trigger_input, output_buffers, auxiliary_inputs
+    )
+    for name, buffer in zip(ordered_output_names, output_buffers):
+        _write_worker_output(output_streams[name], output_views[name], buffer)
 
 
 def _send_worker_event(event_sink: Any, event: dict[str, Any]) -> None:
@@ -227,7 +239,10 @@ def run_kernel_process(
         binding.alias: _open_stream(shared_by_name[binding.name])
         for binding in kernel_config.auxiliary
     }
-    output_stream = _open_stream(shared_by_name[kernel_config.output])
+    output_streams = {
+        name: _open_stream(shared_by_name[name])
+        for name in kernel_config.all_outputs
+    }
     _send_worker_event(
         event_sink,
         {
@@ -270,12 +285,12 @@ def run_kernel_process(
                     current_count,
                     trigger_input,
                     auxiliary_inputs,
-                    output_view,
-                ) = _read_locked_inputs_and_output(
+                    output_views,
+                ) = _read_locked_inputs_and_outputs(
                     kernel_config,
                     trigger_stream,
                     auxiliary_streams,
-                    output_stream,
+                    output_streams,
                 )
             except TimeoutError:
                 continue
@@ -284,12 +299,13 @@ def run_kernel_process(
                 continue
 
             compute_started = time.perf_counter()
-            _compute_and_publish_output(
+            _compute_and_publish_outputs(
                 kernel,
                 trigger_input,
                 auxiliary_inputs,
-                output_stream,
-                output_view,
+                kernel_config.all_outputs,
+                output_streams,
+                output_views,
             )
             last_seen_count = current_count
             last_exec_s = time.perf_counter() - compute_started
@@ -319,7 +335,9 @@ def run_kernel_process(
                             completion_times
                         ),
                         "runtime_s": runtime_s,
-                        "last_output_count": output_stream.count,
+                        "last_output_count": output_streams[
+                            kernel_config.output
+                        ].count,
                         "metrics_window": len(exec_samples_s),
                     },
                 )
@@ -344,7 +362,8 @@ def run_kernel_process(
         trigger_stream.close()
         for stream in auxiliary_streams.values():
             stream.close()
-        output_stream.close()
+        for stream in output_streams.values():
+            stream.close()
         logger.info(
             "worker runtime stopping: kernel=%s pid=%s",
             kernel_config.name,

@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import multiprocessing as mp
 import os
 import threading
 import time
 import traceback
 from collections import deque
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pyshmem
 
-from shmpipeline.config import PipelineConfig
+from shmpipeline.config import (
+    KernelConfig,
+    PipelineConfig,
+    SharedMemoryConfig,
+)
 from shmpipeline.errors import (
     ConfigValidationError,
     StateTransitionError,
@@ -70,6 +77,34 @@ def _read_sink_payload(stream: Any, *, timeout: float) -> tuple[float, Any]:
     return current_count, payload
 
 
+def _call_with_optional_timeout(
+    func: Any,
+    *,
+    timeout: float | None,
+    executor: concurrent.futures.ThreadPoolExecutor | None,
+    label: str,
+) -> Any:
+    """Call ``func`` directly, or under a soft timeout via ``executor``.
+
+    When ``timeout`` is ``None`` the plugin call runs inline on the controller
+    thread (the zero-overhead default).  When a timeout is configured the call
+    runs on a dedicated single-thread executor and a :class:`TimeoutError` is
+    raised if it does not return in time, isolating the controller from a
+    plugin that blocks indefinitely.  A timed-out call keeps running on the
+    executor thread until it returns; its result is discarded.
+    """
+    if timeout is None or executor is None:
+        return func()
+    future = executor.submit(func)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        raise TimeoutError(
+            f"{label} exceeded its {timeout:g}s timeout"
+        ) from exc
+
+
 class _SourceController:
     """Manager-owned thread controller for one configured source plugin."""
 
@@ -96,6 +131,13 @@ class _SourceController:
         self._last_error: str | None = None
         self._traceback: str | None = None
         self._failure_reported = False
+        self._read_timeout = getattr(spec, "read_timeout", None)
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
+        if self._read_timeout is not None:
+            self._executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix=f"shmpipeline-source-read-{spec.name}",
+            )
         self.source._attach_runtime_events(
             stop_event=self._stop_event,
             pause_event=self._pause_event,
@@ -167,7 +209,12 @@ class _SourceController:
                     if self._stop_event.wait(self.spec.poll_interval):
                         return
                     continue
-                payload = self.source.read()
+                payload = _call_with_optional_timeout(
+                    self.source.read,
+                    timeout=self._read_timeout,
+                    executor=self._executor,
+                    label=f"source {self.spec.name!r} read()",
+                )
                 if payload is None:
                     if self._stop_event.wait(self.spec.poll_interval):
                         return
@@ -193,6 +240,8 @@ class _SourceController:
                 self._logger.exception(
                     "source close failed: source=%s", self.spec.name
                 )
+            if self._executor is not None:
+                self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 class _SinkController:
@@ -219,6 +268,13 @@ class _SinkController:
         self._last_error: str | None = None
         self._traceback: str | None = None
         self._failure_reported = False
+        self._consume_timeout = getattr(spec, "consume_timeout", None)
+        self._executor: concurrent.futures.ThreadPoolExecutor | None = None
+        if self._consume_timeout is not None:
+            self._executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix=f"shmpipeline-sink-consume-{spec.name}",
+            )
         self.sink._attach_runtime_events(
             stop_event=self._stop_event,
             pause_event=self._pause_event,
@@ -309,7 +365,12 @@ class _SinkController:
                 if current_count <= last_seen_count:
                     continue
                 started = time.perf_counter()
-                self.sink.consume(payload)
+                _call_with_optional_timeout(
+                    lambda: self.sink.consume(payload),
+                    timeout=self._consume_timeout,
+                    executor=self._executor,
+                    label=f"sink {self.spec.name!r} consume()",
+                )
                 finished = time.perf_counter()
                 last_seen_count = current_count
                 with self._lock:
@@ -330,6 +391,8 @@ class _SinkController:
                 self._logger.exception(
                     "sink close failed: sink=%s", self.spec.name
                 )
+            if self._executor is not None:
+                self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 class PipelineManager:
@@ -607,45 +670,8 @@ class PipelineManager:
         try:
             self._start_sinks()
             for index, kernel_config in enumerate(self.config.kernels):
-                stop_event = self.context.Event()
-                event_reader, event_writer = self.context.Pipe(duplex=False)
-                cpu_slot = self.placement_policy.cpu_slot_for(
-                    kernel=kernel_config,
-                    index=index,
-                    cpu_count=cpu_count,
-                )
-                process = self.context.Process(
-                    target=run_kernel_process,
-                    args=(
-                        kernel_config,
-                        self.config.shared_memory,
-                        self._pause_event,
-                        stop_event,
-                        event_writer,
-                        cpu_slot,
-                        self._runtime_registry,
-                    ),
-                    name=f"shmpipeline-{kernel_config.name}",
-                )
-                try:
-                    process.start()
-                except BaseException:
-                    event_reader.close()
-                    event_writer.close()
-                    raise
-                event_writer.close()
-                self._logger.info(
-                    "spawned worker: kernel=%s pid=%s cpu_slot=%s",
-                    kernel_config.name,
-                    process.pid,
-                    cpu_slot,
-                )
-                self._workers[kernel_config.name] = _WorkerHandle(
-                    name=kernel_config.name,
-                    process=process,
-                    stop_event=stop_event,
-                    event_reader=event_reader,
-                    cpu_slot=cpu_slot,
+                self._spawn_worker(
+                    kernel_config, index=index, cpu_count=cpu_count
                 )
             self._wait_for_workers_started(timeout=self._worker_start_timeout)
             self._start_sources()
@@ -655,6 +681,63 @@ class PipelineManager:
         self._transition_state(
             PipelineState.RUNNING, reason="all workers started"
         )
+
+    def _spawn_worker(
+        self,
+        kernel_config: Any,
+        *,
+        index: int,
+        cpu_count: int | None = None,
+    ) -> int | None:
+        """Spawn one worker process for ``kernel_config`` and register it.
+
+        Shared between :meth:`start`, :meth:`restart`, and :meth:`add_kernel`.
+        Uses the current ``self.config.shared_memory``, so callers adding new
+        streams must commit them to ``self.config`` before spawning.
+        """
+        if cpu_count is None:
+            cpu_count = max(1, os.cpu_count() or 1)
+        stop_event = self.context.Event()
+        event_reader, event_writer = self.context.Pipe(duplex=False)
+        cpu_slot = self.placement_policy.cpu_slot_for(
+            kernel=kernel_config,
+            index=index,
+            cpu_count=cpu_count,
+        )
+        process = self.context.Process(
+            target=run_kernel_process,
+            args=(
+                kernel_config,
+                self.config.shared_memory,
+                self._pause_event,
+                stop_event,
+                event_writer,
+                cpu_slot,
+                self._runtime_registry,
+            ),
+            name=f"shmpipeline-{kernel_config.name}",
+        )
+        try:
+            process.start()
+        except BaseException:
+            event_reader.close()
+            event_writer.close()
+            raise
+        event_writer.close()
+        self._logger.info(
+            "spawned worker: kernel=%s pid=%s cpu_slot=%s",
+            kernel_config.name,
+            process.pid,
+            cpu_slot,
+        )
+        self._workers[kernel_config.name] = _WorkerHandle(
+            name=kernel_config.name,
+            process=process,
+            stop_event=stop_event,
+            event_reader=event_reader,
+            cpu_slot=cpu_slot,
+        )
+        return cpu_slot
 
     def _start_sources(self) -> None:
         """Start all configured source plugins."""
@@ -1126,46 +1209,7 @@ class PipelineManager:
 
             kernel_config = self._kernel_configs[kernel_name]
             index = kernel_index.get(kernel_name, 0)
-            stop_event = self.context.Event()
-            event_reader, event_writer = self.context.Pipe(duplex=False)
-            cpu_slot = self.placement_policy.cpu_slot_for(
-                kernel=kernel_config,
-                index=index,
-                cpu_count=cpu_count,
-            )
-            process = self.context.Process(
-                target=run_kernel_process,
-                args=(
-                    kernel_config,
-                    self.config.shared_memory,
-                    self._pause_event,
-                    stop_event,
-                    event_writer,
-                    cpu_slot,
-                    self._runtime_registry,
-                ),
-                name=f"shmpipeline-{kernel_name}",
-            )
-            try:
-                process.start()
-            except BaseException:
-                event_reader.close()
-                event_writer.close()
-                raise
-            event_writer.close()
-            self._logger.info(
-                "restarted worker: kernel=%s pid=%s cpu_slot=%s",
-                kernel_name,
-                process.pid,
-                cpu_slot,
-            )
-            self._workers[kernel_name] = _WorkerHandle(
-                name=kernel_name,
-                process=process,
-                stop_event=stop_event,
-                event_reader=event_reader,
-                cpu_slot=cpu_slot,
-            )
+            self._spawn_worker(kernel_config, index=index, cpu_count=cpu_count)
 
         self._wait_for_workers_started(
             timeout=effective_timeout, only=to_restart
@@ -1175,6 +1219,132 @@ class PipelineManager:
             self._transition_state(
                 PipelineState.RUNNING, reason="failed workers restarted"
             )
+
+    def add_kernel(
+        self,
+        kernel: "KernelConfig | dict[str, Any]",
+        *,
+        shared_memory: "tuple[Any, ...] | list[Any]" = (),
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Add one kernel to a running pipeline without stopping it.
+
+        Spawns a new worker for ``kernel`` and creates any new shared-memory
+        streams it needs, leaving existing workers and streams untouched.  This
+        enables hot-reloading additional stages into a live pipeline.
+
+        Parameters
+        ----------
+        kernel:
+            A :class:`~shmpipeline.config.KernelConfig` (or mapping) for the new
+            stage.
+        shared_memory:
+            New stream definitions the kernel introduces.  Streams that already
+            exist are referenced as-is; only genuinely new names are created.
+        timeout:
+            Seconds to wait for the new worker to report started.  Defaults to
+            the manager's ``worker_start_timeout``.
+
+        Returns the manager status snapshot after the kernel is running.
+        """
+        self.poll_events()
+        if self.state not in {PipelineState.RUNNING, PipelineState.PAUSED}:
+            raise StateTransitionError(
+                "add_kernel requires a RUNNING or PAUSED pipeline; "
+                f"current state is {self.state.value!r}"
+            )
+        if isinstance(kernel, Mapping):
+            kernel = KernelConfig.from_dict(kernel)
+
+        new_specs: list[SharedMemoryConfig] = []
+        for spec in shared_memory:
+            if isinstance(spec, Mapping):
+                spec = SharedMemoryConfig.from_dict(spec)
+            new_specs.append(spec)
+
+        existing_nodes = {
+            *self._kernel_configs,
+            *self._source_configs,
+            *self._sink_configs,
+        }
+        if kernel.name in existing_nodes:
+            raise ConfigValidationError(
+                f"pipeline node {kernel.name!r} already exists"
+            )
+        for spec in new_specs:
+            if spec.name in self._streams:
+                raise ConfigValidationError(
+                    f"shared memory {spec.name!r} already exists"
+                )
+
+        # Build and validate the candidate configuration as a whole. The
+        # frozen PipelineConfig re-runs full reference/uniqueness validation,
+        # and the graph check rejects duplicate producers (fan-in conflicts).
+        candidate = replace(
+            self.config,
+            shared_memory=(*self.config.shared_memory, *new_specs),
+            kernels=(*self.config.kernels, kernel),
+        )
+        graph_errors = PipelineGraph.from_config(candidate).validation_errors()
+        if graph_errors:
+            raise ConfigValidationError(graph_errors[0])
+        self.registry.validate(kernel, candidate.shared_memory_by_name)
+
+        # Create only the genuinely new streams, then commit the config so the
+        # spawned worker (and graph/status) observe the extended pipeline.
+        previous_config = self.config
+        for spec in new_specs:
+            self._streams[spec.name] = self._build_stream(spec)
+        self.config = candidate
+        self._kernel_configs[kernel.name] = kernel
+
+        self._logger.info(
+            "adding kernel to running pipeline: name=%s kind=%s",
+            kernel.name,
+            kernel.kind,
+        )
+        index = len(self.config.kernels) - 1
+        try:
+            self._spawn_worker(kernel, index=index)
+            self._wait_for_workers_started(
+                timeout=timeout or self._worker_start_timeout,
+                only={kernel.name},
+            )
+        except BaseException:
+            self._rollback_added_kernel(
+                kernel.name, new_specs, previous_config
+            )
+            raise
+        return self.status()
+
+    def _rollback_added_kernel(
+        self,
+        kernel_name: str,
+        new_specs: list[SharedMemoryConfig],
+        previous_config: PipelineConfig,
+    ) -> None:
+        """Undo a partially applied :meth:`add_kernel` after a spawn failure."""
+        worker = self._workers.pop(kernel_name, None)
+        if worker is not None:
+            worker.stop_event.set()
+            worker.process.join(timeout=1.0)
+            if worker.process.is_alive() and hasattr(worker.process, "kill"):
+                worker.process.kill()
+                worker.process.join(1.0)
+            if worker.event_reader is not None:
+                try:
+                    worker.event_reader.close()
+                except OSError:
+                    pass
+        self._failures = [
+            f for f in self._failures if f.get("kernel") != kernel_name
+        ]
+        self._kernel_configs.pop(kernel_name, None)
+        for spec in new_specs:
+            stream = self._streams.pop(spec.name, None)
+            if stream is not None:
+                close_stream(stream, unlink=True)
+        self.config = previous_config
 
     def status(self, *, poll: bool = True) -> dict[str, Any]:
         """Return a snapshot of manager state, workers, and failures.
@@ -1446,6 +1616,126 @@ class PipelineManager:
         return {
             stream_name: controller.snapshot()
             for stream_name, controller in self._synthetic_sources.items()
+        }
+
+    def _terminal_streams(self) -> list[str]:
+        """Return output streams that no kernel or sink consumes."""
+        consumed: set[str] = set()
+        for kernel in self.config.kernels:
+            consumed.update(kernel.all_inputs)
+        for sink in self.config.sinks:
+            consumed.add(sink.stream)
+            consumed.update(sink.auxiliary_names)
+        return [
+            kernel.output
+            for kernel in self.config.kernels
+            if kernel.output not in consumed
+        ]
+
+    def benchmark(
+        self,
+        *,
+        duration_s: float = 5.0,
+        source: "SyntheticInputConfig | dict[str, Any] | None" = None,
+        output_stream: str | None = None,
+        warmup_s: float = 0.5,
+        poll_interval: float = 1e-4,
+    ) -> dict[str, Any]:
+        """Drive the running pipeline and measure throughput and latency.
+
+        The pipeline must already be ``RUNNING``.  When ``source`` is given, a
+        synthetic input writer is started on its stream for the duration of the
+        benchmark (and stopped afterwards); otherwise the pipeline's existing
+        sources drive it.  Frame arrivals are sampled at ``output_stream`` (the
+        graph's single terminal output by default) to compute throughput and
+        inter-frame latency percentiles.
+
+        Returns a JSON-friendly report with ``throughput_hz``, ``frames``,
+        latency percentiles in milliseconds, and per-worker rolling metrics.
+        Raises if a worker failed during the run.
+        """
+        if self.state != PipelineState.RUNNING:
+            raise StateTransitionError(
+                "benchmark requires the pipeline to be RUNNING"
+            )
+        if duration_s <= 0.0:
+            raise ValueError("duration_s must be positive")
+
+        if output_stream is None:
+            terminals = self._terminal_streams()
+            if len(terminals) != 1:
+                raise ValueError(
+                    "output_stream must be specified explicitly: the pipeline "
+                    f"has {len(terminals)} terminal output streams "
+                    f"({sorted(terminals)})"
+                )
+            output_stream = terminals[0]
+        stream = self.get_stream(output_stream)
+
+        started_synthetic: str | None = None
+        if source is not None:
+            from shmpipeline.synthetic import SyntheticInputConfig
+
+            if isinstance(source, dict):
+                source = SyntheticInputConfig(**source)
+            self.start_synthetic_input(source)
+            started_synthetic = source.stream_name
+
+        try:
+            warmup_deadline = time.monotonic() + max(0.0, warmup_s)
+            while time.monotonic() < warmup_deadline:
+                self.poll_events()
+                time.sleep(poll_interval)
+
+            intervals: list[float] = []
+            last_count = stream.count
+            start = time.monotonic()
+            prev_time = start
+            deadline = start + duration_s
+            while time.monotonic() < deadline:
+                self.poll_events()
+                current = stream.count
+                if current > last_count:
+                    now = time.monotonic()
+                    advanced = int(current - last_count)
+                    spacing = (now - prev_time) / advanced
+                    intervals.extend([spacing] * advanced)
+                    last_count = current
+                    prev_time = now
+                time.sleep(poll_interval)
+            elapsed = max(time.monotonic() - start, 1e-12)
+        finally:
+            if started_synthetic is not None:
+                self.stop_synthetic_input(started_synthetic)
+
+        self.raise_if_failed()
+
+        frames = len(intervals)
+        latencies_ms = np.asarray(intervals, dtype=np.float64) * 1000.0
+        percentiles: dict[str, float] = {}
+        if frames:
+            for label, q in (("p50", 50), ("p90", 90), ("p99", 99)):
+                percentiles[label] = float(np.percentile(latencies_ms, q))
+        metrics = self.status().get("metrics", {})
+        return {
+            "output_stream": output_stream,
+            "duration_s": elapsed,
+            "frames": frames,
+            "throughput_hz": frames / elapsed,
+            "latency_ms": {
+                "min": float(latencies_ms.min()) if frames else None,
+                "mean": float(latencies_ms.mean()) if frames else None,
+                "max": float(latencies_ms.max()) if frames else None,
+                **percentiles,
+            },
+            "workers": {
+                name: {
+                    "avg_exec_ms": worker.get("avg_exec_ms"),
+                    "jitter_us_rms": worker.get("jitter_us_rms"),
+                    "throughput_hz": worker.get("throughput_hz"),
+                }
+                for name, worker in metrics.items()
+            },
         }
 
     @property
