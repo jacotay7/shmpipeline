@@ -1040,7 +1040,7 @@ def test_manager_runs_gpu_affine_transform_with_cpu_mirrors(shm_prefix):
         timeout=5.0,
     )
 
-    mirror_stream = pyshmem.open(f"{shm_prefix}_output")
+    mirror_stream = pyshmem.open(f"{shm_prefix}_output", gpu_device=False)
     try:
         received_cpu = _wait_for_next_write(
             mirror_stream,

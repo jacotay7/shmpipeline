@@ -36,6 +36,21 @@ Typical causes:
 
 If a GPU stream must be readable from CPU code, create it with `cpu_mirror: true`.
 
+When attaching to that stream directly with `pyshmem.open(name)` from a process
+that *also* has CUDA available, `pyshmem` auto-attaches to the GPU and `read()`
+returns a `torch.Tensor` on the device — not a NumPy array. To read the host
+mirror as a NumPy array regardless of local CUDA, open it CPU-only:
+
+```python
+import pyshmem
+
+mirror = pyshmem.open(name, gpu_device=False)  # requires cpu_mirror: true
+frame = mirror.read()                          # numpy.ndarray from the mirror
+```
+
+`gpu_device=False` raises `ValueError` if the stream was created without a CPU
+mirror.
+
 ## GPU runtime requirements
 
 GPU support depends on a compatible CUDA and PyTorch environment. When CUDA is unavailable, GPU-specific tests are skipped and GPU examples will not run.
