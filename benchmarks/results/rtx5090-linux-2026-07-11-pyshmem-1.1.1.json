@@ -1,0 +1,18 @@
+{
+  "benchmark": "pipeline",
+  "notes": "Post poll_interval-plumbing baseline (P1). Compare against rtx5090-linux-2026-07-11.json (pyshmem 1.1.0/shmpipeline 1.0.3, 1ms fixed lock-retry interval) to see the effect of forwarding kernel_config.poll_interval into pyshmem.locked_many(). Terminal inter-arrival spacing is reported as latency_ms for compatibility.",
+  "scenarios": {
+    "ao_120x120_hz": 4081,
+    "cpu_copy_hz": 9561,
+    "cpu_copy_p50_us": 80.5,
+    "cpu_copy_p99_us": 166.4,
+    "gpu_copy_hz": 3255,
+    "gpu_copy_p50_us": 310,
+    "raw_pyshmem_write_hz": 139256,
+    "synthetic_source_hz": 17711
+  },
+  "python": "3.12",
+  "pyshmem": "1.1.1",
+  "shmpipeline": "1.0.4",
+  "platform": "Linux RTX 5090"
+}

@@ -1,10 +1,11 @@
 # CLI Guide
 
-The `shmpipeline` CLI provides four headless workflows:
+The `shmpipeline` CLI provides five headless workflows:
 
 - validate a pipeline config
 - describe the derived graph
 - run a pipeline until interrupted or for a bounded duration
+- benchmark a running pipeline with an optional synthetic source
 - serve one pipeline manager over HTTP and SSE
 
 ## Validate
@@ -58,6 +59,18 @@ Use it when you want:
 - a stable bridge between the in-process manager API and external tooling
 
 See [control plane](control-plane.md) for the endpoint model and Python client example.
+
+## Benchmark
+
+```bash
+shmpipeline benchmark pipeline.yaml --duration 5
+shmpipeline benchmark pipeline.yaml --duration 5 \
+  --source input_frame:random:1000 --json
+```
+
+The source shorthand is `STREAM:PATTERN[:RATE_HZ]`. Use `--output-stream`
+when a graph has multiple terminal streams. The report includes throughput,
+worker metrics, and terminal inter-arrival spacing percentiles.
 
 ## Logging
 

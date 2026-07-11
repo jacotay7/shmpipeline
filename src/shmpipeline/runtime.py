@@ -88,6 +88,10 @@ def _locked_inputs_and_outputs(
     trigger_stream: Any,
     auxiliary_streams: dict[str, Any],
     output_streams: dict[str, Any],
+    *,
+    ordered_locked_streams: tuple[tuple[str, Any], ...] | None = None,
+    auxiliary_inputs: dict[str, Any] | None = None,
+    auxiliary_cache: dict[str, tuple[Any, Any]] | None = None,
 ):
     """Yield inputs and output views while all required locks are held.
 
@@ -99,28 +103,58 @@ def _locked_inputs_and_outputs(
     The direct `safe=False` handle path can observe stale CUDA IPC contents
     across processes because it bypasses pyshmem's synchronization/copy logic.
     """
-    locked_streams = {
-        kernel_config.input: trigger_stream,
-        **auxiliary_streams,
-        **output_streams,
-    }
+    if ordered_locked_streams is None:
+        locked_streams = {
+            kernel_config.input: trigger_stream,
+            **auxiliary_streams,
+            **output_streams,
+        }
+        ordered_locked_streams = tuple(
+            sorted(
+                locked_streams.items(),
+                key=lambda item: item[1].name,
+            )
+        )
     with pyshmem.locked_many(
-        tuple(locked_streams.values()),
+        tuple(stream for _, stream in ordered_locked_streams),
         timeout=kernel_config.read_timeout,
+        poll_interval=kernel_config.poll_interval,
     ):
         current_count = trigger_stream.count
         trigger_input = _read_worker_input(trigger_stream)
-        auxiliary_inputs = {
-            name: _read_worker_input(stream)
-            for name, stream in auxiliary_streams.items()
-        }
+        if auxiliary_inputs is None:
+            auxiliary_inputs = {}
+        else:
+            auxiliary_inputs.clear()
+        for name, stream in auxiliary_streams.items():
+            auxiliary_inputs[name] = _read_worker_input(
+                stream,
+                cache=auxiliary_cache,
+                cache_key=name,
+            )
         yield current_count, trigger_input, auxiliary_inputs
 
 
-def _read_worker_input(stream: Any):
+def _read_worker_input(
+    stream: Any,
+    *,
+    cache: dict[str, tuple[Any, Any]] | None = None,
+    cache_key: str | None = None,
+):
     """Return one worker input snapshot with storage-aware consistency."""
     if getattr(stream, "gpu_enabled", False):
-        return stream.read(safe=True)
+        count = getattr(stream, "count", None)
+        if cache is not None and cache_key is not None:
+            cached = cache.get(cache_key)
+            if cached is not None and cached[0] == count:
+                return cached[1]
+        value = stream.read(safe=True)
+        if cache is not None and cache_key is not None:
+            cache[cache_key] = (
+                getattr(stream, "last_read_count", count),
+                value,
+            )
+        return value
     return stream.read(safe=False)
 
 
@@ -180,6 +214,18 @@ def run_kernel_process(
         name: _open_stream(shared_by_name[name])
         for name in kernel_config.all_outputs
     }
+    ordered_locked_streams = tuple(
+        sorted(
+            {
+                kernel_config.input: trigger_stream,
+                **auxiliary_streams,
+                **output_streams,
+            }.items(),
+            key=lambda item: item[1].name,
+        )
+    )
+    auxiliary_inputs: dict[str, Any] = {}
+    auxiliary_cache: dict[str, tuple[Any, Any]] = {}
     _send_worker_event(
         event_sink,
         {
@@ -223,6 +269,9 @@ def run_kernel_process(
                     trigger_stream,
                     auxiliary_streams,
                     output_streams,
+                    ordered_locked_streams=ordered_locked_streams,
+                    auxiliary_inputs=auxiliary_inputs,
+                    auxiliary_cache=auxiliary_cache,
                 ) as (
                     current_count,
                     trigger_input,

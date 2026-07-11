@@ -313,14 +313,14 @@ manager.add_kernel(
 
 `PipelineManager.benchmark(*, duration_s, source=None, output_stream=None,
 warmup_s=0.5, poll_interval=1e-4)` drives a **running** pipeline and measures
-throughput and per-frame latency at a terminal output stream:
+throughput and terminal inter-arrival spacing at a terminal output stream:
 
 ```python
 report = manager.benchmark(
     duration_s=5.0,
     source=SyntheticInputConfig(stream_name="input", pattern="random", rate_hz=1000.0),
 )
-# report -> {throughput_hz, frames, latency_ms: {min,mean,max,p50,p90,p99}, workers: {...}}
+# report -> {throughput_hz, frames, inter_arrival_ms: {...}, latency_ms: {...}, workers: {...}}
 ```
 
 - Optionally starts a synthetic source for the run and stops it afterwards.
@@ -423,7 +423,7 @@ src/shmpipeline/
       _common.py        # torch helpers
       ...
 tests/
-  conftest.py              # shm_prefix fixture (auto-cleanup) + slow-test auto-forking
+  conftest.py              # shm_prefix fixture (auto-cleanup)
   test_config.py           # config models, multi-output, YAML line numbers
   test_graph.py
   test_document.py         # editable-document helpers
@@ -487,9 +487,9 @@ GPU kernels (`kernels/gpu/*`, no CUDA on CI) and the PySide6 GUI
 
 ## Package Info
 
-- Package name on PyPI: `shmpipeline` (v1.0.3)
+- Package name on PyPI: `shmpipeline` (v1.0.4)
 - License: GPL-3.0-only
-- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.1.0,<2`, `PyYAML>=6.0`
+- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.1.1,<2`, `PyYAML>=6.0`
 - Optional extras: `gpu` (torch), `control` (fastapi/uvicorn/httpx), `gui` (PySide6/pyqtgraph)
 - Python: 3.9–3.13
 - GitHub: `https://github.com/jacotay7/shmpipeline`

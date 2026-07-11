@@ -57,6 +57,7 @@ from shmpipeline.gui.model import (
     document_to_yaml,
     load_document,
     parse_inline_yaml,
+    runtime_source_entries,
     save_document,
     validate_document,
 )
@@ -1059,38 +1060,7 @@ class MainWindow(QMainWindow):
     def _source_runtime_entries(
         self, status: dict[str, Any] | None
     ) -> list[dict[str, Any]]:
-        entries: list[dict[str, Any]] = []
-        source_statuses = (status or {}).get("sources", {})
-        for source in self._document.get("sources", []):
-            source_status = source_statuses.get(source.get("name", ""), {})
-            entries.append(
-                {
-                    "name": source.get("name", ""),
-                    "kind": source.get("kind", ""),
-                    "stream": source.get("stream", ""),
-                    "alive": bool(source_status.get("alive", False)),
-                    "frames": source_status.get("frames_written", 0),
-                    "rate_hz": source_status.get("effective_rate_hz"),
-                    "last_error": str(source_status.get("last_error") or ""),
-                }
-            )
-
-        synthetic_sources = (status or {}).get("synthetic_sources", {})
-        for stream_name, source_status in sorted(synthetic_sources.items()):
-            pattern = str(source_status.get("pattern") or "")
-            kind = f"synthetic.{pattern}" if pattern else "synthetic"
-            entries.append(
-                {
-                    "name": f"synthetic:{stream_name}",
-                    "kind": kind,
-                    "stream": stream_name,
-                    "alive": bool(source_status.get("alive", False)),
-                    "frames": source_status.get("frames_written", 0),
-                    "rate_hz": source_status.get("effective_rate_hz"),
-                    "last_error": str(source_status.get("last_error") or ""),
-                }
-            )
-        return entries
+        return runtime_source_entries(self._document, status)
 
     def _refresh_runtime_status(self) -> None:
         self._handle_managed_server_exit()

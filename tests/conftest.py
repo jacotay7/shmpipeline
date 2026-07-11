@@ -36,31 +36,6 @@ def _gc_between_tests():
 def shm_prefix():
     prefix = f"shmpipeline_{uuid.uuid4().hex}"
     yield prefix
-    for suffix in (
-        "input",
-        "output",
-        "matrix",
-        "offset",
-        "image",
-        "centroids",
-        "centroid_offset",
-        "corrected",
-        "flattened",
-        "reconstructor",
-        "affine_offset",
-        "open_loop",
-        "command",
-        "aux",
-        "bias",
-        "dark",
-        "flat",
-        "high",
-        "low",
-        "quiet_test",
-        "sink_aux",
-        "source_aux",
-    ):
-        try:
-            pyshmem.unlink(f"{prefix}_{suffix}")
-        except FileNotFoundError:
-            pass
+    for name in pyshmem.list_streams():
+        if name.startswith(f"{prefix}_"):
+            pyshmem.unlink_quiet(name)

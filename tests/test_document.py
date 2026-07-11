@@ -14,6 +14,7 @@ from shmpipeline.document import (
     parse_inline_yaml,
     save_document,
 )
+from shmpipeline.gui.model import runtime_source_entries
 
 pytestmark = pytest.mark.unit
 
@@ -101,3 +102,79 @@ def test_normalize_document_returns_plain_mapping():
 def test_parse_inline_yaml_uses_fallback_on_blank():
     assert parse_inline_yaml("", fallback={"a": 1}) == {"a": 1}
     assert parse_inline_yaml("{factor: 3.0}", fallback=None) == {"factor": 3.0}
+
+
+def test_document_helpers_cover_sources_sinks_and_shared_memory_options():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "in",
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": "gpu",
+                    "gpu_device": "cuda:0",
+                    "cpu_mirror": True,
+                    "notify": True,
+                    "mode": "replace",
+                },
+                {"name": "out", "shape": [2], "dtype": "float32"},
+                {"name": "aux", "shape": [2], "dtype": "float32"},
+            ],
+            "sources": [
+                {
+                    "name": "camera",
+                    "kind": "test.source",
+                    "stream": "in",
+                    "auxiliary": {"cal": "aux"},
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "copy",
+                    "kind": "cpu.copy",
+                    "input": "in",
+                    "output": "out",
+                    "auxiliary": {"cal": "aux"},
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "display",
+                    "kind": "test.sink",
+                    "stream": "out",
+                    "auxiliary": {"cal": "aux"},
+                }
+            ],
+        }
+    )
+    document = config_to_document(config)
+    assert document["shared_memory"][0]["notify"] is True
+    assert document["sources"][0]["auxiliary"] == {"cal": "aux"}
+    assert document["sinks"][0]["auxiliary"] == {"cal": "aux"}
+    assert PipelineConfig.from_dict(document).sinks[0].name == "display"
+
+
+def test_load_document_rejects_non_mapping(tmp_path):
+    path = tmp_path / "invalid.yaml"
+    path.write_text("- not a mapping\n", encoding="utf-8")
+    with pytest.raises(Exception, match="mapping"):
+        load_document(path)
+
+
+def test_runtime_source_entries_projects_plugin_and_synthetic_status():
+    entries = runtime_source_entries(
+        {"sources": [{"name": "camera", "kind": "camera", "stream": "in"}]},
+        {
+            "sources": {
+                "camera": {
+                    "alive": True,
+                    "frames_written": 4,
+                    "effective_rate_hz": 12.5,
+                }
+            },
+            "synthetic_sources": {"in": {"pattern": "random", "alive": False}},
+        },
+    )
+    assert entries[0]["frames"] == 4
+    assert entries[1]["name"] == "synthetic:in"

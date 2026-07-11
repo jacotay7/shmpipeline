@@ -1,0 +1,16 @@
+{
+  "benchmark": "pipeline",
+  "notes": "Roadmap review baseline; terminal inter-arrival spacing is reported as latency_ms for compatibility.",
+  "scenarios": {
+    "ao_120x120_hz": 4239,
+    "cpu_copy_p50_us": 604,
+    "gpu_copy_exec_us": 62,
+    "gpu_copy_jitter_us_rms": 56,
+    "raw_pyshmem_write_hz": 138000,
+    "synthetic_source_hz": 17700
+  },
+  "python": "3.12",
+  "pyshmem": "1.1.0",
+  "shmpipeline": "1.0.3",
+  "platform": "Linux RTX 5090"
+}

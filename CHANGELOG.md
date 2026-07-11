@@ -2,7 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
-## [1.0.3]
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project follows [Semantic Versioning](https://semver.org/).
+
+## [1.0.4] - 2026-07-11
+
+### Performance and usability
+
+- Plumbed `poll_interval` through pyshmem's multi-stream lock acquisition and
+  require pyshmem 1.1.1 or newer.
+- Added cached GPU auxiliary snapshots and reduced allocations in the worker
+  hot loop.
+- Added a first-class `shmpipeline benchmark` command and documented that
+  benchmark spacing is terminal inter-arrival time, not end-to-end latency.
+- Accepted plain mapping configurations in `PipelineManager`.
+
+### Lifecycle and maintenance
+
+- Added Python 3.9 to the test matrix and made test shared-memory cleanup
+  discover every segment by prefix.
+- Added contributor and security policies.
+- Documented a benign PyTorch CUDA IPC teardown warning that can appear on
+  GPU pipeline exit; it is not caused by shutdown ordering and does not
+  indicate a leak (see the troubleshooting guide).
+- Fixed the `checkerboard` synthetic input pattern: it was accepted as a
+  valid `SyntheticInputConfig.pattern` value (and offered in the GUI) but
+  silently fell through to an unrelated fallback instead of producing a
+  checkerboard. It now renders a real tiled pattern (CPU and GPU) sized by
+  `period`; an unhandled pattern name now raises instead of failing silently.
+
+## [1.0.3] - 2026-07-11
 
 ### Correctness and pyshmem integration
 
@@ -15,10 +44,7 @@ All notable changes to this project will be documented in this file.
   unlinking is requested.
 - Require pyshmem 1.1.0 or newer and document the POSIX platform boundary.
 
-The format is based on Keep a Changelog, and this project follows Semantic
-Versioning.
-
-## [1.0.2]
+## [1.0.2] - 2026-06-02
 
 ### Added
 
@@ -43,9 +69,9 @@ Versioning.
   longer than allowed, isolating the controller from a hung plugin.
 - **YAML config error locations.** `PipelineConfig.from_yaml` now annotates
   `ConfigValidationError` messages with the source file and line number.
-- **Test isolation.** Heavy `slow` integration tests are auto-forked via
-  `pytest-forked` (added to the `test` extra) to keep C-level JIT state from
-  accumulating across the suite.
+- **Test isolation.** Heavy `slow` integration tests run in a separate
+  `pytest` invocation so accumulated C-level JIT state cannot exhaust memory
+  during the main suite.
 
 ### Changed
 

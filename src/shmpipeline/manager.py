@@ -386,7 +386,7 @@ class PipelineManager:
 
     def __init__(
         self,
-        config: PipelineConfig | str | Path,
+        config: PipelineConfig | Mapping[str, Any] | str | Path,
         *,
         spawn_method: str = "spawn",
         placement_policy: WorkerPlacementPolicy | None = None,
@@ -398,7 +398,7 @@ class PipelineManager:
         Parameters
         ----------
         config:
-            Pipeline config object, YAML path, or str path.
+            Pipeline config object, mapping, YAML path, or str path.
         spawn_method:
             Multiprocessing start method. Default is ``"spawn"``.
         placement_policy:
@@ -413,6 +413,8 @@ class PipelineManager:
         """
         if isinstance(config, (str, Path)):
             config = PipelineConfig.from_yaml(config)
+        elif isinstance(config, Mapping):
+            config = PipelineConfig.from_dict(config)
         self.config = config
         self.registry = registry or get_default_registry()
         self._runtime_registry = registry
@@ -1680,10 +1682,13 @@ class PipelineManager:
         benchmark (and stopped afterwards); otherwise the pipeline's existing
         sources drive it.  Frame arrivals are sampled at ``output_stream`` (the
         graph's single terminal output by default) to compute throughput and
-        inter-frame latency percentiles.
+        terminal inter-arrival spacing percentiles. This is deliberately
+        reported as spacing rather than end-to-end latency because a generic
+        pipeline does not require timestamps to be carried in its payload.
 
         Returns a JSON-friendly report with ``throughput_hz``, ``frames``,
-        latency percentiles in milliseconds, and per-worker rolling metrics.
+        ``inter_arrival_ms`` percentiles in milliseconds, a deprecated
+        ``latency_ms`` alias, and per-worker rolling metrics.
         Raises if a worker failed during the run.
         """
         if self.state != PipelineState.RUNNING:
@@ -1754,18 +1759,20 @@ class PipelineManager:
         if frames:
             for label, q in (("p50", 50), ("p90", 90), ("p99", 99)):
                 percentiles[label] = float(np.percentile(latencies_ms, q))
+        spacing_report = {
+            "min": float(latencies_ms.min()) if frames else None,
+            "mean": float(latencies_ms.mean()) if frames else None,
+            "max": float(latencies_ms.max()) if frames else None,
+            **percentiles,
+        }
         metrics = self.status().get("metrics", {})
         return {
             "output_stream": output_stream,
             "duration_s": elapsed,
             "frames": frames,
             "throughput_hz": frames / elapsed,
-            "latency_ms": {
-                "min": float(latencies_ms.min()) if frames else None,
-                "mean": float(latencies_ms.mean()) if frames else None,
-                "max": float(latencies_ms.max()) if frames else None,
-                **percentiles,
-            },
+            "latency_ms": spacing_report,
+            "inter_arrival_ms": spacing_report,
             "workers": {
                 name: {
                     "avg_exec_ms": worker.get("avg_exec_ms"),

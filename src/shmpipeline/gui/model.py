@@ -43,6 +43,7 @@ __all__ = [
     "load_document",
     "parse_inline_yaml",
     "recommended_spawn_method",
+    "runtime_source_entries",
     "save_document",
     "to_numpy",
     "validate_document",
@@ -102,3 +103,45 @@ def to_numpy(value: Any) -> np.ndarray:
     if torch is not None and isinstance(value, torch.Tensor):
         return value.detach().cpu().numpy()
     return np.asarray(value)
+
+
+def runtime_source_entries(
+    document: Mapping[str, Any], status: Mapping[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Project source and synthetic status into GUI table rows.
+
+    Keeping this transformation independent of Qt makes the status contract
+    testable and lets a future non-Qt front end reuse the same presentation
+    model.
+    """
+    entries: list[dict[str, Any]] = []
+    source_statuses = (status or {}).get("sources", {})
+    for source in document.get("sources", []):
+        source_status = source_statuses.get(source.get("name", ""), {})
+        entries.append(
+            {
+                "name": source.get("name", ""),
+                "kind": source.get("kind", ""),
+                "stream": source.get("stream", ""),
+                "alive": bool(source_status.get("alive", False)),
+                "frames": source_status.get("frames_written", 0),
+                "rate_hz": source_status.get("effective_rate_hz"),
+                "last_error": str(source_status.get("last_error") or ""),
+            }
+        )
+
+    synthetic_sources = (status or {}).get("synthetic_sources", {})
+    for stream_name, source_status in sorted(synthetic_sources.items()):
+        pattern = str(source_status.get("pattern") or "")
+        entries.append(
+            {
+                "name": f"synthetic:{stream_name}",
+                "kind": f"synthetic.{pattern}" if pattern else "synthetic",
+                "stream": stream_name,
+                "alive": bool(source_status.get("alive", False)),
+                "frames": source_status.get("frames_written", 0),
+                "rate_hz": source_status.get("effective_rate_hz"),
+                "last_error": str(source_status.get("last_error") or ""),
+            }
+        )
+    return entries

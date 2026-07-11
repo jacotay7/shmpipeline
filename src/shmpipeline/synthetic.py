@@ -121,10 +121,32 @@ class SyntheticPatternGenerator:
                 dtype=torch.float32,
                 device=gpu_device,
             ).reshape(self.shape)
+            self._axis_grids_gpu = (
+                list(
+                    torch.meshgrid(
+                        *(
+                            torch.arange(
+                                axis_size,
+                                dtype=torch.float32,
+                                device=gpu_device,
+                            )
+                            for axis_size in self.shape
+                        ),
+                        indexing="ij",
+                    )
+                )
+                if self.shape
+                else []
+            )
             self._torch_generator = torch.Generator(device=gpu_device)
             self._torch_generator.manual_seed(self.spec.seed)
         else:
             self._buffer = np.empty(self.shape, dtype=self.dtype)
+            self._axis_grids_cpu = (
+                [grid.astype(np.float32) for grid in np.indices(self.shape)]
+                if self.shape
+                else []
+            )
 
     def _warn_incompatible_pattern(self) -> None:
         """Warn when a pattern produces floats that will be truncated."""
@@ -199,12 +221,23 @@ class SyntheticPatternGenerator:
                 )
             return self._buffer
 
-        values = self.spec.offset + self.spec.amplitude * np.remainder(
-            self._base_cpu,
-            2.0,
+        if self.spec.pattern == "checkerboard":
+            tile = max(self.spec.period, 1.0)
+            if self._axis_grids_cpu:
+                parity = np.zeros(self.shape, dtype=np.float32)
+                for axis, grid in enumerate(self._axis_grids_cpu):
+                    coord = grid + float(frame_index) if axis == 0 else grid
+                    parity += np.floor(coord / tile)
+                parity = np.remainder(parity, 2.0)
+            else:
+                parity = float(frame_index % 2)
+            values = self.spec.offset + self.spec.amplitude * parity
+            np.copyto(self._buffer, np.asarray(values, dtype=self.dtype))
+            return self._buffer
+
+        raise AssertionError(
+            f"unhandled synthetic pattern {self.spec.pattern!r}"
         )
-        np.copyto(self._buffer, np.asarray(values, dtype=self.dtype))
-        return self._buffer
 
     def _next_gpu(self, frame_index: int):
         assert torch is not None
@@ -266,12 +299,29 @@ class SyntheticPatternGenerator:
                 )
             return self._buffer
 
-        values = self.spec.offset + self.spec.amplitude * torch.remainder(
-            self._base_gpu,
-            2.0,
+        if self.spec.pattern == "checkerboard":
+            tile = max(self.spec.period, 1.0)
+            if self._axis_grids_gpu:
+                parity = torch.zeros(
+                    self.shape, dtype=torch.float32, device=self.gpu_device
+                )
+                for axis, grid in enumerate(self._axis_grids_gpu):
+                    coord = grid + float(frame_index) if axis == 0 else grid
+                    parity += torch.floor(coord / tile)
+                parity = torch.remainder(parity, 2.0)
+            else:
+                parity = float(frame_index % 2)
+            values = self.spec.offset + self.spec.amplitude * parity
+            self._buffer.copy_(
+                torch.as_tensor(
+                    values, dtype=self._buffer.dtype, device=self.gpu_device
+                )
+            )
+            return self._buffer
+
+        raise AssertionError(
+            f"unhandled synthetic pattern {self.spec.pattern!r}"
         )
-        self._buffer.copy_(values.to(dtype=self._buffer.dtype))
-        return self._buffer
 
 
 class SyntheticSourceController:

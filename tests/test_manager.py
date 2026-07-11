@@ -2517,6 +2517,34 @@ def test_benchmark_requires_running_pipeline(shm_prefix):
         manager.benchmark(duration_s=0.1)
 
 
+def test_manager_accepts_plain_mapping_configuration(shm_prefix):
+    manager = PipelineManager(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_input",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_output",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "copy",
+                    "kind": "cpu.copy",
+                    "input": f"{shm_prefix}_input",
+                    "output": f"{shm_prefix}_output",
+                }
+            ],
+        }
+    )
+    assert isinstance(manager.config, PipelineConfig)
+
+
 def test_benchmark_reports_throughput_and_latency(shm_prefix):
     from shmpipeline.synthetic import SyntheticInputConfig
 

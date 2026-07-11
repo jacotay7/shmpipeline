@@ -65,6 +65,47 @@ def test_control_api_rejects_missing_token(tmp_path):
     assert response.json()["detail"] == "missing or invalid bearer token"
 
 
+def test_control_api_read_endpoints_and_invalid_event_id(tmp_path):
+    config_path = tmp_path / "pipeline.yaml"
+    _write_valid_config(config_path)
+    service = ManagerService(config_path, poll_interval=0.01)
+    try:
+        with TestClient(create_control_app(service)) as client:
+            assert client.get("/info").status_code == 200
+            assert client.get("/document").status_code == 200
+            assert client.get("/snapshot").status_code == 200
+            assert client.get("/graph").status_code == 200
+            response = client.get(
+                "/events", headers={"Last-Event-ID": "not-an-integer"}
+            )
+            assert response.status_code == 400
+    finally:
+        service.close()
+
+
+def test_control_service_error_mapping():
+    from fastapi import HTTPException
+
+    from shmpipeline.control.api import _call_service
+    from shmpipeline.errors import (
+        ConfigValidationError,
+        StateTransitionError,
+        WorkerProcessError,
+    )
+
+    cases = [
+        (StateTransitionError("state"), 409),
+        (ConfigValidationError("config"), 400),
+        (FileNotFoundError("missing"), 404),
+        (KeyError("name"), 404),
+        (WorkerProcessError("worker"), 500),
+    ]
+    for error, status_code in cases:
+        with pytest.raises(HTTPException) as caught:
+            _call_service(lambda error=error: (_ for _ in ()).throw(error))
+        assert caught.value.status_code == status_code
+
+
 def test_remote_manager_client_controls_pipeline(tmp_path):
     config_path = tmp_path / "pipeline.yaml"
     _write_valid_config(config_path)

@@ -1,0 +1,37 @@
+{
+  "benchmark": "pipeline",
+  "config": "benchmarks/smoke.yaml",
+  "host": "HQAOBenchsimulator",
+  "platform": "Linux-6.17.0-35-generic-x86_64-with-glibc2.39",
+  "python": "3.12.0",
+  "report": {
+    "duration_s": 0.5000639380887151,
+    "frames": 500,
+    "inter_arrival_ms": {
+      "max": 1.0872562415897846,
+      "mean": 1.0001257760450244,
+      "min": 0.9177150204777718,
+      "p50": 1.0318949352949858,
+      "p90": 1.0804949793964624,
+      "p99": 1.0844777803868055
+    },
+    "latency_ms": {
+      "max": 1.0872562415897846,
+      "mean": 1.0001257760450244,
+      "min": 0.9177150204777718,
+      "p50": 1.0318949352949858,
+      "p90": 1.0804949793964624,
+      "p99": 1.0844777803868055
+    },
+    "output_stream": "benchmark_output",
+    "throughput_hz": 999.8721401727958,
+    "workers": {
+      "copy": {
+        "avg_exec_ms": 0.009403103940277935,
+        "jitter_us_rms": 1.8815468992950621,
+        "throughput_hz": 1000.8057563109055
+      }
+    }
+  },
+  "started_at_unix": 1783804495.8902738
+}

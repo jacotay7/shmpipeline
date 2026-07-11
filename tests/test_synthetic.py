@@ -239,7 +239,8 @@ def test_synthetic_random_pattern_no_warning_for_float_dtype():
 
 
 @pytest.mark.parametrize(
-    "pattern", ["constant", "random", "ramp", "sine", "impulse"]
+    "pattern",
+    ["constant", "random", "ramp", "sine", "impulse", "checkerboard"],
 )
 def test_synthetic_pattern_generator_next_frame_cpu(pattern):
     spec = SyntheticInputConfig(
@@ -277,4 +278,86 @@ def test_available_synthetic_patterns_lists_known_patterns():
     from shmpipeline.synthetic import available_synthetic_patterns
 
     patterns = available_synthetic_patterns()
-    assert {"constant", "random", "ramp", "sine", "impulse"} <= set(patterns)
+    assert {
+        "constant",
+        "random",
+        "ramp",
+        "sine",
+        "impulse",
+        "checkerboard",
+    } <= set(patterns)
+
+
+def test_synthetic_checkerboard_pattern_alternates_2d_tiles():
+    spec = SyntheticInputConfig(
+        stream_name="s",
+        pattern="checkerboard",
+        amplitude=1.0,
+        offset=0.0,
+        period=2.0,
+    )
+    generator = SyntheticPatternGenerator(
+        spec, shape=(4, 4), dtype=np.float32, storage="cpu"
+    )
+    frame = np.array(generator.next_frame())
+    expected = np.array(
+        [
+            [0.0, 0.0, 1.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    np.testing.assert_allclose(frame, expected)
+    assert set(np.unique(frame)) == {0.0, 1.0}
+
+
+def test_synthetic_checkerboard_pattern_scrolls_with_frame_index():
+    spec = SyntheticInputConfig(
+        stream_name="s",
+        pattern="checkerboard",
+        amplitude=1.0,
+        offset=0.0,
+        period=2.0,
+    )
+    generator = SyntheticPatternGenerator(
+        spec, shape=(4,), dtype=np.float32, storage="cpu"
+    )
+    frame_a = np.array(generator.next_frame())
+    frame_b = np.array(generator.next_frame())
+    np.testing.assert_allclose(frame_a, [0.0, 0.0, 1.0, 1.0])
+    np.testing.assert_allclose(frame_b, [0.0, 1.0, 1.0, 0.0])
+
+
+def test_synthetic_checkerboard_pattern_scalar_shape_blinks():
+    spec = SyntheticInputConfig(stream_name="s", pattern="checkerboard")
+    generator = SyntheticPatternGenerator(
+        spec, shape=(), dtype=np.float32, storage="cpu"
+    )
+    assert float(generator.next_frame()) == pytest.approx(0.0)
+    assert float(generator.next_frame()) == pytest.approx(1.0)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_synthetic_checkerboard_pattern_gpu_matches_cpu():
+    spec = SyntheticInputConfig(
+        stream_name="s",
+        pattern="checkerboard",
+        amplitude=1.0,
+        offset=0.0,
+        period=2.0,
+    )
+    cpu_generator = SyntheticPatternGenerator(
+        spec, shape=(4, 4), dtype=np.float32, storage="cpu"
+    )
+    gpu_generator = SyntheticPatternGenerator(
+        spec,
+        shape=(4, 4),
+        dtype=np.float32,
+        storage="gpu",
+        gpu_device="cuda:0",
+    )
+    cpu_frame = np.array(cpu_generator.next_frame())
+    gpu_frame = gpu_generator.next_frame().detach().cpu().numpy()
+    np.testing.assert_allclose(gpu_frame, cpu_frame)

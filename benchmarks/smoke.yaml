@@ -1,0 +1,12 @@
+shared_memory:
+  - name: benchmark_input
+    shape: [64]
+    dtype: float32
+  - name: benchmark_output
+    shape: [64]
+    dtype: float32
+kernels:
+  - name: copy
+    kind: cpu.copy
+    input: benchmark_input
+    output: benchmark_output

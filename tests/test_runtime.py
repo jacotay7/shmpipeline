@@ -35,7 +35,7 @@ class _FakeStream:
         return self._array
 
     @contextmanager
-    def locked(self, timeout=None):
+    def locked(self, timeout=None, poll_interval=1e-3):
         yield self
 
     def wait_for_count(self, *, after, timeout=None, poll_interval=1e-5):

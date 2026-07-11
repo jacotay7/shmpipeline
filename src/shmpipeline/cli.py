@@ -9,6 +9,7 @@ import time
 from typing import Sequence
 
 from shmpipeline.config import PipelineConfig
+from shmpipeline.errors import ConfigValidationError
 from shmpipeline.graph import PipelineGraph, validate_pipeline_config
 from shmpipeline.logging_utils import configure_colored_logging
 from shmpipeline.manager import PipelineManager
@@ -79,6 +80,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the final runtime snapshot as JSON before exiting.",
     )
 
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        help="Run a configured pipeline and report terminal throughput.",
+    )
+    benchmark_parser.add_argument(
+        "config", help="Path to the YAML pipeline file."
+    )
+    benchmark_parser.add_argument(
+        "--duration",
+        type=float,
+        default=5.0,
+        help="Measured duration in seconds (default: 5).",
+    )
+    benchmark_parser.add_argument(
+        "--warmup",
+        type=float,
+        default=0.5,
+        help="Warm-up duration in seconds (default: 0.5).",
+    )
+    benchmark_parser.add_argument(
+        "--source",
+        default=None,
+        metavar="STREAM:PATTERN[:RATE_HZ]",
+        help="Optional synthetic source, e.g. input:random:1000.",
+    )
+    benchmark_parser.add_argument(
+        "--output-stream",
+        default=None,
+        help="Terminal stream to sample when the graph has multiple outputs.",
+    )
+    benchmark_parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=1e-4,
+        help="Benchmark wait/poll interval in seconds.",
+    )
+    benchmark_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the benchmark report as JSON.",
+    )
+
     serve_parser = subparsers.add_parser(
         "serve",
         help=(
@@ -146,6 +189,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             duration=args.duration,
             poll_interval=args.poll_interval,
             emit_json_status=args.json_status,
+        )
+    if args.command == "benchmark":
+        return _run_benchmark(
+            args.config,
+            duration=args.duration,
+            warmup=args.warmup,
+            source=args.source,
+            output_stream=args.output_stream,
+            poll_interval=args.poll_interval,
+            as_json=args.json,
         )
     if args.command == "serve":
         return _run_serve(
@@ -240,6 +293,79 @@ def _run_pipeline(
     if emit_json_status:
         print(json.dumps(manager.runtime_snapshot(), indent=2, sort_keys=True))
     return exit_code
+
+
+def _parse_benchmark_source(value: str | None) -> dict[str, object] | None:
+    """Parse ``stream:pattern[:rate_hz]`` CLI shorthand."""
+    if value is None:
+        return None
+    parts = value.split(":")
+    if len(parts) not in {2, 3} or not parts[0] or not parts[1]:
+        raise ValueError(
+            "--source must use STREAM:PATTERN[:RATE_HZ], for example "
+            "input:random:1000"
+        )
+    source: dict[str, object] = {
+        "stream_name": parts[0],
+        "pattern": parts[1],
+    }
+    if len(parts) == 3:
+        try:
+            source["rate_hz"] = float(parts[2])
+        except ValueError as exc:
+            raise ValueError("benchmark source rate must be a number") from exc
+    return source
+
+
+def _run_benchmark(
+    config_path: str,
+    *,
+    duration: float,
+    warmup: float,
+    source: str | None,
+    output_stream: str | None,
+    poll_interval: float,
+    as_json: bool,
+) -> int:
+    """Build, run, and report one benchmark from the command line."""
+    try:
+        config = PipelineConfig.from_yaml(config_path)
+        errors = validate_pipeline_config(config)
+        if errors:
+            print("Validation failed:")
+            for error in errors:
+                print(f"- {error}")
+            return 1
+        source_config = _parse_benchmark_source(source)
+        manager = PipelineManager(config)
+        try:
+            manager.build()
+            manager.start()
+            report = manager.benchmark(
+                duration_s=duration,
+                warmup_s=warmup,
+                source=source_config,
+                output_stream=output_stream,
+                poll_interval=poll_interval,
+            )
+        finally:
+            manager.shutdown(force=True)
+    except (OSError, ValueError, ConfigValidationError) as exc:
+        print(f"Benchmark failed: {exc}")
+        return 1
+
+    if as_json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"Output: {report['output_stream']}")
+        print(f"Frames: {report['frames']}")
+        print(f"Throughput: {report['throughput_hz']:.1f} Hz")
+        spacing = report["inter_arrival_ms"]
+        print(
+            "Inter-arrival spacing (ms): "
+            f"p50={spacing['p50']}, p99={spacing['p99']}"
+        )
+    return 0
 
 
 def _run_serve(

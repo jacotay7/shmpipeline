@@ -25,6 +25,7 @@ getting-started/configuration
 guides/cli
 guides/control-plane
 guides/runtime
+guides/performance
 guides/gui
 guides/extensions
 guides/troubleshooting

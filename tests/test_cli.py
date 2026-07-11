@@ -225,3 +225,74 @@ def test_cli_describe_text_emits_human_readable_summary(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "scale_stage" in output
     assert "cpu.scale" in output
+
+
+def test_cli_benchmark_delegates_and_emits_json(tmp_path, monkeypatch, capsys):
+    config_path = tmp_path / "pipeline.yaml"
+    _write_valid_config(config_path)
+    calls = {}
+
+    class _FakeManager:
+        def __init__(self, config):
+            calls["config"] = config
+
+        def build(self):
+            calls["built"] = True
+
+        def start(self):
+            calls["started"] = True
+
+        def benchmark(self, **kwargs):
+            calls["benchmark"] = kwargs
+            return {
+                "output_stream": "output_frame",
+                "frames": 3,
+                "throughput_hz": 30.0,
+                "inter_arrival_ms": {"p50": 1.0, "p99": 2.0},
+                "latency_ms": {"p50": 1.0, "p99": 2.0},
+                "workers": {},
+            }
+
+        def shutdown(self, **kwargs):
+            calls["shutdown"] = kwargs
+
+    monkeypatch.setattr("shmpipeline.cli.PipelineManager", _FakeManager)
+    assert (
+        main(
+            [
+                "benchmark",
+                str(config_path),
+                "--duration",
+                "2",
+                "--warmup",
+                "0.1",
+                "--source",
+                "input_frame:random:1000",
+                "--json",
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["frames"] == 3
+    assert calls["benchmark"]["source"]["rate_hz"] == 1000.0
+    assert calls["shutdown"] == {"force": True}
+
+
+def test_cli_benchmark_rejects_malformed_source(tmp_path, capsys):
+    config_path = tmp_path / "pipeline.yaml"
+    _write_valid_config(config_path)
+
+    exit_code = main(
+        [
+            "benchmark",
+            str(config_path),
+            "--source",
+            "not-enough-parts",
+        ]
+    )
+
+    assert exit_code == 1
+    output = capsys.readouterr().out
+    assert "Benchmark failed" in output
+    assert "STREAM:PATTERN[:RATE_HZ]" in output

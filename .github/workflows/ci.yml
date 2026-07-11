@@ -66,6 +66,23 @@ jobs:
       - name: Run slow integration tests (separate session)
         run: pytest -q -m slow
 
+      - name: Run CPU benchmark smoke test
+        run: |
+          python benchmarks/benchmark_pipeline.py benchmarks/smoke.yaml \
+            --duration 0.5 --warmup 0.1 \
+            --source benchmark_input:random:1000 \
+            --json-out /tmp/shmpipeline-benchmark.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("/tmp/shmpipeline-benchmark.json").read_text())[
+              "report"
+          ]
+          assert report["frames"] > 0
+          assert report["throughput_hz"] > 1.0
+          PY
+
   package:
     runs-on: ubuntu-latest
     steps:
@@ -118,6 +135,7 @@ jobs:
           - ubuntu-latest
           - macos-latest
         python-version:
+          - "3.9"
           - "3.10"
           - "3.11"
           - "3.12"

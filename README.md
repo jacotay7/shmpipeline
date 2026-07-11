@@ -129,6 +129,8 @@ If you prefer the CLI for the same pipeline:
 shmpipeline validate pipeline.yaml
 shmpipeline describe pipeline.yaml
 shmpipeline run pipeline.yaml --duration 5.0
+shmpipeline benchmark pipeline.yaml --duration 5.0 \
+  --source input_frame:random:1000 --json
 ```
 
 ## Popular Example Pages
@@ -144,10 +146,11 @@ Start with these in roughly the order most users need them:
 
 1. [Configuration guide](https://shmpipeline.readthedocs.io/en/latest/getting-started/configuration.html) for the full YAML model, parameters, and shared-memory definitions.
 2. [Worked examples](https://shmpipeline.readthedocs.io/en/latest/examples/index.html) for complete CPU, GPU, custom-operation, AO, and plugin-backed pipelines.
-3. [CLI guide](https://shmpipeline.readthedocs.io/en/latest/guides/cli.html) for `validate`, `describe`, `run`, and `serve`.
+3. [CLI guide](https://shmpipeline.readthedocs.io/en/latest/guides/cli.html) for `validate`, `describe`, `run`, `benchmark`, and `serve`.
 4. [GUI guide](https://shmpipeline.readthedocs.io/en/latest/guides/gui.html) for editing configs, validating locally, inspecting graphs, and launching viewers.
-5. [Runtime guide](https://shmpipeline.readthedocs.io/en/latest/guides/runtime.html) for lifecycle, metrics, worker health, and synthetic inputs.
-6. [Extensions guide](https://shmpipeline.readthedocs.io/en/latest/guides/extensions.html) for custom kernels, sources, and sinks.
-7. [Control plane guide](https://shmpipeline.readthedocs.io/en/latest/guides/control-plane.html) for remote management, SSE events, and the Python client.
-8. [API reference](https://shmpipeline.readthedocs.io/en/latest/reference/index.html), [core API](https://shmpipeline.readthedocs.io/en/latest/reference/core.html), and [kernel catalog](https://shmpipeline.readthedocs.io/en/latest/reference/kernels.html) for the detailed reference surface.
-9. [Troubleshooting](https://shmpipeline.readthedocs.io/en/latest/guides/troubleshooting.html) for common setup and runtime issues.
+5. [Performance guide](https://shmpipeline.readthedocs.io/en/latest/guides/performance.html) for benchmark baselines, lock polling, placement, and CPU/GPU tuning.
+6. [Runtime guide](https://shmpipeline.readthedocs.io/en/latest/guides/runtime.html) for lifecycle, metrics, worker health, and synthetic inputs.
+7. [Extensions guide](https://shmpipeline.readthedocs.io/en/latest/guides/extensions.html) for custom kernels, sources, and sinks.
+8. [Control plane guide](https://shmpipeline.readthedocs.io/en/latest/guides/control-plane.html) for remote management, SSE events, and the Python client.
+9. [API reference](https://shmpipeline.readthedocs.io/en/latest/reference/index.html), [core API](https://shmpipeline.readthedocs.io/en/latest/reference/core.html), and [kernel catalog](https://shmpipeline.readthedocs.io/en/latest/reference/kernels.html) for the detailed reference surface.
+10. [Troubleshooting](https://shmpipeline.readthedocs.io/en/latest/guides/troubleshooting.html) for common setup and runtime issues.
