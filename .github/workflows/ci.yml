@@ -159,18 +159,37 @@ jobs:
           fi
 
       - name: Install Linux GUI runtime
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.python-version != '3.9'
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1
 
-      - name: Install dependencies
+      - name: Install dependencies (with GUI extra)
+        if: matrix.python-version != '3.9'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test,gui]"
 
+      - name: Install dependencies (no GUI extra)
+        # pyqtgraph>=0.14 and recent PySide6 releases require Python >=3.10;
+        # 3.9 exercises the core library and control plane only.
+        if: matrix.python-version == '3.9'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[test]"
+
       - name: Run tests
+        if: matrix.python-version != '3.9'
         run: pytest -q -m "not slow"
 
+      - name: Run tests (no GUI)
+        if: matrix.python-version == '3.9'
+        run: pytest -q -m "not slow" --ignore=tests/test_gui_app.py --ignore=tests/test_gui_model.py
+
       - name: Run slow integration tests (separate session)
+        if: matrix.python-version != '3.9'
         run: pytest -q -m slow
+
+      - name: Run slow integration tests (separate session, no GUI)
+        if: matrix.python-version == '3.9'
+        run: pytest -q -m slow --ignore=tests/test_gui_app.py --ignore=tests/test_gui_model.py

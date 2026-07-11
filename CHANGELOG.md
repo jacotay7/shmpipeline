@@ -20,7 +20,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ### Lifecycle and maintenance
 
 - Added Python 3.9 to the test matrix and made test shared-memory cleanup
-  discover every segment by prefix.
+  discover every segment by prefix. The `gui` extra (`pyqtgraph>=0.14`,
+  recent `PySide6`) requires Python >=3.10, so Python 3.9 CI installs
+  `.[test]` only and skips the GUI test files; the `test`/`control` extras
+  now also pull in `eval_type_backport` on Python <3.10, which pydantic
+  needs to evaluate `X | None`-style annotations in `control/api.py` at
+  class-definition time.
 - Added contributor and security policies.
 - Documented a benign PyTorch CUDA IPC teardown warning that can appear on
   GPU pipeline exit; it is not caused by shutdown ordering and does not
