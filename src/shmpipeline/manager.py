@@ -53,28 +53,15 @@ class _WorkerHandle:
     cpu_slot: int | None
 
 
-def _wait_for_stream_update(
+def _read_sink_payload(
     stream: Any,
-    previous_count: float,
+    previous_count: int,
     *,
     timeout: float,
-) -> float | None:
-    """Wait for a stream write count to advance beyond the previous count."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        current = stream.count
-        if current > previous_count:
-            return current
-        time.sleep(1e-5)
-    return None
-
-
-def _read_sink_payload(stream: Any, *, timeout: float) -> tuple[float, Any]:
-    """Read one stable payload for a sink plugin."""
-    with stream.locked(timeout=timeout):
-        current_count = stream.count
-        payload = stream.read(safe=True)
-    return current_count, payload
+) -> tuple[int, Any]:
+    """Wait for and read one stable payload through pyshmem."""
+    payload = stream.read_after(previous_count, timeout=timeout)
+    return stream.last_read_count, payload
 
 
 def _call_with_optional_timeout(
@@ -348,16 +335,10 @@ class _SinkController:
                     if self._stop_event.wait(self.spec.pause_sleep):
                         return
                     continue
-                triggered_count = _wait_for_stream_update(
-                    self.stream,
-                    last_seen_count,
-                    timeout=self.spec.read_timeout,
-                )
-                if triggered_count is None:
-                    continue
                 try:
                     current_count, payload = _read_sink_payload(
                         self.stream,
+                        last_seen_count,
                         timeout=self.spec.read_timeout,
                     )
                 except TimeoutError:
@@ -440,6 +421,7 @@ class PipelineManager:
         self._logger = get_logger("manager")
         self.state = PipelineState.INITIALIZED
         self._streams: dict[str, Any] = {}
+        self._owned_streams: set[str] = set()
         self._pause_event: Any | None = None
         self._workers: dict[str, _WorkerHandle] = {}
         self._failures: list[dict[str, Any]] = []
@@ -545,19 +527,45 @@ class PipelineManager:
         self._transition_state(PipelineState.BUILT, reason="build complete")
 
     def _build_stream(self, spec) -> Any:
-        """Create, reuse, or replace one shared-memory stream."""
+        """Create, attach, or replace one stream according to ``spec.mode``."""
         existing_stream = self._open_existing_stream(spec)
         if existing_stream is not None:
-            reused_stream = self._reuse_or_replace_existing_stream(
-                spec,
-                existing_stream,
+            if spec.mode == "create":
+                existing_stream.close()
+                raise FileExistsError(spec.name)
+            if spec.mode == "replace":
+                close_stream(existing_stream, unlink=True)
+            elif self._stream_matches_spec(existing_stream, spec):
+                self._logger.info(
+                    "reusing shared memory: name=%s storage=%s shape=%s "
+                    "dtype=%s",
+                    spec.name,
+                    spec.storage,
+                    spec.shape,
+                    spec.dtype,
+                )
+                return existing_stream
+            elif spec.mode == "attach":
+                existing_stream.close()
+                raise ConfigValidationError(
+                    f"existing shared memory {spec.name!r} does not match "
+                    "the requested attach configuration"
+                )
+            else:
+                close_stream(existing_stream, unlink=True)
+        elif spec.mode == "attach":
+            raise FileNotFoundError(
+                f"shared memory stream {spec.name!r} does not exist"
             )
-            if reused_stream is not None:
-                return reused_stream
 
         create_kwargs = {
             "shape": spec.shape,
             "dtype": spec.dtype,
+            "notify": (
+                self._stream_should_notify(spec.name)
+                if spec.notify is None
+                else spec.notify
+            ),
         }
         if spec.storage == "gpu":
             create_kwargs["gpu_device"] = spec.gpu_device
@@ -572,13 +580,29 @@ class PipelineManager:
             )
             existing_stream = self._open_existing_stream(spec)
             if existing_stream is not None:
-                reused_stream = self._reuse_or_replace_existing_stream(
-                    spec,
-                    existing_stream,
-                )
-                if reused_stream is not None:
-                    return reused_stream
+                if spec.mode == "create":
+                    existing_stream.close()
+                    raise FileExistsError(spec.name)
+                if spec.mode == "attach" and not self._stream_matches_spec(
+                    existing_stream, spec
+                ):
+                    existing_stream.close()
+                    raise ConfigValidationError(
+                        f"existing shared memory {spec.name!r} does not "
+                        "match the requested attach configuration"
+                    )
+                if spec.mode != "replace" and self._stream_matches_spec(
+                    existing_stream, spec
+                ):
+                    return existing_stream
+                close_stream(existing_stream, unlink=True)
             else:
+                if spec.mode == "create":
+                    raise FileExistsError(spec.name)
+                if spec.mode == "attach":
+                    raise FileNotFoundError(
+                        f"shared memory stream {spec.name!r} does not exist"
+                    )
                 self._logger.warning(
                     "shared memory exists but is not attachable; recreating stale stream: name=%s",
                     spec.name,
@@ -593,60 +617,51 @@ class PipelineManager:
             spec.shape,
             spec.dtype,
         )
+        self._owned_streams.add(spec.name)
         return stream
 
-    def _reuse_or_replace_existing_stream(
-        self, spec, existing_stream
-    ) -> Any | None:
-        """Return a reusable existing stream or replace it when incompatible."""
-        if self._stream_matches_spec(existing_stream, spec):
-            self._logger.info(
-                "reusing shared memory: name=%s storage=%s shape=%s dtype=%s",
-                spec.name,
-                spec.storage,
-                spec.shape,
-                spec.dtype,
-            )
-            return existing_stream
-
-        self._logger.info(
-            "replacing incompatible shared memory: name=%s expected_storage=%s "
-            "expected_shape=%s expected_dtype=%s existing_storage=%s "
-            "existing_shape=%s existing_dtype=%s",
-            spec.name,
-            spec.storage,
-            spec.shape,
-            spec.dtype,
-            "gpu" if existing_stream.gpu_enabled else "cpu",
-            existing_stream.shape,
-            existing_stream.dtype,
-        )
-        close_stream(existing_stream, unlink=True)
-        return None
+    def _stream_should_notify(self, name: str) -> bool:
+        """Return the default wait-notification policy for one stream."""
+        if any(kernel.input == name for kernel in self.config.kernels):
+            return True
+        return any(sink.stream == name for sink in self.config.sinks)
 
     def _open_existing_stream(self, spec) -> Any | None:
         """Open an existing stream if present.
 
-        GPU streams are probed without a CUDA attachment so build can inspect
-        and replace stale streams without reopening their IPC handles.
+        Metadata is inspected first so a dead GPU producer is not needlessly
+        mapped.  A live GPU stream is then opened with pyshmem's recorded
+        device resolution.
         """
         try:
+            info = pyshmem.stat(spec.name)
+            if info["gpu_enabled"] and not info["creator_alive"]:
+                if not info["cpu_mirror"]:
+                    return None
+                return pyshmem.open(spec.name, gpu_device=False)
             return pyshmem.open(spec.name)
         except FileNotFoundError:
             return None
-        except ValueError:
+        except (OSError, RuntimeError, ValueError):
             return None
 
     def _stream_matches_spec(self, stream: Any, spec) -> bool:
         """Return whether an existing stream matches the requested config."""
-        if spec.storage == "gpu":
-            return False
         if tuple(stream.shape) != tuple(spec.shape):
             return False
         if stream.dtype != spec.dtype:
             return False
         if stream.gpu_enabled != (spec.storage == "gpu"):
             return False
+        if spec.storage == "gpu":
+            if spec.gpu_device is not None:
+                if stream.gpu_device != spec.gpu_device:
+                    return False
+            if (
+                spec.cpu_mirror is not None
+                and stream.cpu_mirror != spec.cpu_mirror
+            ):
+                return False
         return True
 
     def start(self) -> None:
@@ -905,13 +920,25 @@ class PipelineManager:
         self._workers.clear()
         self._pause_event = None
 
-    def shutdown(self, *, unlink: bool = True, force: bool = False) -> None:
+    def shutdown(
+        self,
+        *,
+        unlink: bool = True,
+        unlink_external: bool = False,
+        force: bool = False,
+    ) -> None:
         """Stop workers, close local handles, and optionally unlink streams.
 
-        This is the terminal cleanup step for a manager instance.
+        This is the terminal cleanup step for a manager instance.  By default
+        only streams created by this manager are unlinked; attached external
+        streams are merely closed.  Set ``unlink_external=True`` for the
+        explicit administrative cleanup behavior.
         """
         self._logger.info(
-            "shutdown requested: unlink=%s force=%s", unlink, force
+            "shutdown requested: unlink=%s unlink_external=%s force=%s",
+            unlink,
+            unlink_external,
+            force,
         )
         self.stop_all_synthetic_inputs()
         if self.state in {
@@ -922,7 +949,11 @@ class PipelineManager:
             self.stop(force=force)
         for name, stream in list(self._streams.items()):
             try:
-                close_stream(stream, unlink=unlink)
+                close_stream(
+                    stream,
+                    unlink=unlink
+                    and (unlink_external or name in self._owned_streams),
+                )
             finally:
                 self._logger.info(
                     "released shared memory: name=%s unlink=%s",
@@ -930,6 +961,7 @@ class PipelineManager:
                     unlink,
                 )
         self._streams.clear()
+        self._owned_streams.clear()
         self._transition_state(
             PipelineState.STOPPED, reason="shutdown complete"
         )
@@ -1694,15 +1726,21 @@ class PipelineManager:
             deadline = start + duration_s
             while time.monotonic() < deadline:
                 self.poll_events()
-                current = stream.count
-                if current > last_count:
-                    now = time.monotonic()
-                    advanced = int(current - last_count)
-                    spacing = (now - prev_time) / advanced
-                    intervals.extend([spacing] * advanced)
-                    last_count = current
-                    prev_time = now
-                time.sleep(poll_interval)
+                remaining = max(0.0, deadline - time.monotonic())
+                try:
+                    current = stream.wait_for_count(
+                        after=last_count,
+                        timeout=remaining,
+                        poll_interval=poll_interval,
+                    )
+                except TimeoutError:
+                    break
+                now = time.monotonic()
+                advanced = int(current - last_count)
+                spacing = (now - prev_time) / advanced
+                intervals.extend([spacing] * advanced)
+                last_count = current
+                prev_time = now
             elapsed = max(time.monotonic() - start, 1e-12)
         finally:
             if started_synthetic is not None:

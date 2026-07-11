@@ -44,6 +44,57 @@ def test_pipeline_config_loads_from_yaml(tmp_path):
     assert config.kernels[0].parameters["factor"] == 3.0
 
 
+def test_shared_memory_wait_and_lifecycle_options():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "notify": True,
+                    "mode": "attach",
+                }
+            ],
+            "sources": [
+                {
+                    "name": "source",
+                    "kind": "example.source",
+                    "stream": "input_frame",
+                }
+            ],
+        }
+    )
+
+    spec = config.shared_memory[0]
+    assert spec.notify is True
+    assert spec.mode == "attach"
+
+
+@pytest.mark.parametrize("mode", ["bad", "reuse", "create-or-attach"])
+def test_shared_memory_rejects_unknown_lifecycle_mode(mode):
+    with pytest.raises(ConfigValidationError, match="mode"):
+        PipelineConfig.from_dict(
+            {
+                "shared_memory": [
+                    {
+                        "name": "input_frame",
+                        "shape": [4],
+                        "dtype": "float32",
+                        "mode": mode,
+                    }
+                ],
+                "sources": [
+                    {
+                        "name": "source",
+                        "kind": "example.source",
+                        "stream": "input_frame",
+                    }
+                ],
+            }
+        )
+
+
 def test_pipeline_config_accepts_sources_and_sinks():
     config = PipelineConfig.from_dict(
         {

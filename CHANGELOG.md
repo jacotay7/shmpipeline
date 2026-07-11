@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.3]
+
+### Correctness and pyshmem integration
+
+- Keep worker borrowed views inside their pyshmem lock scope.
+- Publish CPU and GPU outputs through pyshmem's exception-safe writable-view
+  transactions rather than private sequence and storage attributes.
+- Use level-triggered pyshmem waits and enable stream notifications for worker
+  and sink trigger streams.
+- Preserve externally attached streams on shutdown unless explicit external
+  unlinking is requested.
+- Require pyshmem 1.1.0 or newer and document the POSIX platform boundary.
+
 The format is based on Keep a Changelog, and this project follows Semantic
 Versioning.
 

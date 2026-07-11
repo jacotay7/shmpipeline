@@ -24,6 +24,17 @@ Supported fields:
 - `storage`: `cpu` or `gpu`
 - `gpu_device`: required for GPU streams
 - `cpu_mirror`: optional for GPU streams that need CPU-side readers such as viewers or external tooling
+- `notify`: optional boolean override for pyshmem waitable notifications;
+  when omitted, shmpipeline enables notifications for streams consumed by
+  workers or sinks where supported
+- `mode`: stream lifecycle policy: `create_or_attach` (default), `create`,
+  `attach`, or `replace`
+
+`create_or_attach` reuses a compatible stream and replaces an incompatible
+one. `attach` never creates or replaces a stream, `create` fails when the name
+already exists, and `replace` explicitly recreates an existing stream.
+Streams attached from outside the manager are closed but not unlinked during
+shutdown unless `shutdown(unlink_external=True)` is requested.
 
 ## Kernel definitions
 

@@ -7,12 +7,10 @@ import os
 import time
 import traceback
 from collections import deque
-from contextlib import ExitStack
-from importlib import import_module
+from contextlib import ExitStack, contextmanager
 from queue import Empty
 from typing import Any, Mapping
 
-import numpy as np
 import pyshmem
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
@@ -20,21 +18,6 @@ from shmpipeline.logging_utils import get_logger
 from shmpipeline.registry import get_default_registry
 
 ROLLING_METRICS_WINDOW = 1000
-_TORCH_UNINITIALIZED = object()
-_TORCH_MODULE: Any = _TORCH_UNINITIALIZED
-
-
-def _get_torch_module() -> Any | None:
-    """Import torch on first use so CPU-only workers stay lightweight."""
-    global _TORCH_MODULE
-    if _TORCH_MODULE is _TORCH_UNINITIALIZED:
-        try:
-            _TORCH_MODULE = import_module("torch")
-        except (
-            Exception
-        ):  # pragma: no cover - exercised when torch is unavailable
-            _TORCH_MODULE = None
-    return _TORCH_MODULE
 
 
 def _compute_rolling_throughput_hz(
@@ -88,23 +71,25 @@ def _wait_for_trigger(
     timeout: float,
     poll_interval: float = 1e-5,
 ) -> float | None:
-    """Wait for a trigger stream count to advance beyond the previous count."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        current = stream.count
-        if current > previous_count:
-            return current
-        time.sleep(poll_interval)
-    return None
+    """Wait for a trigger count using pyshmem's level-triggered primitive."""
+    try:
+        return stream.wait_for_count(
+            after=previous_count,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+    except TimeoutError:
+        return None
 
 
-def _read_locked_inputs_and_outputs(
+@contextmanager
+def _locked_inputs_and_outputs(
     kernel_config: KernelConfig,
     trigger_stream: Any,
     auxiliary_streams: dict[str, Any],
     output_streams: dict[str, Any],
 ):
-    """Read a consistent set of inputs and the output views under locks.
+    """Yield inputs and output views while all required locks are held.
 
     Lock acquisition can legitimately fail under load when an external writer
     is updating the trigger stream. That is treated as transient backpressure,
@@ -119,23 +104,17 @@ def _read_locked_inputs_and_outputs(
         **auxiliary_streams,
         **output_streams,
     }
-    with ExitStack() as stack:
-        for name in sorted(locked_streams):
-            stack.enter_context(
-                locked_streams[name].locked(timeout=kernel_config.read_timeout)
-            )
-
+    with pyshmem.locked_many(
+        tuple(locked_streams.values()),
+        timeout=kernel_config.read_timeout,
+    ):
         current_count = trigger_stream.count
         trigger_input = _read_worker_input(trigger_stream)
         auxiliary_inputs = {
             name: _read_worker_input(stream)
             for name, stream in auxiliary_streams.items()
         }
-        output_views = {
-            name: stream.read(safe=False)
-            for name, stream in output_streams.items()
-        }
-        return current_count, trigger_input, auxiliary_inputs, output_views
+        yield current_count, trigger_input, auxiliary_inputs
 
 
 def _read_worker_input(stream: Any):
@@ -145,64 +124,22 @@ def _read_worker_input(stream: Any):
     return stream.read(safe=False)
 
 
-def _write_worker_output(
-    output_stream: Any, output_view: Any, value: Any
-) -> None:
-    """Publish one output buffer while keeping GPU mirrors and metadata consistent.
-
-    Accesses pyshmem private API (_mark_write_started, _finish_write, _array)
-    intentionally: the worker already holds the stream lock, so the public
-    write() path (which re-acquires the lock) cannot be used without deadlock.
-    This avoids an extra lock round-trip on every frame.  See CLAUDE.md for
-    the full coupling contract.
-    """
-    output_stream._mark_write_started()
-    if isinstance(output_view, np.ndarray):
-        np.copyto(output_view, value)
-        output_stream._finish_write()
-        return
-
-    output_view.copy_(value)
-    if getattr(output_stream, "cpu_mirror", False):
-        np.copyto(output_stream._array, value.detach().cpu().numpy())
-    torch_module = _get_torch_module()
-    if torch_module is not None:
-        torch_module.cuda.synchronize(device=output_stream.gpu_device)
-    output_stream._finish_write()
-
-
 def _compute_and_publish_outputs(
     kernel: Any,
     trigger_input: Any,
     auxiliary_inputs: Mapping[str, Any],
     ordered_output_names: tuple[str, ...],
     output_streams: dict[str, Any],
-    output_views: dict[str, Any],
 ) -> None:
-    """Compute one kernel result and publish it to all output streams.
-
-    CPU kernels use a zero-copy fast path: ``compute_into_multiple`` writes
-    directly into the locked output views (the shared-memory buffers
-    themselves).  GPU kernels write into ``kernel.output_buffers`` first, then
-    copy each into the corresponding CUDA IPC tensor.
-    """
-    if getattr(kernel, "storage", None) == "cpu":
-        ordered_views = [output_views[name] for name in ordered_output_names]
-        for name in ordered_output_names:
-            output_streams[name]._mark_write_started()
+    """Compute directly into exception-safe pyshmem output transactions."""
+    with ExitStack() as stack:
+        output_views = [
+            stack.enter_context(output_streams[name].write_view_locked())
+            for name in ordered_output_names
+        ]
         kernel.compute_into_multiple(
-            trigger_input, ordered_views, auxiliary_inputs
+            trigger_input, output_views, auxiliary_inputs
         )
-        for name in ordered_output_names:
-            output_streams[name]._finish_write()
-        return
-
-    output_buffers = getattr(kernel, "output_buffers", [kernel.output_buffer])
-    kernel.compute_into_multiple(
-        trigger_input, output_buffers, auxiliary_inputs
-    )
-    for name, buffer in zip(ordered_output_names, output_buffers):
-        _write_worker_output(output_streams[name], output_views[name], buffer)
 
 
 def _send_worker_event(event_sink: Any, event: dict[str, Any]) -> None:
@@ -281,33 +218,31 @@ def run_kernel_process(
                 continue
 
             try:
-                (
-                    current_count,
-                    trigger_input,
-                    auxiliary_inputs,
-                    output_views,
-                ) = _read_locked_inputs_and_outputs(
+                with _locked_inputs_and_outputs(
                     kernel_config,
                     trigger_stream,
                     auxiliary_streams,
                     output_streams,
-                )
+                ) as (
+                    current_count,
+                    trigger_input,
+                    auxiliary_inputs,
+                ):
+                    if current_count <= last_seen_count:
+                        continue
+
+                    compute_started = time.perf_counter()
+                    _compute_and_publish_outputs(
+                        kernel,
+                        trigger_input,
+                        auxiliary_inputs,
+                        kernel_config.all_outputs,
+                        output_streams,
+                    )
+                    last_seen_count = current_count
             except TimeoutError:
                 continue
 
-            if current_count <= last_seen_count:
-                continue
-
-            compute_started = time.perf_counter()
-            _compute_and_publish_outputs(
-                kernel,
-                trigger_input,
-                auxiliary_inputs,
-                kernel_config.all_outputs,
-                output_streams,
-                output_views,
-            )
-            last_seen_count = current_count
             last_exec_s = time.perf_counter() - compute_started
             frames_processed += 1
             now = time.monotonic()

@@ -1090,6 +1090,25 @@ def test_manager_build_reuses_compatible_existing_shared_memory(shm_prefix):
         manager.shutdown(force=True)
 
 
+def test_manager_does_not_unlink_attached_stream_on_shutdown(shm_prefix):
+    input_name = f"{shm_prefix}_input"
+    output_name = f"{shm_prefix}_output"
+    existing_input = pyshmem.create(input_name, shape=(4,), dtype=np.float32)
+    existing_output = pyshmem.create(output_name, shape=(4,), dtype=np.float32)
+    manager = PipelineManager(
+        _make_pipeline_config(shm_prefix, kind="cpu.copy", parameters={})
+    )
+    manager.build()
+    manager.shutdown(force=True)
+
+    reopened_input = pyshmem.open(input_name)
+    reopened_output = pyshmem.open(output_name)
+    reopened_input.close()
+    reopened_output.close()
+    existing_input.unlink()
+    existing_output.unlink()
+
+
 def test_manager_owned_stream_survives_external_client_exit(shm_prefix):
     input_name = f"{shm_prefix}_input"
     payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
@@ -1276,7 +1295,7 @@ def test_close_stream_no_unlink_skips_pyshmem(monkeypatch):
     assert unlink_quiet_calls == []
 
 
-def test_manager_does_not_reuse_compatible_gpu_shared_memory(shm_prefix):
+def test_manager_reuses_compatible_gpu_shared_memory(shm_prefix):
     config = _make_pipeline_config_for_storage(
         shm_prefix,
         kind="gpu.copy",
@@ -1297,7 +1316,7 @@ def test_manager_does_not_reuse_compatible_gpu_shared_memory(shm_prefix):
             _FakeGpuStream(),
             config.shared_memory_by_name[f"{shm_prefix}_input"],
         )
-        is False
+        is True
     )
 
 
@@ -1322,7 +1341,7 @@ def test_manager_opens_existing_gpu_streams_without_cuda_attachment(
     monkeypatch.setattr(pyshmem, "open", _fake_open)
 
     assert manager._open_existing_stream(spec) is None
-    assert open_calls == [(spec.name, {})]
+    assert open_calls == []
 
 
 def test_manager_worker_retries_after_transient_lock_contention(shm_prefix):
@@ -1364,9 +1383,7 @@ def test_manager_worker_retries_after_transient_lock_contention(shm_prefix):
         baseline = output_stream.count
 
         with input_stream.locked():
-            input_stream._mark_write_started()
-            np.copyto(input_stream.read(safe=False), expected)
-            input_stream._finish_write()
+            input_stream.write_locked(expected)
             time.sleep(0.05)
 
         observed = _wait_for_next_write(output_stream, baseline, timeout=2.0)

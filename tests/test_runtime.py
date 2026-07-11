@@ -7,9 +7,11 @@ behaviour covered without process spawning.
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
 
 import numpy as np
+import pyshmem
 import pytest
 
 from shmpipeline import runtime
@@ -36,11 +38,20 @@ class _FakeStream:
     def locked(self, timeout=None):
         yield self
 
-    def _mark_write_started(self):
-        self.writes_started += 1
+    def wait_for_count(self, *, after, timeout=None, poll_interval=1e-5):
+        if self.count > after:
+            return self.count
+        raise TimeoutError
 
-    def _finish_write(self):
-        self.writes_finished += 1
+    @contextmanager
+    def write_view_locked(self):
+        self.writes_started += 1
+        try:
+            yield self._array
+        except BaseException:
+            raise
+        else:
+            self.writes_finished += 1
 
 
 def test_wait_for_trigger_returns_when_count_advances():
@@ -92,7 +103,7 @@ def test_read_worker_input_uses_safe_read_for_gpu():
     assert calls["safe"] is False
 
 
-def test_read_locked_inputs_and_outputs_reads_all_streams():
+def test_locked_inputs_and_outputs_reads_all_streams():
     config = KernelConfig.from_dict(
         {
             "name": "k",
@@ -106,13 +117,66 @@ def test_read_locked_inputs_and_outputs_reads_all_streams():
     out_b = _FakeStream("out_b", np.zeros(2, dtype=np.float32))
     output_streams = {"out_a": out_a, "out_b": out_b}
 
-    count, trigger_input, aux, views = runtime._read_locked_inputs_and_outputs(
+    with runtime._locked_inputs_and_outputs(
         config, trigger, {}, output_streams
+    ) as (count, trigger_input, aux):
+        assert count == 7
+        np.testing.assert_array_equal(trigger_input, [1.0, 2.0])
+        assert aux == {}
+
+
+def test_locked_views_remain_protected_until_compute_scope_exits(shm_prefix):
+    trigger_name = f"{shm_prefix}_input"
+    output_name = f"{shm_prefix}_output"
+    trigger = pyshmem.create(trigger_name, shape=(1,), dtype=np.float32)
+    output = pyshmem.create(output_name, shape=(1,), dtype=np.float32)
+    competing_trigger = pyshmem.open(trigger_name)
+    competing_output = pyshmem.open(output_name)
+    trigger.write(np.array([1.0], dtype=np.float32))
+    config = KernelConfig.from_dict(
+        {
+            "name": "k",
+            "kind": "cpu.copy",
+            "input": trigger_name,
+            "output": output_name,
+        }
     )
-    assert count == 7
-    np.testing.assert_array_equal(trigger_input, [1.0, 2.0])
-    assert aux == {}
-    assert set(views) == {"out_a", "out_b"}
+
+    try:
+        with runtime._locked_inputs_and_outputs(
+            config, trigger, {}, {output_name: output}
+        ) as (count, trigger_input, _aux):
+            assert count == 1
+            np.testing.assert_array_equal(trigger_input, [1.0])
+            attempts = []
+
+            def try_acquire(stream):
+                try:
+                    stream.acquire(timeout=0.0)
+                except TimeoutError:
+                    attempts.append(False)
+                else:
+                    attempts.append(True)
+                    stream.release()
+
+            threads = [
+                threading.Thread(
+                    target=try_acquire, args=(competing_trigger,)
+                ),
+                threading.Thread(target=try_acquire, args=(competing_output,)),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            assert attempts == [False, False]
+        competing_trigger.acquire(timeout=1.0)
+        competing_trigger.release()
+    finally:
+        competing_output.close()
+        competing_trigger.close()
+        trigger.unlink()
+        output.unlink()
 
 
 def test_compute_and_publish_outputs_cpu_zero_copy_multi_output():
@@ -133,31 +197,19 @@ def test_compute_and_publish_outputs_cpu_zero_copy_multi_output():
     ordered = ("out_a", "out_b")
     out_a = _FakeStream("out_a", np.zeros(2, dtype=np.float32))
     out_b = _FakeStream("out_b", np.zeros(2, dtype=np.float32))
-    views = {
-        "out_a": np.zeros(2, dtype=np.float32),
-        "out_b": np.zeros(2, dtype=np.float32),
-    }
     streams = {"out_a": out_a, "out_b": out_b}
-    runtime._compute_and_publish_outputs(
-        _Splitter(),
-        np.array([1.0, 2.0], dtype=np.float32),
-        {},
-        ordered,
-        streams,
-        views,
-    )
-    np.testing.assert_allclose(views["out_a"], [2.0, 4.0])
-    np.testing.assert_allclose(views["out_b"], [2.0, 3.0])
+    with out_a.locked(), out_b.locked():
+        runtime._compute_and_publish_outputs(
+            _Splitter(),
+            np.array([1.0, 2.0], dtype=np.float32),
+            {},
+            ordered,
+            streams,
+        )
+    np.testing.assert_allclose(out_a._array, [2.0, 4.0])
+    np.testing.assert_allclose(out_b._array, [2.0, 3.0])
     assert out_a.writes_started == 1 and out_a.writes_finished == 1
     assert out_b.writes_started == 1 and out_b.writes_finished == 1
-
-
-def test_write_worker_output_ndarray_path():
-    stream = _FakeStream("o", np.zeros(3, dtype=np.float32))
-    view = np.zeros(3, dtype=np.float32)
-    runtime._write_worker_output(stream, view, np.array([1.0, 2.0, 3.0]))
-    np.testing.assert_allclose(view, [1.0, 2.0, 3.0])
-    assert stream.writes_started == 1 and stream.writes_finished == 1
 
 
 def test_send_worker_event_supports_queue_and_pipe():

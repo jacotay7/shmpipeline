@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shmpipeline"
-version = "1.0.2"
+version = "1.0.3"
 description = "Process-based shared-memory compute pipelines built on pyshmem."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
@@ -16,7 +16,7 @@ authors = [
 dependencies = [
     "numba>=0.60",
     "numpy>=1.26,<3",
-    "pyshmem>=1.0.0",
+    "pyshmem>=1.1.0,<2",
     "PyYAML>=6.0",
 ]
 keywords = ["shared-memory", "pipeline", "multiprocessing", "numba", "cuda"]
@@ -25,7 +25,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
-    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",

@@ -75,7 +75,7 @@ kernels:
     parameters: {factor: 2.0}
     read_timeout: 1.0       # seconds
     pause_sleep: 0.01       # seconds
-    poll_interval: 1.0e-5   # trigger polling interval in seconds (default 10 µs)
+    poll_interval: 1.0e-5   # fallback wait polling interval (default 10 µs)
 
 sources:                    # optional external data providers
   - name: my_source
@@ -114,12 +114,14 @@ class MyKernel(Kernel):
 
     def compute_into(self, trigger_input, output, auxiliary_inputs):
         # Write result directly into the shared-memory output view — no allocation.
-        # For CPU kernels, output IS the locked shared-memory buffer.
-        # For GPU kernels (GpuKernel subclass), output is self.output_buffer.
+        # CPU and GPU kernels receive the pyshmem output view for this frame.
         output[...] = trigger_input * self.factor
 ```
 
-**Note on output_buffer**: GPU kernels (`GpuKernel` subclasses) receive a private CUDA tensor (`self.output_buffer`) as the `output` argument, which is then copied to the shared CUDA IPC tensor. CPU kernels write directly into the shared-memory view and do **not** have `self.output_buffer`. Custom CPU kernels that need intermediate buffers should allocate them in `__init__` explicitly.
+**Note on output buffers**: the runtime passes the shared pyshmem output view
+to both CPU and GPU kernels. `GpuKernel.output_buffer` remains available to
+kernels that need a private staging/intermediate tensor, but the runtime no
+longer copies every result through it.
 
 ### Multi-output kernels
 
@@ -142,8 +144,9 @@ class SplitKernel(Kernel):
 
 The base `Kernel.compute_into_multiple` forwards `outputs[0]` to
 `compute_into`, so single-output kernels need no changes. For CPU kernels each
-output view is the zero-copy locked shared-memory buffer; GPU kernels receive
-one private `output_buffer` per output (via `self.output_buffers`).
+output view is the zero-copy locked pyshmem shared-memory buffer for either
+backend. GPU kernels may retain private intermediate buffers when an operation
+cannot target its caller-provided output.
 
 Register via pyproject.toml entry point:
 ```toml
@@ -228,19 +231,29 @@ The input stream can have any shape; the output stream must be a scalar (single-
 
 Each worker process (`run_kernel_process` in `runtime.py`):
 1. Opens pyshmem streams for its input, auxiliaries, and output.
-2. Waits for the trigger stream's write count to advance (polling at `kernel_config.poll_interval`).
-3. Acquires sorted locks on all streams to read a consistent snapshot.
+2. Waits for the trigger stream's level-triggered pyshmem count to advance
+   (futex notification on supported streams, polling fallback otherwise).
+3. Acquires sorted locks on all streams and keeps them held through borrowed
+   CPU input use and output publication.
 4. Calls `kernel.compute_into(trigger, output_view, auxiliaries)`.
-5. Publishes the output (directly into the locked output_view for CPU, via `output_buffer` copy for GPU).
+5. Publishes outputs through pyshmem's exception-safe `write_view_locked()`
+   transactions.
 6. Emits rolling metrics (exec time, jitter, throughput) via a `multiprocessing.Pipe`.
 
-**Performance note**: CPU kernels use a zero-copy fast path that writes directly into the shared-memory buffer without an intermediate `output_buffer` copy. This requires accessing pyshmem private API (`_mark_write_started`, `_finish_write`, `_array`). This coupling is intentional and documented.
+**Performance note**: CPU and GPU kernels use a zero-copy path that writes
+directly into the locked pyshmem buffer. Publication, mirror updates, CUDA
+synchronization, and abort handling belong to pyshmem's public transaction API.
 
-**GPU note**: GPU kernels always go through a `kernel.output_buffer` (CUDA tensor) → copy to shared CUDA IPC tensor path. Safe-reads are used even inside locks because CUDA IPC memory can be stale across process boundaries.
+**GPU note**: safe GPU input reads remain snapshots because a file lock alone
+does not establish CUDA stream synchronization. When a CUDA handle is
+attached, pyshmem snapshots the device tensor even if a host mirror exists.
 
 **Lazy kernel loading**: Built-in kernels (both CPU and GPU) are loaded lazily on first use. Each worker process only imports the single kernel kind it runs, keeping startup time proportional to what's needed rather than importing everything.
 
-**poll_interval**: The trigger polling interval is configurable per kernel via `KernelConfig.poll_interval` (default 10 µs). Increase for throughput-oriented pipelines (e.g., 1 ms) to reduce CPU burn; keep at default for lowest-latency use cases.
+**poll_interval**: The trigger wait fallback is configurable per kernel via
+`KernelConfig.poll_interval` (default 10 µs). On Linux notification-enabled
+streams, normal waits park in the kernel; the interval remains useful for
+non-futex platforms and dead-writer checks.
 
 ## PipelineManager Parameters
 
@@ -474,20 +487,17 @@ GPU kernels (`kernels/gpu/*`, no CUDA on CI) and the PySide6 GUI
 
 ## Package Info
 
-- Package name on PyPI: `shmpipeline` (v1.0.2)
+- Package name on PyPI: `shmpipeline` (v1.0.3)
 - License: GPL-3.0-only
-- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.0.0`, `PyYAML>=6.0`
+- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.1.0,<2`, `PyYAML>=6.0`
 - Optional extras: `gpu` (torch), `control` (fastapi/uvicorn/httpx), `gui` (PySide6/pyqtgraph)
 - Python: 3.9–3.13
 - GitHub: `https://github.com/jacotay7/shmpipeline`
 
-## pyshmem Private API Coupling
+## pyshmem integration boundary
 
-shmpipeline intentionally accesses pyshmem internals only in `runtime.py`. The `shm_cleanup.py` module no longer accesses any pyshmem internals — it delegates to the public `pyshmem.unlink_quiet()` API.
-
-| Private attribute / method | Location used | Reason |
-|---------------------------|---------------|--------|
-| `_mark_write_started()`, `_finish_write()` | `runtime.py` | Zero-copy locked write path |
-| `_array` | `runtime.py` | Direct buffer view for CPU fast path |
-
-Any changes to pyshmem internals must be coordinated with `runtime.py`.
+shmpipeline uses pyshmem's public stream API for mappings, locks, snapshots,
+level-triggered waits, writable transactions, GPU IPC, mirrors, and cleanup.
+No runtime code should access pyshmem private attributes. Changes to the
+public transaction or wait contracts must be coordinated with the integration
+tests in `tests/test_runtime.py` and the pyshmem API tests.

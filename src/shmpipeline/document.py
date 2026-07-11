@@ -88,6 +88,10 @@ def config_to_document(config: PipelineConfig) -> Document:
             item["gpu_device"] = spec.gpu_device
         if spec.cpu_mirror is not None:
             item["cpu_mirror"] = spec.cpu_mirror
+        if spec.notify is not None:
+            item["notify"] = spec.notify
+        if spec.mode != "create_or_attach":
+            item["mode"] = spec.mode
         shared_memory.append(item)
 
     kernels = []

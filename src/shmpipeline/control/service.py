@@ -275,6 +275,7 @@ class ManagerService:
         self,
         *,
         unlink: bool = True,
+        unlink_external: bool = False,
         force: bool = False,
     ) -> dict[str, Any]:
         """Shutdown the manager and optionally unlink shared-memory streams."""
@@ -282,6 +283,7 @@ class ManagerService:
             "shutdown",
             self._manager.shutdown,
             unlink=unlink,
+            unlink_external=unlink_external,
             force=force,
         )
 

@@ -13,6 +13,7 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from shmpipeline import __version__ as SHMPIPELINE_VERSION
 from shmpipeline.control.service import ManagerService
 from shmpipeline.errors import (
     ConfigValidationError,
@@ -32,6 +33,7 @@ class ShutdownRequest(BaseModel):
     """Request body for manager-shutdown operations."""
 
     unlink: bool = True
+    unlink_external: bool = False
     force: bool = False
 
 
@@ -93,7 +95,7 @@ def create_control_app(
 
     app = FastAPI(
         title="shmpipeline control plane",
-        version="1.0.2",
+        version=SHMPIPELINE_VERSION,
         lifespan=lifespan,
     )
     authorizer = _ScopeAuthorizer(token=token, tokens=tokens)
@@ -168,6 +170,7 @@ def create_control_app(
         return _call_service(
             service.shutdown,
             unlink=payload.unlink,
+            unlink_external=payload.unlink_external,
             force=payload.force,
         )
 

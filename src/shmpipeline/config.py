@@ -184,6 +184,8 @@ class SharedMemoryConfig:
     storage: str = "cpu"
     gpu_device: str | None = None
     cpu_mirror: bool | None = None
+    notify: bool | None = None
+    mode: str = "create_or_attach"
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SharedMemoryConfig":
@@ -199,6 +201,8 @@ class SharedMemoryConfig:
                 "storage",
                 "gpu_device",
                 "cpu_mirror",
+                "notify",
+                "mode",
             },
         )
         name = _normalize_name(data.get("name"), context="shared memory name")
@@ -223,6 +227,20 @@ class SharedMemoryConfig:
             raise ConfigValidationError(
                 f"cpu_mirror for shared memory {name!r} must be boolean"
             )
+        notify = data.get("notify")
+        if notify is not None and not isinstance(notify, bool):
+            raise ConfigValidationError(
+                f"notify for shared memory {name!r} must be boolean"
+            )
+        mode = _normalize_name(
+            data.get("mode", "create_or_attach"),
+            context=f"mode for shared memory {name}",
+        ).lower()
+        if mode not in {"create", "attach", "create_or_attach", "replace"}:
+            raise ConfigValidationError(
+                f"mode for shared memory {name!r} must be one of "
+                "'create', 'attach', 'create_or_attach', or 'replace'"
+            )
         return cls(
             name=name,
             shape=shape,
@@ -230,6 +248,8 @@ class SharedMemoryConfig:
             storage=storage,
             gpu_device=gpu_device,
             cpu_mirror=cpu_mirror,
+            notify=notify,
+            mode=mode,
         )
 
     def __post_init__(self) -> None:

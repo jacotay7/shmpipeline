@@ -523,7 +523,9 @@ def test_gpu_viewer_can_open_without_cpu_mirror(qapp, monkeypatch):
         {"name": "demo", "storage": "gpu", "gpu_device": "cuda:0"}
     )
     try:
-        assert open_calls == [("demo", {"gpu_device": "cuda:0"})]
+        assert open_calls == [
+            ("demo", {"gpu_device": "cuda:0", "readonly": True})
+        ]
         assert "Mode: passive-gpu" in viewer._status_label.text()
     finally:
         viewer.close()

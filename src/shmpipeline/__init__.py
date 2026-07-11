@@ -1,8 +1,12 @@
 """Public package surface for shmpipeline."""
 
 from importlib import import_module
+from importlib.metadata import PackageNotFoundError, version
 
-__version__ = "1.0.2"
+try:
+    __version__ = version("shmpipeline")
+except PackageNotFoundError:  # source tree imported without installation
+    __version__ = "0+unknown"
 
 _EXPORTS = {
     "Kernel": ("shmpipeline.kernel", "Kernel"),

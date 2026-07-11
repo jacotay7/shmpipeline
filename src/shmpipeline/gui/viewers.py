@@ -164,15 +164,21 @@ class SharedMemoryViewer(QMainWindow):
     def _open_stream(self):
         if self.spec.get("storage") == "gpu":
             if self.spec.get("cpu_mirror", False):
-                return pyshmem.open(self.spec["name"])
+                return pyshmem.open(
+                    self.spec["name"],
+                    gpu_device=False,
+                    readonly=True,
+                )
             gpu_device = self.spec.get("gpu_device")
             if not gpu_device:
                 raise RuntimeError(
                     "GPU viewers without cpu_mirror require a gpu_device so "
                     "they can attach directly to the CUDA handle"
                 )
-            return pyshmem.open(self.spec["name"], gpu_device=gpu_device)
-        return pyshmem.open(self.spec["name"])
+            return pyshmem.open(
+                self.spec["name"], gpu_device=gpu_device, readonly=True
+            )
+        return pyshmem.open(self.spec["name"], readonly=True)
 
     def _record_stream_sample(self, count: int, write_time: float) -> None:
         """Track stream metadata samples for rate reporting."""

@@ -47,7 +47,8 @@ pip install -e ".[control,gpu,gui,test,docs]"
 - The desktop GUI requires Qt bindings through `PySide6` and plotting support through `pyqtgraph`.
 - The desktop GUI extra also installs the local control-plane dependencies so the full editor can auto-launch a loopback server for local workflows.
 - The remote control plane requires the `control` extra, which installs FastAPI, Uvicorn, and the Python HTTP client dependency.
-- The repository CI runs on Linux, macOS, and Windows. GPU tests are skipped automatically when CUDA is unavailable.
+- pyshmem supports POSIX Linux and macOS; Windows is not supported because the
+  shared-memory backend and lifecycle semantics are POSIX-specific.
 
 ## Verify the install
 
