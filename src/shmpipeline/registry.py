@@ -493,18 +493,48 @@ _DEFAULT_LAZY_KERNELS.update(
     )
 )
 
+
+def _load_default_source(kind: str) -> type[Source]:
+    """Import and return one bundled built-in source class."""
+    from shmpipeline.sources import SyntheticArraySource
+
+    return {SyntheticArraySource.kind: SyntheticArraySource}[kind]
+
+
+def _load_default_sink(kind: str) -> type[Sink]:
+    """Import and return one bundled built-in sink class."""
+    from shmpipeline.sinks import NullSink
+
+    return {NullSink.kind: NullSink}[kind]
+
+
+_DEFAULT_BUILTIN_SOURCE_KINDS = ("synthetic.array",)
+_DEFAULT_BUILTIN_SINK_KINDS = ("null.sink",)
+
 _DEFAULT_SOURCES: dict[str, type[Source]] = {}
-_DEFAULT_LAZY_SOURCES = _discover_entry_point_loaders(
-    "shmpipeline.sources",
-    validator=_source_kind,
-    existing_kinds=set(_DEFAULT_SOURCES),
+_DEFAULT_LAZY_SOURCES: dict[str, Callable[[], type[Source]]] = {
+    kind: partial(_load_default_source, kind)
+    for kind in _DEFAULT_BUILTIN_SOURCE_KINDS
+}
+_DEFAULT_LAZY_SOURCES.update(
+    _discover_entry_point_loaders(
+        "shmpipeline.sources",
+        validator=_source_kind,
+        existing_kinds=set(_DEFAULT_LAZY_SOURCES),
+    )
 )
 
 _DEFAULT_SINKS: dict[str, type[Sink]] = {}
-_DEFAULT_LAZY_SINKS = _discover_entry_point_loaders(
-    "shmpipeline.sinks",
-    validator=_sink_kind,
-    existing_kinds=set(_DEFAULT_SINKS),
+_DEFAULT_LAZY_SINKS: dict[str, Callable[[], type[Sink]]] = {
+    kind: partial(_load_default_sink, kind)
+    for kind in _DEFAULT_BUILTIN_SINK_KINDS
+}
+_DEFAULT_LAZY_SINKS.update(
+    _discover_entry_point_loaders(
+        "shmpipeline.sinks",
+        validator=_sink_kind,
+        existing_kinds=set(_DEFAULT_LAZY_SINKS),
+    )
 )
 
 _DEFAULT_REGISTRY = KernelRegistry(

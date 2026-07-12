@@ -324,6 +324,48 @@ class SyntheticPatternGenerator:
         )
 
 
+_SYNTHETIC_PARAMETER_FIELDS = (
+    "pattern",
+    "seed",
+    "amplitude",
+    "offset",
+    "period",
+    "constant",
+    "impulse_interval",
+)
+
+
+def synthetic_config_from_parameters(
+    stream_name: str, parameters: dict[str, Any]
+) -> SyntheticInputConfig:
+    """Build a :class:`SyntheticInputConfig` from a source parameter mapping.
+
+    Only the pattern-shaping fields are consumed here; timing (``rate_hz``,
+    ``jitter_us``) and multi-stream layout are handled by the source plugin, so
+    they are ignored by the generator config.
+    """
+    fields = {
+        name: parameters[name]
+        for name in _SYNTHETIC_PARAMETER_FIELDS
+        if name in parameters
+    }
+    return SyntheticInputConfig(stream_name=stream_name, **fields)
+
+
+def pattern_generator_for_stream(
+    stream_name: str, parameters: dict[str, Any], stream: Any
+) -> "SyntheticPatternGenerator":
+    """Build a pattern generator matched to a live stream handle."""
+    spec = synthetic_config_from_parameters(stream_name, parameters)
+    return SyntheticPatternGenerator(
+        spec,
+        shape=stream.shape,
+        dtype=stream.dtype,
+        storage="gpu" if stream.gpu_enabled else "cpu",
+        gpu_device=stream.gpu_device,
+    )
+
+
 class SyntheticSourceController:
     """Background writer that feeds a stream with synthetic test frames.
 

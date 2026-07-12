@@ -171,6 +171,7 @@ class _SourceController:
                     else 1000.0 * self._last_write_duration_s
                 ),
                 "last_error": self._last_error,
+                "plugin_metrics": self.source.plugin_metrics(),
             }
 
     def consume_failure(self) -> dict[str, Any] | None:
@@ -252,6 +253,7 @@ class _SinkController:
         self._last_read_time: float | None = None
         self._last_read_duration_s: float | None = None
         self._frames_consumed = 0
+        self._missed_writes = 0
         self._last_error: str | None = None
         self._traceback: str | None = None
         self._failure_reported = False
@@ -300,6 +302,7 @@ class _SinkController:
                 "pause_sleep": self.spec.pause_sleep,
                 "alive": self._thread.is_alive(),
                 "frames_consumed": self._frames_consumed,
+                "missed_writes": self._missed_writes,
                 "effective_rate_hz": effective_rate_hz,
                 "started_at": self._started_at_wall,
                 "last_read_time": self._last_read_time,
@@ -309,6 +312,7 @@ class _SinkController:
                     else 1000.0 * self._last_read_duration_s
                 ),
                 "last_error": self._last_error,
+                "plugin_metrics": self.sink.plugin_metrics(),
             }
 
     def consume_failure(self) -> dict[str, Any] | None:
@@ -345,6 +349,7 @@ class _SinkController:
                     continue
                 if current_count <= last_seen_count:
                     continue
+                missed = int(current_count - last_seen_count - 1)
                 started = time.perf_counter()
                 _call_with_optional_timeout(
                     lambda: self.sink.consume(payload),
@@ -356,6 +361,8 @@ class _SinkController:
                 last_seen_count = current_count
                 with self._lock:
                     self._frames_consumed += 1
+                    if missed > 0:
+                        self._missed_writes += missed
                     self._last_read_time = time.time()
                     self._last_read_duration_s = finished - started
         except BaseException as exc:

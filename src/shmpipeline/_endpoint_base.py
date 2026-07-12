@@ -29,6 +29,17 @@ class _EndpointBase:
         self._stop_event = stop_event
         self._pause_event = pause_event
 
+    def plugin_metrics(self) -> dict[str, Any]:
+        """Return plugin-specific metrics merged into the status snapshot.
+
+        The default implementation reports nothing.  Endpoints override this to
+        surface counters (consume-time percentiles, injected drops, generation
+        skew, ...) that the generic controller cannot know about.  It is called
+        from the controller thread's ``snapshot`` while holding no plugin lock,
+        so implementations must be cheap and thread-safe.
+        """
+        return {}
+
     def stop_requested(self) -> bool:
         """Return whether the manager has requested that this endpoint stop."""
         return bool(self._stop_event is not None and self._stop_event.is_set())

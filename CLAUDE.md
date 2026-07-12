@@ -222,6 +222,22 @@ Register via:
 
 CPU kernels use Numba JIT (`@njit(cache=True)`) in hot paths when available; fall back to NumPy otherwise.
 
+### Built-in source/sink kinds
+
+The default registry ships a few general-purpose endpoints so example and test
+pipelines run through `shmpipeline run` without an external entry-point package:
+
+| Kind | Type | Description |
+|------|------|-------------|
+| `synthetic.array` | source | Publishes deterministic `SyntheticPatternGenerator` frames into one CPU or GPU stream, self-paced to `rate_hz` (omit/`null` = unthrottled) |
+| `null.sink` | sink | Consumes and discards every publication on device (no host copy), with optional `device_delay_s` fake-hardware latency; reports consumed count and consume-time percentiles via `plugin_metrics` |
+
+Endpoint plugins may override `plugin_metrics()` to surface counters the generic
+controller cannot know (consume-time percentiles, injected drops, skew); the
+manager merges the result into each source/sink status snapshot under
+`plugin_metrics`. `_SinkController` additionally reports `missed_writes` (gaps in
+the publication count) for every sink.
+
 ### cpu.reduce parameters
 
 | Parameter | Type | Default | Description |
