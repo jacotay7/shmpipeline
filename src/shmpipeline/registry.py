@@ -496,9 +496,15 @@ _DEFAULT_LAZY_KERNELS.update(
 
 def _load_default_source(kind: str) -> type[Source]:
     """Import and return one bundled built-in source class."""
-    from shmpipeline.sources import SyntheticArraySource
+    from shmpipeline.sources import (
+        SyntheticArraySource,
+        SyntheticFrameSetSource,
+    )
 
-    return {SyntheticArraySource.kind: SyntheticArraySource}[kind]
+    return {
+        SyntheticArraySource.kind: SyntheticArraySource,
+        SyntheticFrameSetSource.kind: SyntheticFrameSetSource,
+    }[kind]
 
 
 def _load_default_sink(kind: str) -> type[Sink]:
@@ -508,7 +514,7 @@ def _load_default_sink(kind: str) -> type[Sink]:
     return {NullSink.kind: NullSink}[kind]
 
 
-_DEFAULT_BUILTIN_SOURCE_KINDS = ("synthetic.array",)
+_DEFAULT_BUILTIN_SOURCE_KINDS = ("synthetic.array", "synthetic.frame_set")
 _DEFAULT_BUILTIN_SINK_KINDS = ("null.sink",)
 
 _DEFAULT_SOURCES: dict[str, type[Source]] = {}

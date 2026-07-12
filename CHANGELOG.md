@@ -26,9 +26,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
   WFS calibration + centroid + reconstruction + integration + command clip).
 - **Built-in endpoints** in the default registry so example and test pipelines
   run through `shmpipeline run` without an entry-point package:
-  `synthetic.array` (self-paced single-stream CPU/GPU pattern source) and
+  `synthetic.array` (self-paced single-stream CPU/GPU pattern source),
+  `synthetic.frame_set` (coordinated multi-output camera source), and
   `null.sink` (on-device drain with optional `device_delay_s` and consume-time
   percentiles).
+- **Multi-output sources.** `SourceConfig` accepts `streams: [...]` (mutually
+  exclusive with `stream:`); such a source overrides `produce(writers)` and
+  publishes every output stream itself, so one coordinator can drive several
+  streams with controlled per-stream jitter and optional drop injection.
 - **`plugin_metrics()`** hook on source/sink plugins; the manager merges the
   result into each endpoint status snapshot. `_SinkController` additionally
   reports `missed_writes` (publication-count gaps) for every sink.

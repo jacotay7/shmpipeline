@@ -495,11 +495,16 @@ class SourceConfig:
     parameters: dict[str, Any] = field(default_factory=dict)
     poll_interval: float = 0.01
     read_timeout: float | None = None
+    streams: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SourceConfig":
         """Build a normalized source configuration from a mapping."""
         data = _expect_mapping(raw, context="source entry")
+        if "stream" in data and "streams" in data:
+            raise ConfigValidationError(
+                "source entry must use either 'stream' or 'streams', not both"
+            )
         _reject_unexpected_keys(
             data,
             context="source entry",
@@ -507,6 +512,7 @@ class SourceConfig:
                 "name",
                 "kind",
                 "stream",
+                "streams",
                 "auxiliary",
                 "parameters",
                 "poll_interval",
@@ -517,9 +523,17 @@ class SourceConfig:
         kind = _normalize_name(
             data.get("kind"), context=f"kind for source {name}"
         )
-        stream = _normalize_name(
-            data.get("stream"), context=f"stream for source {name}"
-        )
+        if "streams" in data:
+            streams = _normalize_names(
+                data.get("streams"), context=f"streams for {name}"
+            )
+        else:
+            streams = (
+                _normalize_name(
+                    data.get("stream"), context=f"stream for source {name}"
+                ),
+            )
+        stream = streams[0]
         auxiliary = _normalize_auxiliary_bindings(
             data.get("auxiliary", ()),
             context=f"auxiliary for {name}",
@@ -544,7 +558,22 @@ class SourceConfig:
             parameters=parameters,
             poll_interval=poll_interval,
             read_timeout=read_timeout,
+            streams=tuple(streams),
         )
+
+    def __post_init__(self) -> None:
+        """Validate multi-output stream wiring."""
+        output_streams = self.output_streams
+        if len(set(output_streams)) != len(output_streams):
+            raise ConfigValidationError(
+                f"source {self.name!r} cannot declare the same output stream "
+                "more than once"
+            )
+
+    @property
+    def output_streams(self) -> tuple[str, ...]:
+        """Return every stream this source publishes, in declaration order."""
+        return self.streams if self.streams else (self.stream,)
 
     @property
     def auxiliary_names(self) -> tuple[str, ...]:

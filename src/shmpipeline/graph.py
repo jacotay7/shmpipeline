@@ -56,7 +56,8 @@ class PipelineGraph:
             for binding in kernel.auxiliary:
                 self._kernel_consumers[binding.name].append(kernel.name)
         for source in config.sources:
-            self._source_producers[source.stream].append(source.name)
+            for stream_name in source.output_streams:
+                self._source_producers[stream_name].append(source.name)
             for binding in source.auxiliary:
                 self._source_consumers[binding.name].append(source.name)
         for sink in config.sinks:
@@ -99,14 +100,15 @@ class PipelineGraph:
                         stream=binding.name,
                     )
                 )
-            edges.append(
-                GraphEdge(
-                    source=source.name,
-                    target=source.stream,
-                    role="source",
-                    stream=source.stream,
+            for index, stream_name in enumerate(source.output_streams):
+                edges.append(
+                    GraphEdge(
+                        source=source.name,
+                        target=stream_name,
+                        role="source" if index == 0 else f"source:{index}",
+                        stream=stream_name,
+                    )
                 )
-            )
         for kernel in self.config.kernels:
             for index, input_name in enumerate(kernel.trigger_inputs):
                 edges.append(

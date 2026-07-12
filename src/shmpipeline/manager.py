@@ -96,12 +96,21 @@ class _SourceController:
     """Manager-owned thread controller for one configured source plugin."""
 
     def __init__(
-        self, *, stream: Any, source: Any, spec: Any, pause_event: Any
+        self,
+        *,
+        stream: Any,
+        source: Any,
+        spec: Any,
+        pause_event: Any,
+        writers: Mapping[str, Any] | None = None,
     ):
         self.stream = stream
         self.source = source
         self.spec = spec
         self._pause_event = pause_event
+        # When set, the source owns multiple output streams and publishes them
+        # itself through produce(); otherwise it returns one payload per read().
+        self._writers = dict(writers) if writers is not None else None
         self._stop_event = threading.Event()
         self._logger = get_logger(f"source.{spec.name}")
         self._lock = threading.Lock()
@@ -197,21 +206,37 @@ class _SourceController:
                     if self._stop_event.wait(self.spec.poll_interval):
                         return
                     continue
-                payload = _call_with_optional_timeout(
-                    self.source.read,
-                    timeout=self._read_timeout,
-                    executor=self._executor,
-                    label=f"source {self.spec.name!r} read()",
-                )
-                if payload is None:
-                    if self._stop_event.wait(self.spec.poll_interval):
-                        return
-                    continue
-                started = time.perf_counter()
-                self.stream.write(payload)
-                finished = time.perf_counter()
+                if self._writers is not None:
+                    started = time.perf_counter()
+                    produced = _call_with_optional_timeout(
+                        lambda: self.source.produce(self._writers),
+                        timeout=self._read_timeout,
+                        executor=self._executor,
+                        label=f"source {self.spec.name!r} produce()",
+                    )
+                    finished = time.perf_counter()
+                    if not produced:
+                        if self._stop_event.wait(self.spec.poll_interval):
+                            return
+                        continue
+                    count = int(produced)
+                else:
+                    payload = _call_with_optional_timeout(
+                        self.source.read,
+                        timeout=self._read_timeout,
+                        executor=self._executor,
+                        label=f"source {self.spec.name!r} read()",
+                    )
+                    if payload is None:
+                        if self._stop_event.wait(self.spec.poll_interval):
+                            return
+                        continue
+                    started = time.perf_counter()
+                    self.stream.write(payload)
+                    finished = time.perf_counter()
+                    count = 1
                 with self._lock:
-                    self._frames_written += 1
+                    self._frames_written += count
                     self._last_write_time = time.time()
                     self._last_write_duration_s = finished - started
         except BaseException as exc:
@@ -774,11 +799,20 @@ class PipelineManager:
                 shared_by_name,
                 self._streams,
             )
+            writers = (
+                {
+                    name: self._streams[name]
+                    for name in source_config.output_streams
+                }
+                if len(source_config.output_streams) > 1
+                else None
+            )
             controller = _SourceController(
                 stream=self._streams[source_config.stream],
                 source=source,
                 spec=source_config,
                 pause_event=self._pause_event,
+                writers=writers,
             )
             controller.start()
             self._sources[source_config.name] = controller

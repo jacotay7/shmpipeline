@@ -132,10 +132,13 @@ def config_to_document(config: PipelineConfig) -> Document:
         item = {
             "name": source.name,
             "kind": source.kind,
-            "stream": source.stream,
             "parameters": deepcopy(source.parameters),
             "poll_interval": source.poll_interval,
         }
+        if len(source.output_streams) > 1:
+            item["streams"] = list(source.output_streams)
+        else:
+            item["stream"] = source.stream
         if source.auxiliary:
             if all(
                 binding.alias == binding.name for binding in source.auxiliary

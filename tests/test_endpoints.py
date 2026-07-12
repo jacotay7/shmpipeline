@@ -151,6 +151,145 @@ def test_null_sink_percentiles_are_monotonic():
     )
 
 
+def _frame_set_config(shm_prefix, *, drop_probability=0.0, jitter_us=0.0):
+    return PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_cam0",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_cam1",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_cam2",
+                    "shape": [4],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_joined",
+                    "shape": [12],
+                    "dtype": "float32",
+                },
+            ],
+            "sources": [
+                {
+                    "name": "cams",
+                    "kind": "synthetic.frame_set",
+                    "streams": [
+                        f"{shm_prefix}_cam0",
+                        f"{shm_prefix}_cam1",
+                        f"{shm_prefix}_cam2",
+                    ],
+                    "parameters": {
+                        "pattern": "constant",
+                        "constant": 1.0,
+                        "rate_hz": 400.0,
+                        "jitter_us": jitter_us,
+                        "drop_probability": drop_probability,
+                    },
+                }
+            ],
+            "kernels": [
+                {
+                    "name": "join",
+                    "kind": "cpu.concatenate",
+                    "inputs": [
+                        f"{shm_prefix}_cam0",
+                        f"{shm_prefix}_cam1",
+                        f"{shm_prefix}_cam2",
+                    ],
+                    "trigger_policy": "all_new",
+                    "output": f"{shm_prefix}_joined",
+                    "parameters": {"axis": 0},
+                    "read_timeout": 0.2,
+                }
+            ],
+        }
+    )
+
+
+def test_synthetic_frame_set_publishes_synchronized_generations(shm_prefix):
+    config = _frame_set_config(shm_prefix, jitter_us=15.0)
+    manager = PipelineManager(config)
+    try:
+        manager.build()
+        manager.start()
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            manager.poll_events()
+            manager.raise_if_failed()
+            metrics = manager.status()["metrics"].get("join", {})
+            if metrics.get("frames_processed", 0) > 20:
+                break
+            time.sleep(1e-2)
+        status = manager.status()
+        source = status["sources"]["cams"]
+        metrics = source["plugin_metrics"]
+        writes = metrics["per_stream_writes"]
+        # Every camera receives the same number of writes each generation.
+        assert len(set(writes.values())) == 1
+        assert metrics["generations"] > 20
+        assert metrics["per_stream_drops"] == {name: 0 for name in writes}
+        # The three constant cameras concatenate into a length-12 vector.
+        np.testing.assert_allclose(
+            manager.get_stream(f"{shm_prefix}_joined").read(),
+            np.ones(12, dtype=np.float32),
+        )
+    finally:
+        manager.shutdown(force=True)
+
+
+def test_synthetic_frame_set_injects_drops(shm_prefix):
+    config = _frame_set_config(shm_prefix, drop_probability=1.0)
+    manager = PipelineManager(config)
+    try:
+        manager.build()
+        manager.start()
+        deadline = time.monotonic() + 1.5
+        while time.monotonic() < deadline:
+            manager.poll_events()
+            manager.raise_if_failed()
+            if manager.status()["sources"]["cams"]["frames_written"] > 20:
+                break
+            time.sleep(1e-2)
+        metrics = manager.status()["sources"]["cams"]["plugin_metrics"]
+        # With drop_probability 1.0 no camera is ever written.
+        assert all(
+            count == 0 for count in metrics["per_stream_writes"].values()
+        )
+        assert all(count > 0 for count in metrics["per_stream_drops"].values())
+    finally:
+        manager.shutdown(force=True)
+
+
+def test_synthetic_frame_set_requires_two_streams(shm_prefix):
+    import numpy as np
+
+    from shmpipeline.config import SharedMemoryConfig, SourceConfig
+
+    shared = {
+        f"{shm_prefix}_cam0": SharedMemoryConfig(
+            name=f"{shm_prefix}_cam0",
+            shape=(4,),
+            dtype=np.dtype("float32"),
+            storage="cpu",
+        )
+    }
+    single = SourceConfig(
+        name="cams",
+        kind="synthetic.frame_set",
+        stream=f"{shm_prefix}_cam0",
+    )
+    registry = get_default_registry()
+    with pytest.raises(ConfigValidationError, match="at least two"):
+        registry.validate_source(single, shared)
+
+
 def test_null_sink_plugin_metrics_track_consume_delay():
     from shmpipeline.config import SinkConfig
     from shmpipeline.sink import SinkContext

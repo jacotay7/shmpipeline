@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
@@ -71,14 +71,32 @@ class Source(_EndpointBase, ABC):
     def open(self) -> None:
         """Prepare the source before the runtime thread starts."""
 
-    @abstractmethod
     def read(self) -> Any | None:
         """Return the next payload for the configured stream.
 
-        Returning ``None`` indicates that no new payload is currently ready and
-        the runtime should sleep for the configured poll interval before trying
-        again.
+        Single-output sources implement this. Returning ``None`` indicates that
+        no new payload is currently ready and the runtime should sleep for the
+        configured poll interval before trying again.
         """
+        raise NotImplementedError(
+            f"source kind {self.kind!r} must implement read() or produce()"
+        )
+
+    def produce(self, writers: Mapping[str, Any]) -> int | None:
+        """Publish one coordinated generation across all output streams.
+
+        Multi-output sources (those declaring ``streams:``) override this to
+        write each stream in ``writers`` themselves — for example to apply
+        per-stream jitter or share one generated frame set. Return the number of
+        generations produced this cycle (usually ``1``), or ``0``/``None`` when
+        nothing was produced so the runtime sleeps for the poll interval.
+
+        ``writers`` maps each declared output stream name to its live handle.
+        """
+        raise NotImplementedError(
+            f"source kind {self.kind!r} declares multiple output streams but "
+            "does not implement produce()"
+        )
 
     def close(self) -> None:
         """Release any external resources owned by the source."""

@@ -148,6 +148,65 @@ def test_pipeline_config_accepts_sources_and_sinks():
     assert config.sinks[0].read_timeout == 0.25
 
 
+def test_source_config_accepts_multi_output_streams():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": "cam0", "shape": [4], "dtype": "float32"},
+                {"name": "cam1", "shape": [4], "dtype": "float32"},
+            ],
+            "sources": [
+                {
+                    "name": "cams",
+                    "kind": "synthetic.frame_set",
+                    "streams": ["cam0", "cam1"],
+                    "parameters": {"pattern": "constant"},
+                }
+            ],
+        }
+    )
+    source = config.sources[0]
+    assert source.output_streams == ("cam0", "cam1")
+    assert source.stream == "cam0"
+
+
+def test_source_config_rejects_stream_and_streams_together():
+    with pytest.raises(ConfigValidationError, match="either 'stream'"):
+        PipelineConfig.from_dict(
+            {
+                "shared_memory": [
+                    {"name": "cam0", "shape": [4], "dtype": "float32"},
+                ],
+                "sources": [
+                    {
+                        "name": "cams",
+                        "kind": "synthetic.frame_set",
+                        "stream": "cam0",
+                        "streams": ["cam0"],
+                    }
+                ],
+            }
+        )
+
+
+def test_source_config_rejects_duplicate_output_stream():
+    with pytest.raises(ConfigValidationError, match="same output stream"):
+        PipelineConfig.from_dict(
+            {
+                "shared_memory": [
+                    {"name": "cam0", "shape": [4], "dtype": "float32"},
+                ],
+                "sources": [
+                    {
+                        "name": "cams",
+                        "kind": "synthetic.frame_set",
+                        "streams": ["cam0", "cam0"],
+                    }
+                ],
+            }
+        )
+
+
 def test_pipeline_config_allows_source_and_sink_only_pipeline():
     config = PipelineConfig.from_dict(
         {

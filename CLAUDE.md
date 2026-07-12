@@ -230,7 +230,15 @@ pipelines run through `shmpipeline run` without an external entry-point package:
 | Kind | Type | Description |
 |------|------|-------------|
 | `synthetic.array` | source | Publishes deterministic `SyntheticPatternGenerator` frames into one CPU or GPU stream, self-paced to `rate_hz` (omit/`null` = unthrottled) |
+| `synthetic.frame_set` | source | **Multi-output.** One coordinator publishes a synchronized frame per `streams:` entry each generation, with per-camera `jitter_us` and optional `drop_probability` fault injection; reports per-stream writes/drops and generation skew |
 | `null.sink` | sink | Consumes and discards every publication on device (no host copy), with optional `device_delay_s` fake-hardware latency; reports consumed count and consume-time percentiles via `plugin_metrics` |
+
+**Multi-output sources.** A source declares `streams: [...]` (mutually exclusive
+with `stream:`, analogous to kernel `outputs:`) and overrides `produce(writers)`
+instead of `read()`. The manager hands it the live handles for all its output
+streams and it publishes each itself — which is how one hardware trigger drives
+several cameras with controlled inter-stream skew. `stream` always equals the
+first of `streams`.
 
 Endpoint plugins may override `plugin_metrics()` to surface counters the generic
 controller cannot know (consume-time percentiles, injected drops, skew); the

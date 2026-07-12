@@ -82,6 +82,31 @@ def test_config_to_document_emits_outputs_for_multi_output():
     assert "output" not in kernel
 
 
+def test_config_to_document_round_trips_multi_output_source():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": "cam0", "shape": [4], "dtype": "float32"},
+                {"name": "cam1", "shape": [4], "dtype": "float32"},
+            ],
+            "sources": [
+                {
+                    "name": "cams",
+                    "kind": "synthetic.frame_set",
+                    "streams": ["cam0", "cam1"],
+                    "parameters": {"pattern": "constant"},
+                }
+            ],
+        }
+    )
+    document = config_to_document(config)
+    source = document["sources"][0]
+    assert source["streams"] == ["cam0", "cam1"]
+    assert "stream" not in source
+    rebuilt = PipelineConfig.from_dict(document)
+    assert rebuilt.sources[0].output_streams == ("cam0", "cam1")
+
+
 def test_document_to_yaml_and_load_round_trip(tmp_path):
     document = config_to_document(_config())
     text = document_to_yaml(document)
