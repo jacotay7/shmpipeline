@@ -15,6 +15,7 @@ exercised honestly.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any, Mapping
 
@@ -107,8 +108,10 @@ class SyntheticFrameSetSource(Source):
                 storage=spec.storage,
                 gpu_device=spec.gpu_device,
             )
-        # Metrics protected by the base controller's snapshot cadence; ints and
-        # floats are updated atomically enough for a best-effort status view.
+        # Metrics are read by the manager's status thread while produce() runs
+        # in the source thread. Keep the whole generation update behind one
+        # lock so status never exposes a half-published frame set.
+        self._metrics_lock = threading.Lock()
         self._generation = 0
         self._writes = {name: 0 for name in self._stream_names}
         self._dropped = {name: 0 for name in self._stream_names}
@@ -138,42 +141,44 @@ class SyntheticFrameSetSource(Source):
             )
         # Token for this generation (1-based); shared by every camera write.
         token = self._generation + 1 if self._assign_frame_id else None
-        first_write: float | None = None
-        last_write: float | None = None
-        for name in self._stream_names:
-            if self._jitter_s > 0.0:
-                delay = float(self._rng.uniform(0.0, self._jitter_s))
-                if self._sleep(delay):
-                    return None
-            if (
-                self._drop_probability > 0.0
-                and float(self._rng.random()) < self._drop_probability
-            ):
-                self._dropped[name] += 1
-                continue
-            frame = self._generators[name].next_frame()
-            moment = time.perf_counter()
-            writers[name].write(frame, frame_id=token)
-            self._writes[name] += 1
-            first_write = moment if first_write is None else first_write
-            last_write = moment
-        self._generation += 1
-        if first_write is not None and last_write is not None:
-            self._last_skew_s = last_write - first_write
-            self._max_skew_s = max(self._max_skew_s, self._last_skew_s)
+        with self._metrics_lock:
+            first_write: float | None = None
+            last_write: float | None = None
+            for name in self._stream_names:
+                if self._jitter_s > 0.0:
+                    delay = float(self._rng.uniform(0.0, self._jitter_s))
+                    if self._sleep(delay):
+                        return None
+                if (
+                    self._drop_probability > 0.0
+                    and float(self._rng.random()) < self._drop_probability
+                ):
+                    self._dropped[name] += 1
+                    continue
+                frame = self._generators[name].next_frame()
+                moment = time.perf_counter()
+                writers[name].write(frame, frame_id=token)
+                self._writes[name] += 1
+                first_write = moment if first_write is None else first_write
+                last_write = moment
+            self._generation += 1
+            if first_write is not None and last_write is not None:
+                self._last_skew_s = last_write - first_write
+                self._max_skew_s = max(self._max_skew_s, self._last_skew_s)
         return 1
 
     def plugin_metrics(self) -> dict[str, Any]:
         """Report per-camera writes, drops, and generation skew."""
-        return {
-            "generations": self._generation,
-            "per_stream_writes": dict(self._writes),
-            "per_stream_drops": dict(self._dropped),
-            "requested_rate_hz": (
-                None if self._interval is None else 1.0 / self._interval
-            ),
-            "jitter_us": self._jitter_s * 1e6,
-            "drop_probability": self._drop_probability,
-            "last_skew_us": self._last_skew_s * 1e6,
-            "max_skew_us": self._max_skew_s * 1e6,
-        }
+        with self._metrics_lock:
+            return {
+                "generations": self._generation,
+                "per_stream_writes": dict(self._writes),
+                "per_stream_drops": dict(self._dropped),
+                "requested_rate_hz": (
+                    None if self._interval is None else 1.0 / self._interval
+                ),
+                "jitter_us": self._jitter_s * 1e6,
+                "drop_probability": self._drop_probability,
+                "last_skew_us": self._last_skew_s * 1e6,
+                "max_skew_us": self._max_skew_s * 1e6,
+            }
