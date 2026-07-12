@@ -16,7 +16,7 @@ authors = [
 dependencies = [
     "numba>=0.60",
     "numpy>=1.26,<3",
-    "pyshmem>=1.1.1,<2",
+    "pyshmem>=1.2.0,<2",
     "PyYAML>=6.0",
 ]
 keywords = ["shared-memory", "pipeline", "multiprocessing", "numba", "cuda"]

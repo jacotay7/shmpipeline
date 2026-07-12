@@ -30,6 +30,8 @@ class _FakeStream:
         self.gpu_enabled = gpu_enabled
         self.writes_started = 0
         self.writes_finished = 0
+        self.frame_id = 0
+        self.published_frame_id = None
 
     def read(self, safe=False):
         return self._array
@@ -44,7 +46,7 @@ class _FakeStream:
         raise TimeoutError
 
     @contextmanager
-    def write_view_locked(self):
+    def write_view_locked(self, *, frame_id=None):
         self.writes_started += 1
         try:
             yield self._array
@@ -52,6 +54,8 @@ class _FakeStream:
             raise
         else:
             self.writes_finished += 1
+            if frame_id is not None:
+                self.published_frame_id = frame_id
 
 
 def test_wait_for_trigger_returns_when_count_advances():
@@ -106,7 +110,7 @@ def test_locked_inputs_returns_ordered_multi_input_tuple():
     output = _FakeStream("out", np.zeros(2, dtype=np.float32))
     with runtime._locked_inputs_and_outputs(
         config, triggers, {}, {"out": output}
-    ) as (counts, values, auxiliary):
+    ) as (counts, values, auxiliary, _frame_ids):
         assert counts == {"a": 3, "b": 4}
         assert auxiliary == {}
         np.testing.assert_array_equal(values[0], [1.0])
@@ -165,7 +169,7 @@ def test_locked_inputs_and_outputs_reads_all_streams():
 
     with runtime._locked_inputs_and_outputs(
         config, trigger, {}, output_streams
-    ) as (count, trigger_input, aux):
+    ) as (count, trigger_input, aux, _frame_ids):
         assert count == 7
         np.testing.assert_array_equal(trigger_input, [1.0, 2.0])
         assert aux == {}
@@ -191,7 +195,7 @@ def test_locked_views_remain_protected_until_compute_scope_exits(shm_prefix):
     try:
         with runtime._locked_inputs_and_outputs(
             config, trigger, {}, {output_name: output}
-        ) as (count, trigger_input, _aux):
+        ) as (count, trigger_input, _aux, _frame_ids):
             assert count == 1
             np.testing.assert_array_equal(trigger_input, [1.0])
             attempts = []

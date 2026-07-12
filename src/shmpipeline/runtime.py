@@ -121,6 +121,25 @@ def _wait_for_triggers(
             continue
 
 
+def _matching_frame_decision(
+    tokens: Mapping[str, int],
+) -> tuple[int, int, tuple[str, ...]]:
+    """Resolve a ``matching_frame_id`` barrier against the current tokens.
+
+    Returns ``(target, skew_gap, laggards)`` where ``target`` is the newest
+    token across the triggers, ``skew_gap`` is the spread between newest and
+    oldest, and ``laggards`` names the triggers still behind ``target``. An
+    empty ``laggards`` means every trigger already carries ``target`` and the
+    kernel may combine them. Determinism (no arrival-order dependence) is why
+    this is a pure function of the token snapshot taken under the lock.
+    """
+    values = list(tokens.values())
+    target = max(values)
+    skew_gap = target - min(values)
+    laggards = tuple(name for name, token in tokens.items() if token < target)
+    return target, skew_gap, laggards
+
+
 @contextmanager
 def _locked_inputs_and_outputs(
     kernel_config: KernelConfig,
@@ -131,6 +150,7 @@ def _locked_inputs_and_outputs(
     ordered_locked_streams: tuple[tuple[str, Any], ...] | None = None,
     auxiliary_inputs: dict[str, Any] | None = None,
     auxiliary_cache: dict[str, tuple[Any, Any]] | None = None,
+    track_frame_id: bool = False,
 ):
     """Yield inputs and output views while all required locks are held.
 
@@ -183,12 +203,24 @@ def _locked_inputs_and_outputs(
                 cache=auxiliary_cache,
                 cache_key=name,
             )
+        # Read the propagated tokens inside the same lock scope that snapshots
+        # the payloads, so a token can never be torn from its value.
+        trigger_frame_ids = (
+            {name: stream.frame_id for name, stream in trigger_streams.items()}
+            if track_frame_id
+            else {}
+        )
         current_count = (
             next(iter(current_counts.values()))
             if len(current_counts) == 1
             else current_counts
         )
-        yield current_count, trigger_input, auxiliary_inputs
+        yield (
+            current_count,
+            trigger_input,
+            auxiliary_inputs,
+            trigger_frame_ids,
+        )
 
 
 def _read_worker_input(
@@ -220,11 +252,18 @@ def _compute_and_publish_outputs(
     auxiliary_inputs: Mapping[str, Any],
     ordered_output_names: tuple[str, ...],
     output_streams: dict[str, Any],
+    frame_id: int | None = None,
 ) -> None:
-    """Compute directly into exception-safe pyshmem output transactions."""
+    """Compute directly into exception-safe pyshmem output transactions.
+
+    ``frame_id`` propagates a publication token onto every output in the same
+    locked transaction; ``None`` leaves each output's token unchanged.
+    """
     with ExitStack() as stack:
         output_views = [
-            stack.enter_context(output_streams[name].write_view_locked())
+            stack.enter_context(
+                output_streams[name].write_view_locked(frame_id=frame_id)
+            )
             for name in ordered_output_names
         ]
         kernel.compute_into_multiple(
@@ -310,6 +349,13 @@ def run_kernel_process(
         completion_times: deque[float] = deque(maxlen=ROLLING_METRICS_WINDOW)
         next_metrics_emit = time.monotonic() + 0.25
         started_at = time.monotonic()
+        track_frame_id = kernel_config.tracks_frame_id
+        matching = kernel_config.requires_matching_frame_id
+        sync = kernel_config.synchronization
+        skew_started_at: float | None = None
+        matching_skew_events = 0
+        matching_skipped_generations = 0
+        matching_timeouts = 0
         while not stop_event.is_set():
             if pause_event.is_set():
                 time.sleep(kernel_config.pause_sleep)
@@ -334,10 +380,12 @@ def run_kernel_process(
                     ordered_locked_streams=ordered_locked_streams,
                     auxiliary_inputs=auxiliary_inputs,
                     auxiliary_cache=auxiliary_cache,
+                    track_frame_id=track_frame_id,
                 ) as (
                     current_counts,
                     trigger_input,
                     auxiliary_inputs,
+                    trigger_frame_ids,
                 ):
                     if not isinstance(current_counts, Mapping):
                         current_counts = {kernel_config.input: current_counts}
@@ -352,6 +400,47 @@ def run_kernel_process(
                     if not should_compute:
                         continue
 
+                    frame_id = None
+                    if matching:
+                        target, skew_gap, laggards = _matching_frame_decision(
+                            trigger_frame_ids
+                        )
+                        if not laggards:
+                            frame_id = target or None
+                            skew_started_at = None
+                        else:
+                            matching_skew_events += 1
+                            now_m = time.monotonic()
+                            if skew_started_at is None:
+                                skew_started_at = now_m
+                            waited = now_m - skew_started_at
+                            give_up = skew_gap > sync.max_skew_generations or (
+                                sync.max_wait_s is not None
+                                and waited >= sync.max_wait_s
+                            )
+                            if give_up:
+                                # Abandon the mismatched generation entirely so
+                                # a failed branch cannot stall the loop.
+                                matching_timeouts += 1
+                                last_seen_counts = dict(current_counts)
+                                skew_started_at = None
+                            else:
+                                # drop_older: consume the lagging branches and
+                                # wait for their next (newer) publication.
+                                matching_skipped_generations += 1
+                                for name in laggards:
+                                    last_seen_counts[name] = current_counts[
+                                        name
+                                    ]
+                            continue
+                    elif track_frame_id:
+                        token = (
+                            max(trigger_frame_ids.values())
+                            if trigger_frame_ids
+                            else 0
+                        )
+                        frame_id = token or None
+
                     compute_started = time.perf_counter()
                     _compute_and_publish_outputs(
                         kernel,
@@ -359,6 +448,7 @@ def run_kernel_process(
                         auxiliary_inputs,
                         kernel_config.all_outputs,
                         output_streams,
+                        frame_id=frame_id,
                     )
                     last_seen_counts = dict(current_counts)
             except TimeoutError:
@@ -395,6 +485,11 @@ def run_kernel_process(
                             kernel_config.output
                         ].count,
                         "metrics_window": len(exec_samples_s),
+                        "frame_sync_skew_events": matching_skew_events,
+                        "frame_sync_skipped_generations": (
+                            matching_skipped_generations
+                        ),
+                        "frame_sync_timeouts": matching_timeouts,
                     },
                 )
                 next_metrics_emit = now + 0.25

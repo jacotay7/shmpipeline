@@ -114,6 +114,18 @@ def config_to_document(config: PipelineConfig) -> Document:
             item["output"] = kernel.output
         if kernel.operation is not None:
             item["operation"] = kernel.operation
+        if kernel.propagate_frame_id:
+            item["propagate_frame_id"] = True
+        if kernel.synchronization is not None:
+            sync = kernel.synchronization
+            sync_item: dict[str, Any] = {
+                "mode": sync.mode,
+                "on_skew": sync.on_skew,
+                "max_skew_generations": sync.max_skew_generations,
+            }
+            if sync.max_wait_s is not None:
+                sync_item["max_wait_s"] = sync.max_wait_s
+            item["synchronization"] = sync_item
         if kernel.auxiliary:
             if all(
                 binding.alias == binding.name for binding in kernel.auxiliary

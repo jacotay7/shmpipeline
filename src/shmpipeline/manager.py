@@ -1049,6 +1049,15 @@ class PipelineManager:
                         "runtime_s": event.get("runtime_s"),
                         "last_output_count": event.get("last_output_count"),
                         "metrics_window": event.get("metrics_window"),
+                        "frame_sync_skew_events": event.get(
+                            "frame_sync_skew_events", 0
+                        ),
+                        "frame_sync_skipped_generations": event.get(
+                            "frame_sync_skipped_generations", 0
+                        ),
+                        "frame_sync_timeouts": event.get(
+                            "frame_sync_timeouts", 0
+                        ),
                     }
                     runtime = self._worker_runtime.setdefault(
                         event["kernel"],

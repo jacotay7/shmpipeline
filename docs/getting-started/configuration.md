@@ -85,8 +85,49 @@ them advance, acquires all input/output locks in sorted order, and rechecks the
 counts before computing. This guarantees that every concatenation uses a new
 value from every input. Publication counts do not by themselves prove that the
 values share an external hardware frame ID if upstream stages dropped different
-frames; applications needing that stronger guarantee must propagate and check
-a hardware sequence token.
+frames; applications needing that stronger guarantee use the `frame_id` token
+described next.
+
+## Frame-id tokens and matching_frame_id
+
+pyshmem publishes an optional uint64 `frame_id` token atomically with each
+write. shmpipeline uses it to establish cross-branch frame identity — a
+coordinated source (`synthetic.frame_set`) stamps the same token on every
+camera of one hardware generation, and a fan-in only combines inputs carrying
+the same token:
+
+```yaml
+- name: synchronized_join
+  kind: cpu.concatenate
+  inputs: [wfs0_slopes, wfs1_slopes, wfs2_slopes]
+  trigger_policy: all_new
+  output: combined_slopes
+  synchronization:
+    mode: matching_frame_id     # combine only equal frame_id tokens
+    max_skew_generations: 16    # give up once branches skew this far
+    max_wait_s: 0.010           # ...or after this long (alias: timeout)
+    on_skew: drop_older         # advance past lagging generations
+  parameters:
+    axis: 0
+```
+
+Under `matching_frame_id` the worker reads all trigger tokens in the same lock
+scope that snapshots the payloads, and:
+
+- computes only when every trigger carries the same token, propagating that
+  token to the output;
+- when branches skew, applies `on_skew: drop_older` — it advances past the
+  lagging branches and waits for their next publication, bounded by
+  `max_skew_generations` and `max_wait_s` so a dead branch cannot stall the
+  loop forever;
+- reports `frame_sync_skew_events`, `frame_sync_skipped_generations`, and
+  `frame_sync_timeouts` in the worker metrics.
+
+Any single-input kernel can carry the token forward with `propagate_frame_id:
+true`, which copies its trigger's token to every output in the same locked
+publication. Token handling is entirely opt-in — a kernel with neither
+`matching_frame_id` nor `propagate_frame_id` never touches the token metadata,
+so the default hot path is unchanged.
 
 ## Auxiliary inputs
 

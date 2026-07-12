@@ -88,6 +88,10 @@ class SyntheticFrameSetSource(Source):
         self._interval = None if rate is None else 1.0 / float(rate)
         self._jitter_s = float(parameters.get("jitter_us", 0.0)) * 1e-6
         self._drop_probability = float(parameters.get("drop_probability", 0.0))
+        # Assign the same monotonically increasing frame_id token to every
+        # camera in one generation so a downstream matching_frame_id barrier
+        # can combine images from the same hardware trigger.
+        self._assign_frame_id = bool(parameters.get("assign_frame_id", True))
         self._rng = np.random.default_rng(int(parameters.get("seed", 0)))
         self._next_deadline: float | None = None
         self._generators: dict[str, SyntheticPatternGenerator] = {}
@@ -132,6 +136,8 @@ class SyntheticFrameSetSource(Source):
             self._next_deadline = max(
                 self._next_deadline + self._interval, time.perf_counter()
             )
+        # Token for this generation (1-based); shared by every camera write.
+        token = self._generation + 1 if self._assign_frame_id else None
         first_write: float | None = None
         last_write: float | None = None
         for name in self._stream_names:
@@ -147,7 +153,7 @@ class SyntheticFrameSetSource(Source):
                 continue
             frame = self._generators[name].next_frame()
             moment = time.perf_counter()
-            writers[name].write(frame)
+            writers[name].write(frame, frame_id=token)
             self._writes[name] += 1
             first_write = moment if first_write is None else first_write
             last_write = moment

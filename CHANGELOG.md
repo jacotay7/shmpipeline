@@ -34,6 +34,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
   exclusive with `stream:`); such a source overrides `produce(writers)` and
   publishes every output stream itself, so one coordinator can drive several
   streams with controlled per-stream jitter and optional drop injection.
+- **Frame-id propagation and `matching_frame_id` synchronization.** Kernels can
+  gate a multi-input fan-in on pyshmem's `frame_id` token via
+  `synchronization: {mode: matching_frame_id, max_skew_generations, max_wait_s,
+  on_skew: drop_older}`, so a barrier combines only inputs from the same
+  generation, drops lagging branches deterministically, and reports skew/skip/
+  timeout counters. `synthetic.frame_set` stamps one token per generation across
+  all cameras, and any kernel can forward the token with `propagate_frame_id:
+  true`. Token handling is fully opt-in; the default worker path is unchanged.
+  Requires `pyshmem>=1.2.0`.
 - **`plugin_metrics()`** hook on source/sink plugins; the manager merges the
   result into each endpoint status snapshot. `_SinkController` additionally
   reports `missed_writes` (publication-count gaps) for every sink.

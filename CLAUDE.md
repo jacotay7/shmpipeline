@@ -71,6 +71,14 @@ kernels:
     input: input_stream
     output: output_stream   # single output
     # outputs: [out_a, out_b]   # multi-output form (mutually exclusive with output)
+    # inputs: [a, b]            # multi-input form (mutually exclusive with input)
+    # trigger_policy: all_new   # any_new (default) | all_new
+    # propagate_frame_id: true  # copy trigger frame_id token to outputs
+    # synchronization:          # multi-input frame-id barrier (see below)
+    #   mode: matching_frame_id
+    #   max_skew_generations: 16
+    #   max_wait_s: 0.010
+    #   on_skew: drop_older
     # auxiliary: {alias: stream_name}  # or list form
     parameters: {factor: 2.0}
     read_timeout: 1.0       # seconds

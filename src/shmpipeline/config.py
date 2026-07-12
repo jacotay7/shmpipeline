@@ -272,6 +272,73 @@ class AuxiliaryBinding:
     name: str
 
 
+_SYNC_MODES = ("count", "matching_frame_id")
+_SYNC_ON_SKEW = ("drop_older",)
+
+
+@dataclass(frozen=True)
+class SynchronizationConfig:
+    """Cross-input synchronization policy for a multi-input kernel.
+
+    ``mode`` ``"count"`` (default) fires on publication counts alone. Mode
+    ``"matching_frame_id"`` additionally requires every trigger to carry the
+    same propagated ``frame_id`` token before the kernel runs, so a fan-in only
+    combines inputs from the same hardware generation. When branches skew, the
+    ``on_skew`` policy (``drop_older``) advances past the lagging generations,
+    bounded by ``max_skew_generations`` and ``max_wait_s`` so a stalled branch
+    cannot block forever.
+    """
+
+    mode: str = "count"
+    on_skew: str = "drop_older"
+    max_skew_generations: int = 16
+    max_wait_s: float | None = None
+
+    @classmethod
+    def from_dict(
+        cls, raw: Mapping[str, Any], *, context: str
+    ) -> "SynchronizationConfig":
+        """Build and validate a synchronization policy from a mapping."""
+        data = _expect_mapping(raw, context=context)
+        _reject_unexpected_keys(
+            data,
+            context=context,
+            allowed={
+                "mode",
+                "on_skew",
+                "max_skew_generations",
+                "max_wait_s",
+                "timeout",
+            },
+        )
+        mode = str(data.get("mode", "count")).strip().lower()
+        if mode not in _SYNC_MODES:
+            raise ConfigValidationError(
+                f"{context}: mode must be one of {_SYNC_MODES}"
+            )
+        on_skew = str(data.get("on_skew", "drop_older")).strip().lower()
+        if on_skew not in _SYNC_ON_SKEW:
+            raise ConfigValidationError(
+                f"{context}: on_skew must be one of {_SYNC_ON_SKEW}"
+            )
+        max_skew = data.get("max_skew_generations", 16)
+        if not isinstance(max_skew, int) or max_skew < 1:
+            raise ConfigValidationError(
+                f"{context}: max_skew_generations must be a positive integer"
+            )
+        # 'timeout' is accepted as an alias for max_wait_s to match the plan.
+        max_wait = data.get("max_wait_s", data.get("timeout"))
+        max_wait_s = _normalize_optional_positive_float(
+            max_wait, context=f"{context} max_wait_s"
+        )
+        return cls(
+            mode=mode,
+            on_skew=on_skew,
+            max_skew_generations=int(max_skew),
+            max_wait_s=max_wait_s,
+        )
+
+
 @dataclass(frozen=True)
 class KernelConfig:
     """Configuration for one compute kernel in the pipeline.
@@ -294,6 +361,8 @@ class KernelConfig:
     outputs: tuple[str, ...] = field(default_factory=tuple)
     inputs: tuple[str, ...] = field(default_factory=tuple)
     trigger_policy: str = "any_new"
+    synchronization: SynchronizationConfig | None = None
+    propagate_frame_id: bool = False
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "KernelConfig":
@@ -324,6 +393,8 @@ class KernelConfig:
                 "pause_sleep",
                 "poll_interval",
                 "trigger_policy",
+                "synchronization",
+                "propagate_frame_id",
             },
         )
         name = _normalize_name(data.get("name"), context="kernel name")
@@ -390,6 +461,13 @@ class KernelConfig:
                 f"trigger_policy for kernel {name!r} must be either "
                 "'any_new' or 'all_new'"
             )
+        synchronization = None
+        if "synchronization" in data:
+            synchronization = SynchronizationConfig.from_dict(
+                data["synchronization"],
+                context=f"synchronization for kernel {name!r}",
+            )
+        propagate_frame_id = bool(data.get("propagate_frame_id", False))
         return cls(
             name=name,
             kind=kind,
@@ -404,6 +482,8 @@ class KernelConfig:
             outputs=tuple(outputs),
             inputs=tuple(inputs),
             trigger_policy=trigger_policy,
+            synchronization=synchronization,
+            propagate_frame_id=propagate_frame_id,
         )
 
     def __post_init__(self) -> None:
@@ -414,6 +494,15 @@ class KernelConfig:
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot declare the same trigger input "
                 "stream more than once"
+            )
+        if (
+            self.synchronization is not None
+            and self.synchronization.mode == "matching_frame_id"
+            and self.trigger_policy != "all_new"
+        ):
+            raise ConfigValidationError(
+                f"kernel {self.name!r} synchronization mode "
+                "'matching_frame_id' requires trigger_policy 'all_new'"
             )
         if len(set(all_outputs)) != len(all_outputs):
             raise ConfigValidationError(
@@ -453,6 +542,22 @@ class KernelConfig:
     def trigger_inputs(self) -> tuple[str, ...]:
         """Return every dynamic trigger stream in declaration order."""
         return self.inputs if self.inputs else (self.input,)
+
+    @property
+    def requires_matching_frame_id(self) -> bool:
+        """Return whether this kernel gates on matching frame-id tokens."""
+        return (
+            self.synchronization is not None
+            and self.synchronization.mode == "matching_frame_id"
+        )
+
+    @property
+    def tracks_frame_id(self) -> bool:
+        """Return whether the worker reads/propagates frame-id tokens.
+
+        Gated so the default hot path never touches the token metadata.
+        """
+        return self.propagate_frame_id or self.requires_matching_frame_id
 
     @property
     def all_outputs(self) -> tuple[str, ...]:
