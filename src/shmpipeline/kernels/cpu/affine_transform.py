@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 from ctypes.util import find_library
+from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
@@ -25,12 +26,15 @@ def _load_openblas_set_num_threads():
     if _OPENBLAS_LIBRARY is False:
         return None
 
-    candidates = (
+    candidates = [
         find_library("openblas"),
         find_library("blas"),
         "libopenblas.dylib",
         "libblas.dylib",
-    )
+    ]
+    numpy_root = Path(np.__file__).resolve().parent.parent
+    candidates.extend(sorted((numpy_root / "numpy.libs").glob("*openblas*")))
+    candidates.extend(sorted((numpy_root / ".libs").glob("*openblas*")))
     for candidate in candidates:
         if not candidate:
             continue
@@ -38,7 +42,16 @@ def _load_openblas_set_num_threads():
             library = ctypes.CDLL(candidate)
         except OSError:
             continue
-        setter = getattr(library, "openblas_set_num_threads", None)
+        setter = None
+        for symbol in (
+            "openblas_set_num_threads",
+            "openblas_set_num_threads64_",
+            "scipy_openblas_set_num_threads64_",
+            "scipy_openblas_set_num_threads_64_",
+        ):
+            setter = getattr(library, symbol, None)
+            if setter is not None:
+                break
         if setter is None:
             continue
         setter.argtypes = [ctypes.c_int]

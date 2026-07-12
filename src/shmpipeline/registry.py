@@ -23,6 +23,7 @@ _TORCH_AVAILABLE = find_spec("torch") is not None
 _DEFAULT_CPU_KINDS = (
     "cpu.add_constant",
     "cpu.affine_transform",
+    "cpu.concatenate",
     "cpu.copy",
     "cpu.custom_operation",
     "cpu.elementwise_add",
@@ -37,6 +38,7 @@ _DEFAULT_CPU_KINDS = (
     "cpu.scale_offset",
     "cpu.shack_hartmann_centroid",
     "cpu.spot_centroid",
+    "cpu.tip_tilt_controller",
     "cpu.centroid",
 )
 
@@ -44,6 +46,7 @@ if _TORCH_AVAILABLE:
     _DEFAULT_GPU_KINDS = (
         "gpu.add_constant",
         "gpu.affine_transform",
+        "gpu.concatenate",
         "gpu.copy",
         "gpu.custom_operation",
         "gpu.elementwise_add",
@@ -56,6 +59,9 @@ if _TORCH_AVAILABLE:
         "gpu.scale",
         "gpu.scale_offset",
         "gpu.shack_hartmann_centroid",
+        "gpu.spot_centroid",
+        "gpu.tip_tilt_controller",
+        "gpu.tomographic_controller",
     )
 
 
@@ -63,6 +69,7 @@ def _load_default_cpu_kernel(kind: str) -> type[Kernel]:
     from shmpipeline.kernels.cpu import (
         AddConstantCpuKernel,
         AffineTransformCpuKernel,
+        ConcatenateCpuKernel,
         CopyCpuKernel,
         CustomOperationCpuKernel,
         ElementwiseAddCpuKernel,
@@ -77,11 +84,13 @@ def _load_default_cpu_kernel(kind: str) -> type[Kernel]:
         ScaleOffsetCpuKernel,
         ShackHartmannCentroidCpuKernel,
         SpotCentroidCpuKernel,
+        TipTiltControllerCpuKernel,
     )
 
     _cpu_map: dict[str, type[Kernel]] = {
         AddConstantCpuKernel.kind: AddConstantCpuKernel,
         AffineTransformCpuKernel.kind: AffineTransformCpuKernel,
+        ConcatenateCpuKernel.kind: ConcatenateCpuKernel,
         CopyCpuKernel.kind: CopyCpuKernel,
         CustomOperationCpuKernel.kind: CustomOperationCpuKernel,
         ElementwiseAddCpuKernel.kind: ElementwiseAddCpuKernel,
@@ -97,6 +106,7 @@ def _load_default_cpu_kernel(kind: str) -> type[Kernel]:
         ShackHartmannCentroidCpuKernel.kind: ShackHartmannCentroidCpuKernel,
         "cpu.centroid": ShackHartmannCentroidCpuKernel,
         SpotCentroidCpuKernel.kind: SpotCentroidCpuKernel,
+        TipTiltControllerCpuKernel.kind: TipTiltControllerCpuKernel,
     }
     result = _cpu_map.get(kind)
     if result is None:
@@ -108,6 +118,7 @@ def _load_default_gpu_kernel(kind: str) -> type[Kernel]:
     from shmpipeline.kernels.gpu import (
         AddConstantGpuKernel,
         AffineTransformGpuKernel,
+        ConcatenateGpuKernel,
         CopyGpuKernel,
         CustomOperationGpuKernel,
         ElementwiseAddGpuKernel,
@@ -120,11 +131,15 @@ def _load_default_gpu_kernel(kind: str) -> type[Kernel]:
         ScaleGpuKernel,
         ScaleOffsetGpuKernel,
         ShackHartmannCentroidGpuKernel,
+        SpotCentroidGpuKernel,
+        TipTiltControllerGpuKernel,
+        TomographicControllerGpuKernel,
     )
 
     return {
         AddConstantGpuKernel.kind: AddConstantGpuKernel,
         AffineTransformGpuKernel.kind: AffineTransformGpuKernel,
+        ConcatenateGpuKernel.kind: ConcatenateGpuKernel,
         CopyGpuKernel.kind: CopyGpuKernel,
         CustomOperationGpuKernel.kind: CustomOperationGpuKernel,
         ElementwiseAddGpuKernel.kind: ElementwiseAddGpuKernel,
@@ -137,6 +152,9 @@ def _load_default_gpu_kernel(kind: str) -> type[Kernel]:
         ScaleGpuKernel.kind: ScaleGpuKernel,
         ScaleOffsetGpuKernel.kind: ScaleOffsetGpuKernel,
         ShackHartmannCentroidGpuKernel.kind: ShackHartmannCentroidGpuKernel,
+        SpotCentroidGpuKernel.kind: SpotCentroidGpuKernel,
+        TipTiltControllerGpuKernel.kind: TipTiltControllerGpuKernel,
+        TomographicControllerGpuKernel.kind: TomographicControllerGpuKernel,
     }[kind]
 
 

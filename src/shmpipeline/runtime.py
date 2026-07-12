@@ -82,6 +82,45 @@ def _wait_for_trigger(
         return None
 
 
+def _wait_for_triggers(
+    streams: Mapping[str, Any],
+    previous_counts: Mapping[str, float],
+    *,
+    policy: str,
+    timeout: float,
+    poll_interval: float = 1e-5,
+) -> dict[str, float] | None:
+    """Wait until any or all dynamic input generations have advanced."""
+    deadline = time.monotonic() + timeout
+    while True:
+        counts = {name: stream.count for name, stream in streams.items()}
+        advanced = {
+            name: counts[name] > previous_counts[name] for name in streams
+        }
+        if (policy == "all_new" and all(advanced.values())) or (
+            policy == "any_new" and any(advanced.values())
+        ):
+            return counts
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.0:
+            return None
+        pending = [
+            name
+            for name in streams
+            if not advanced[name] or policy == "any_new"
+        ]
+        name = pending[0]
+        wait_timeout = min(remaining, max(poll_interval, 0.01))
+        try:
+            streams[name].wait_for_count(
+                after=previous_counts[name],
+                timeout=wait_timeout,
+                poll_interval=poll_interval,
+            )
+        except TimeoutError:
+            continue
+
+
 @contextmanager
 def _locked_inputs_and_outputs(
     kernel_config: KernelConfig,
@@ -103,9 +142,13 @@ def _locked_inputs_and_outputs(
     The direct `safe=False` handle path can observe stale CUDA IPC contents
     across processes because it bypasses pyshmem's synchronization/copy logic.
     """
+    if isinstance(trigger_stream, Mapping):
+        trigger_streams = dict(trigger_stream)
+    else:
+        trigger_streams = {kernel_config.input: trigger_stream}
     if ordered_locked_streams is None:
         locked_streams = {
-            kernel_config.input: trigger_stream,
+            **trigger_streams,
             **auxiliary_streams,
             **output_streams,
         }
@@ -120,8 +163,16 @@ def _locked_inputs_and_outputs(
         timeout=kernel_config.read_timeout,
         poll_interval=kernel_config.poll_interval,
     ):
-        current_count = trigger_stream.count
-        trigger_input = _read_worker_input(trigger_stream)
+        current_counts = {
+            name: stream.count for name, stream in trigger_streams.items()
+        }
+        trigger_values = tuple(
+            _read_worker_input(trigger_streams[name])
+            for name in kernel_config.trigger_inputs
+        )
+        trigger_input = (
+            trigger_values[0] if len(trigger_values) == 1 else trigger_values
+        )
         if auxiliary_inputs is None:
             auxiliary_inputs = {}
         else:
@@ -132,6 +183,11 @@ def _locked_inputs_and_outputs(
                 cache=auxiliary_cache,
                 cache_key=name,
             )
+        current_count = (
+            next(iter(current_counts.values()))
+            if len(current_counts) == 1
+            else current_counts
+        )
         yield current_count, trigger_input, auxiliary_inputs
 
 
@@ -205,7 +261,10 @@ def run_kernel_process(
     if registry is None:
         registry = get_default_registry()
     kernel = registry.create(kernel_config, shared_by_name)
-    trigger_stream = _open_stream(shared_by_name[kernel_config.input])
+    trigger_streams = {
+        name: _open_stream(shared_by_name[name])
+        for name in kernel_config.trigger_inputs
+    }
     auxiliary_streams = {
         binding.alias: _open_stream(shared_by_name[binding.name])
         for binding in kernel_config.auxiliary
@@ -217,7 +276,7 @@ def run_kernel_process(
     ordered_locked_streams = tuple(
         sorted(
             {
-                kernel_config.input: trigger_stream,
+                **trigger_streams,
                 **auxiliary_streams,
                 **output_streams,
             }.items(),
@@ -243,7 +302,9 @@ def run_kernel_process(
     )
 
     try:
-        last_seen_count = trigger_stream.count
+        last_seen_counts = {
+            name: stream.count for name, stream in trigger_streams.items()
+        }
         frames_processed = 0
         exec_samples_s: deque[float] = deque(maxlen=ROLLING_METRICS_WINDOW)
         completion_times: deque[float] = deque(maxlen=ROLLING_METRICS_WINDOW)
@@ -254,30 +315,41 @@ def run_kernel_process(
                 time.sleep(kernel_config.pause_sleep)
                 continue
 
-            triggered_count = _wait_for_trigger(
-                trigger_stream,
-                last_seen_count,
+            triggered_counts = _wait_for_triggers(
+                trigger_streams,
+                last_seen_counts,
+                policy=kernel_config.trigger_policy,
                 timeout=kernel_config.read_timeout,
                 poll_interval=kernel_config.poll_interval,
             )
-            if triggered_count is None:
+            if triggered_counts is None:
                 continue
 
             try:
                 with _locked_inputs_and_outputs(
                     kernel_config,
-                    trigger_stream,
+                    trigger_streams,
                     auxiliary_streams,
                     output_streams,
                     ordered_locked_streams=ordered_locked_streams,
                     auxiliary_inputs=auxiliary_inputs,
                     auxiliary_cache=auxiliary_cache,
                 ) as (
-                    current_count,
+                    current_counts,
                     trigger_input,
                     auxiliary_inputs,
                 ):
-                    if current_count <= last_seen_count:
+                    if not isinstance(current_counts, Mapping):
+                        current_counts = {kernel_config.input: current_counts}
+                    advanced = {
+                        name: current_counts[name] > last_seen_counts[name]
+                        for name in trigger_streams
+                    }
+                    if kernel_config.trigger_policy == "all_new":
+                        should_compute = all(advanced.values())
+                    else:
+                        should_compute = any(advanced.values())
+                    if not should_compute:
                         continue
 
                     compute_started = time.perf_counter()
@@ -288,7 +360,7 @@ def run_kernel_process(
                         kernel_config.all_outputs,
                         output_streams,
                     )
-                    last_seen_count = current_count
+                    last_seen_counts = dict(current_counts)
             except TimeoutError:
                 continue
 
@@ -343,7 +415,8 @@ def run_kernel_process(
         )
         raise
     finally:
-        trigger_stream.close()
+        for stream in trigger_streams.values():
+            stream.close()
         for stream in auxiliary_streams.values():
             stream.close()
         for stream in output_streams.values():

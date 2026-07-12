@@ -214,6 +214,50 @@ def _make_affine_pipeline_config(shm_prefix: str):
     )
 
 
+def test_multi_input_concatenate_waits_for_all_new_streams(shm_prefix):
+    names = {
+        "a": f"{shm_prefix}_a",
+        "b": f"{shm_prefix}_b",
+        "out": f"{shm_prefix}_out",
+    }
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": names["a"], "shape": [2], "dtype": "float32"},
+                {"name": names["b"], "shape": [2], "dtype": "float32"},
+                {"name": names["out"], "shape": [4], "dtype": "float32"},
+            ],
+            "kernels": [
+                {
+                    "name": "join",
+                    "kind": "cpu.concatenate",
+                    "inputs": [names["a"], names["b"]],
+                    "trigger_policy": "all_new",
+                    "output": names["out"],
+                    "read_timeout": 0.05,
+                }
+            ],
+        }
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+    try:
+        stream_a = manager.get_stream(names["a"])
+        stream_b = manager.get_stream(names["b"])
+        output = manager.get_stream(names["out"])
+        baseline = output.count
+        stream_a.write(np.array([1.0, 2.0], dtype=np.float32))
+        time.sleep(0.1)
+        assert output.count == baseline
+
+        stream_b.write(np.array([3.0, 4.0], dtype=np.float32))
+        observed = _wait_for_next_write(output, baseline, manager=manager)
+        np.testing.assert_array_equal(observed, [1.0, 2.0, 3.0, 4.0])
+    finally:
+        manager.shutdown(force=True)
+
+
 def _make_affine_pipeline_config_for_storage(shm_prefix: str, *, storage: str):
     return PipelineConfig.from_dict(
         {

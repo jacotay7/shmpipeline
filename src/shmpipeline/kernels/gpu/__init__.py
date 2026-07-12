@@ -4,6 +4,7 @@ from shmpipeline.kernels.gpu.add_constant import AddConstantGpuKernel
 from shmpipeline.kernels.gpu.affine_transform import AffineTransformGpuKernel
 from shmpipeline.kernels.gpu.base import GpuKernel
 from shmpipeline.kernels.gpu.centroid import ShackHartmannCentroidGpuKernel
+from shmpipeline.kernels.gpu.concatenate import ConcatenateGpuKernel
 from shmpipeline.kernels.gpu.copy import CopyGpuKernel
 from shmpipeline.kernels.gpu.custom_operation import CustomOperationGpuKernel
 from shmpipeline.kernels.gpu.elementwise_add import ElementwiseAddGpuKernel
@@ -21,10 +22,16 @@ from shmpipeline.kernels.gpu.leaky_integrator import LeakyIntegratorGpuKernel
 from shmpipeline.kernels.gpu.raise_error import RaiseErrorGpuKernel
 from shmpipeline.kernels.gpu.scale import ScaleGpuKernel
 from shmpipeline.kernels.gpu.scale_offset import ScaleOffsetGpuKernel
+from shmpipeline.kernels.gpu.spot_centroid import SpotCentroidGpuKernel
+from shmpipeline.kernels.gpu.tomographic_controller import (
+    TipTiltControllerGpuKernel,
+    TomographicControllerGpuKernel,
+)
 
 __all__ = [
     "AddConstantGpuKernel",
     "AffineTransformGpuKernel",
+    "ConcatenateGpuKernel",
     "CopyGpuKernel",
     "CustomOperationGpuKernel",
     "ElementwiseAddGpuKernel",
@@ -37,5 +44,8 @@ __all__ = [
     "RaiseErrorGpuKernel",
     "ScaleGpuKernel",
     "ScaleOffsetGpuKernel",
+    "SpotCentroidGpuKernel",
+    "TipTiltControllerGpuKernel",
+    "TomographicControllerGpuKernel",
     "ShackHartmannCentroidGpuKernel",
 ]

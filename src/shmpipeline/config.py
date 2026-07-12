@@ -276,7 +276,7 @@ class AuxiliaryBinding:
 class KernelConfig:
     """Configuration for one compute kernel in the pipeline.
 
-    Each kernel consumes one trigger input stream, may read zero or more
+    Each kernel consumes one or more trigger input streams, may read zero or more
     auxiliary streams, and writes one output stream. The `kind` field resolves
     through the active :class:`shmpipeline.registry.KernelRegistry`.
     """
@@ -292,15 +292,16 @@ class KernelConfig:
     pause_sleep: float = 0.01
     poll_interval: float = 1e-5
     outputs: tuple[str, ...] = field(default_factory=tuple)
+    inputs: tuple[str, ...] = field(default_factory=tuple)
+    trigger_policy: str = "any_new"
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "KernelConfig":
         """Build a normalized kernel configuration from a mapping."""
         data = _expect_mapping(raw, context="kernel entry")
-        if "inputs" in data:
+        if "input" in data and "inputs" in data:
             raise ConfigValidationError(
-                "kernel entry must use 'input' (single trigger stream); "
-                "'inputs' is not supported"
+                "kernel entry must use either 'input' or 'inputs', not both"
             )
         if "output" in data and "outputs" in data:
             raise ConfigValidationError(
@@ -313,6 +314,7 @@ class KernelConfig:
                 "name",
                 "kind",
                 "input",
+                "inputs",
                 "output",
                 "outputs",
                 "auxiliary",
@@ -321,15 +323,25 @@ class KernelConfig:
                 "read_timeout",
                 "pause_sleep",
                 "poll_interval",
+                "trigger_policy",
             },
         )
         name = _normalize_name(data.get("name"), context="kernel name")
         kind = _normalize_name(
             data.get("kind"), context=f"kind for kernel {name}"
         )
-        input_name = data.get("input")
+        if "inputs" in data:
+            inputs = _normalize_names(
+                data.get("inputs"), context=f"inputs for {name}"
+            )
+        else:
+            inputs = (
+                _normalize_name(
+                    data.get("input"), context=f"input for {name}"
+                ),
+            )
+        input_name = inputs[0]
         auxiliary_raw = data.get("auxiliary", ())
-        input_name = _normalize_name(input_name, context=f"input for {name}")
         if "outputs" in data:
             outputs = _normalize_names(
                 data.get("outputs"), context=f"outputs for {name}"
@@ -366,6 +378,18 @@ class KernelConfig:
             data.get("poll_interval", 1e-5),
             context=f"poll_interval for kernel {name!r}",
         )
+        trigger_policy = _normalize_name(
+            data.get(
+                "trigger_policy",
+                "all_new" if len(inputs) > 1 else "any_new",
+            ),
+            context=f"trigger_policy for kernel {name!r}",
+        ).lower()
+        if trigger_policy not in {"any_new", "all_new"}:
+            raise ConfigValidationError(
+                f"trigger_policy for kernel {name!r} must be either "
+                "'any_new' or 'all_new'"
+            )
         return cls(
             name=name,
             kind=kind,
@@ -378,17 +402,25 @@ class KernelConfig:
             pause_sleep=pause_sleep,
             poll_interval=poll_interval,
             outputs=tuple(outputs),
+            inputs=tuple(inputs),
+            trigger_policy=trigger_policy,
         )
 
     def __post_init__(self) -> None:
         """Validate basic kernel wiring constraints."""
         all_outputs = self.all_outputs
+        trigger_inputs = self.trigger_inputs
+        if len(set(trigger_inputs)) != len(trigger_inputs):
+            raise ConfigValidationError(
+                f"kernel {self.name!r} cannot declare the same trigger input "
+                "stream more than once"
+            )
         if len(set(all_outputs)) != len(all_outputs):
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot declare the same output stream "
                 "more than once"
             )
-        if self.input in all_outputs:
+        if any(name in all_outputs for name in trigger_inputs):
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot use the same shared memory for "
                 "both input and output"
@@ -403,7 +435,7 @@ class KernelConfig:
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot reuse the same auxiliary alias more than once"
             )
-        if self.input in auxiliary_names:
+        if any(name in auxiliary_names for name in trigger_inputs):
             raise ConfigValidationError(
                 f"kernel {self.name!r} cannot reuse the trigger input as auxiliary"
             )
@@ -414,8 +446,13 @@ class KernelConfig:
 
     @property
     def all_inputs(self) -> tuple[str, ...]:
-        """Return the trigger input followed by ordered auxiliary streams."""
-        return (self.input, *self.auxiliary_names)
+        """Return trigger inputs followed by ordered auxiliary streams."""
+        return (*self.trigger_inputs, *self.auxiliary_names)
+
+    @property
+    def trigger_inputs(self) -> tuple[str, ...]:
+        """Return every dynamic trigger stream in declaration order."""
+        return self.inputs if self.inputs else (self.input,)
 
     @property
     def all_outputs(self) -> tuple[str, ...]:

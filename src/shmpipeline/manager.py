@@ -498,11 +498,11 @@ class PipelineManager:
         for kernel_config in self.config.kernels:
             self.registry.validate(kernel_config, shared_by_name)
             self._logger.info(
-                "validated kernel: name=%s kind=%s input=%s output=%s "
+                "validated kernel: name=%s kind=%s inputs=%s output=%s "
                 "auxiliary=%s",
                 kernel_config.name,
                 kernel_config.kind,
-                kernel_config.input,
+                kernel_config.trigger_inputs,
                 kernel_config.output,
                 kernel_config.auxiliary_by_alias,
             )
@@ -624,7 +624,9 @@ class PipelineManager:
 
     def _stream_should_notify(self, name: str) -> bool:
         """Return the default wait-notification policy for one stream."""
-        if any(kernel.input == name for kernel in self.config.kernels):
+        if any(
+            name in kernel.trigger_inputs for kernel in self.config.kernels
+        ):
             return True
         return any(sink.stream == name for sink in self.config.sinks)
 

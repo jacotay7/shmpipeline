@@ -283,35 +283,59 @@ def test_affine_kernel_rejects_incompatible_shapes():
         manager.build()
 
 
-def test_kernel_config_rejects_legacy_inputs_key():
+def test_kernel_config_accepts_synchronized_inputs():
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": "input_frame",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "input_frame_b",
+                    "shape": [4],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+                {
+                    "name": "output_frame",
+                    "shape": [8],
+                    "dtype": "float32",
+                    "storage": "cpu",
+                },
+            ],
+            "kernels": [
+                {
+                    "name": "copy",
+                    "kind": "cpu.concatenate",
+                    "inputs": ["input_frame", "input_frame_b"],
+                    "output": "output_frame",
+                }
+            ],
+        }
+    )
+
+    kernel = config.kernels[0]
+    assert kernel.trigger_inputs == ("input_frame", "input_frame_b")
+    assert kernel.input == "input_frame"
+    assert kernel.trigger_policy == "all_new"
+
+
+def test_kernel_config_rejects_input_and_inputs_together():
+    from shmpipeline.config import KernelConfig
+
     with pytest.raises(
-        ConfigValidationError,
-        match="'inputs' is not supported",
+        ConfigValidationError, match="either 'input' or 'inputs'"
     ):
-        PipelineConfig.from_dict(
+        KernelConfig.from_dict(
             {
-                "shared_memory": [
-                    {
-                        "name": "input_frame",
-                        "shape": [4],
-                        "dtype": "float32",
-                        "storage": "cpu",
-                    },
-                    {
-                        "name": "output_frame",
-                        "shape": [4],
-                        "dtype": "float32",
-                        "storage": "cpu",
-                    },
-                ],
-                "kernels": [
-                    {
-                        "name": "copy",
-                        "kind": "cpu.copy",
-                        "inputs": ["input_frame"],
-                        "output": "output_frame",
-                    }
-                ],
+                "name": "bad",
+                "kind": "cpu.concatenate",
+                "input": "a",
+                "inputs": ["a", "b"],
+                "output": "out",
             }
         )
 

@@ -4,6 +4,7 @@ from shmpipeline.kernels.cpu.add_constant import AddConstantCpuKernel
 from shmpipeline.kernels.cpu.affine_transform import AffineTransformCpuKernel
 from shmpipeline.kernels.cpu.base import CpuKernel
 from shmpipeline.kernels.cpu.centroid import ShackHartmannCentroidCpuKernel
+from shmpipeline.kernels.cpu.concatenate import ConcatenateCpuKernel
 from shmpipeline.kernels.cpu.copy import CopyCpuKernel
 from shmpipeline.kernels.cpu.custom_operation import CustomOperationCpuKernel
 from shmpipeline.kernels.cpu.elementwise_add import ElementwiseAddCpuKernel
@@ -23,10 +24,14 @@ from shmpipeline.kernels.cpu.reduce import ReduceCpuKernel
 from shmpipeline.kernels.cpu.scale import ScaleCpuKernel
 from shmpipeline.kernels.cpu.scale_offset import ScaleOffsetCpuKernel
 from shmpipeline.kernels.cpu.spot_centroid import SpotCentroidCpuKernel
+from shmpipeline.kernels.cpu.tip_tilt_controller import (
+    TipTiltControllerCpuKernel,
+)
 
 __all__ = [
     "AddConstantCpuKernel",
     "AffineTransformCpuKernel",
+    "ConcatenateCpuKernel",
     "FlattenCpuKernel",
     "CopyCpuKernel",
     "CpuKernel",
@@ -41,5 +46,6 @@ __all__ = [
     "ScaleCpuKernel",
     "ScaleOffsetCpuKernel",
     "SpotCentroidCpuKernel",
+    "TipTiltControllerCpuKernel",
     "ShackHartmannCentroidCpuKernel",
 ]

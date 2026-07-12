@@ -9,6 +9,7 @@ from shmpipeline.kernel import KernelContext
 from shmpipeline.kernels.cpu import (
     AddConstantCpuKernel,
     AffineTransformCpuKernel,
+    ConcatenateCpuKernel,
     CopyCpuKernel,
     CustomOperationCpuKernel,
     ElementwiseAddCpuKernel,
@@ -22,6 +23,7 @@ from shmpipeline.kernels.cpu import (
     ScaleOffsetCpuKernel,
     ShackHartmannCentroidCpuKernel,
     SpotCentroidCpuKernel,
+    TipTiltControllerCpuKernel,
 )
 
 try:
@@ -33,6 +35,7 @@ if torch is not None:
     from shmpipeline.kernels.gpu import (
         AddConstantGpuKernel,
         AffineTransformGpuKernel,
+        ConcatenateGpuKernel,
         CopyGpuKernel,
         CustomOperationGpuKernel,
         ElementwiseAddGpuKernel,
@@ -45,10 +48,12 @@ if torch is not None:
         ScaleGpuKernel,
         ScaleOffsetGpuKernel,
         ShackHartmannCentroidGpuKernel,
+        TomographicControllerGpuKernel,
     )
 else:  # pragma: no cover - exercised only when torch is unavailable
     AddConstantGpuKernel = None
     AffineTransformGpuKernel = None
+    ConcatenateGpuKernel = None
     CopyGpuKernel = None
     CustomOperationGpuKernel = None
     ElementwiseAddGpuKernel = None
@@ -61,6 +66,7 @@ else:  # pragma: no cover - exercised only when torch is unavailable
     ScaleGpuKernel = None
     ScaleOffsetGpuKernel = None
     ShackHartmannCentroidGpuKernel = None
+    TomographicControllerGpuKernel = None
 
 
 pytestmark = pytest.mark.unit
@@ -303,6 +309,159 @@ def test_flatten_kernel_flattens_input():
     kernel.compute_into(payload, output, {})
 
     np.testing.assert_allclose(output, payload.ravel())
+
+
+def test_concatenate_kernel_combines_all_trigger_inputs():
+    shared_memory = _make_shared_memory(
+        [
+            {"name": "a", "shape": [2], "dtype": "float32"},
+            {"name": "b", "shape": [3], "dtype": "float32"},
+            {"name": "output", "shape": [5], "dtype": "float32"},
+        ]
+    )
+    config = KernelConfig.from_dict(
+        {
+            "name": "join",
+            "kind": "cpu.concatenate",
+            "inputs": ["a", "b"],
+            "output": "output",
+        }
+    )
+    ConcatenateCpuKernel.validate_config(config, shared_memory)
+    kernel = ConcatenateCpuKernel(
+        KernelContext(config=config, shared_memory=shared_memory)
+    )
+    output = np.empty(5, dtype=np.float32)
+    kernel.compute_into(
+        (
+            np.array([1.0, 2.0], dtype=np.float32),
+            np.array([3.0, 4.0, 5.0], dtype=np.float32),
+        ),
+        output,
+        {},
+    )
+    np.testing.assert_array_equal(output, [1.0, 2.0, 3.0, 4.0, 5.0])
+
+
+def test_concatenate_kernel_rejects_non_all_new_policy():
+    shared_memory = _make_shared_memory(
+        [
+            {"name": "a", "shape": [2], "dtype": "float32"},
+            {"name": "b", "shape": [2], "dtype": "float32"},
+            {"name": "output", "shape": [4], "dtype": "float32"},
+        ]
+    )
+    config = KernelConfig.from_dict(
+        {
+            "name": "join",
+            "kind": "cpu.concatenate",
+            "inputs": ["a", "b"],
+            "trigger_policy": "any_new",
+            "output": "output",
+        }
+    )
+    with pytest.raises(ConfigValidationError, match="all_new"):
+        ConcatenateCpuKernel.validate_config(config, shared_memory)
+
+
+def test_fused_cpu_tip_tilt_controller_updates_closed_loop_state():
+    shared_memory = _make_shared_memory(
+        [
+            {"name": "image", "shape": [4, 4], "dtype": "float32"},
+            {"name": "rotation", "shape": [2, 2], "dtype": "float32"},
+            {"name": "bias", "shape": [2], "dtype": "float32"},
+            {"name": "output", "shape": [2], "dtype": "float32"},
+        ]
+    )
+    config = KernelConfig.from_dict(
+        {
+            "name": "tip_tilt",
+            "kind": "cpu.tip_tilt_controller",
+            "input": "image",
+            "output": "output",
+            "auxiliary": ["rotation", "bias"],
+            "parameters": {"leak": 0.9, "control_gain": 0.5},
+        }
+    )
+    TipTiltControllerCpuKernel.validate_config(config, shared_memory)
+    kernel = TipTiltControllerCpuKernel(
+        KernelContext(config=config, shared_memory=shared_memory)
+    )
+    image = np.zeros((4, 4), dtype=np.float32)
+    image[3, 3] = 1.0
+    rotation = np.eye(2, dtype=np.float32)
+    bias = np.zeros(2, dtype=np.float32)
+    output = np.empty(2, dtype=np.float32)
+    kernel.compute_into(image, output, {"rotation": rotation, "bias": bias})
+    np.testing.assert_allclose(output, [0.75, 0.75])
+    kernel.compute_into(image, output, {"rotation": rotation, "bias": bias})
+    np.testing.assert_allclose(output, [1.425, 1.425])
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_fused_batched_gpu_tomographic_controller_runs_small_geometry():
+    specs = [
+        {"name": "images", "shape": [8, 4, 4]},
+        {"name": "dark", "shape": [8, 4, 4]},
+        {"name": "flat", "shape": [8, 4, 4]},
+        {"name": "slope_offset", "shape": [8, 1, 1, 2]},
+        {"name": "matrix", "shape": [2, 16]},
+        {"name": "reconstructor_bias", "shape": [2]},
+        {"name": "command_offset", "shape": [2]},
+        {"name": "command_low", "shape": [2]},
+        {"name": "command_high", "shape": [2]},
+        {"name": "output", "shape": [2]},
+    ]
+    shared_memory = _make_shared_memory(
+        [
+            {
+                **spec,
+                "dtype": "float32",
+                "storage": "gpu",
+                "gpu_device": "cuda:0",
+            }
+            for spec in specs
+        ]
+    )
+    config = KernelConfig.from_dict(
+        {
+            "name": "tomo",
+            "kind": "gpu.tomographic_controller",
+            "input": "images",
+            "trigger_policy": "all_new",
+            "output": "output",
+            "auxiliary": {
+                "wfs_dark": "dark",
+                "wfs_inverse_flat": "flat",
+                "wfs_slope_offset": "slope_offset",
+                "reconstructor": "matrix",
+                "reconstructor_bias": "reconstructor_bias",
+                "command_offset": "command_offset",
+                "command_low": "command_low",
+                "command_high": "command_high",
+            },
+            "parameters": {"tile_size": 4},
+        }
+    )
+    TomographicControllerGpuKernel.validate_config(config, shared_memory)
+    kernel = TomographicControllerGpuKernel(
+        KernelContext(config=config, shared_memory=shared_memory)
+    )
+    device = "cuda:0"
+    inputs = torch.ones((8, 4, 4), dtype=torch.float32, device=device)
+    auxiliary = {
+        "wfs_dark": torch.zeros((8, 4, 4), device=device),
+        "wfs_inverse_flat": torch.ones((8, 4, 4), device=device),
+        "wfs_slope_offset": torch.zeros((8, 1, 1, 2), device=device),
+        "reconstructor": torch.zeros((2, 16), device=device),
+        "reconstructor_bias": torch.tensor([0.5, -0.5], device=device),
+        "command_offset": torch.zeros(2, device=device),
+        "command_low": torch.full((2,), -1.0, device=device),
+        "command_high": torch.full((2,), 1.0, device=device),
+    }
+    output = torch.empty(2, device=device)
+    kernel.compute_into(inputs, output, auxiliary)
+    _assert_allclose(output, [0.5, -0.5])
 
 
 def test_affine_transform_kernel_applies_matrix_and_offset():

@@ -51,7 +51,8 @@ class PipelineGraph:
         for kernel in config.kernels:
             for output_name in kernel.all_outputs:
                 self._kernel_producers[output_name].append(kernel.name)
-            self._kernel_consumers[kernel.input].append(kernel.name)
+            for input_name in kernel.trigger_inputs:
+                self._kernel_consumers[input_name].append(kernel.name)
             for binding in kernel.auxiliary:
                 self._kernel_consumers[binding.name].append(kernel.name)
         for source in config.sources:
@@ -107,14 +108,15 @@ class PipelineGraph:
                 )
             )
         for kernel in self.config.kernels:
-            edges.append(
-                GraphEdge(
-                    source=kernel.input,
-                    target=kernel.name,
-                    role="input",
-                    stream=kernel.input,
+            for index, input_name in enumerate(kernel.trigger_inputs):
+                edges.append(
+                    GraphEdge(
+                        source=input_name,
+                        target=kernel.name,
+                        role="input" if index == 0 else f"input:{index}",
+                        stream=input_name,
+                    )
                 )
-            )
             for binding in kernel.auxiliary:
                 edges.append(
                     GraphEdge(
@@ -286,6 +288,8 @@ class PipelineGraph:
                     "name": kernel.name,
                     "kind": kernel.kind,
                     "input": kernel.input,
+                    "inputs": list(kernel.trigger_inputs),
+                    "trigger_policy": kernel.trigger_policy,
                     "output": kernel.output,
                     "outputs": list(kernel.all_outputs),
                     "auxiliary": kernel.auxiliary_by_alias,
@@ -381,7 +385,9 @@ class PipelineGraph:
                 lines.append(
                     "- "
                     f"{kernel.name} ({kernel.kind}) "
-                    f"input={kernel.input} output={output_text} "
+                    f"inputs={', '.join(kernel.trigger_inputs)} "
+                    f"trigger_policy={kernel.trigger_policy} "
+                    f"output={output_text} "
                     f"auxiliary={auxiliary_text} "
                     f"upstream={', '.join(upstream)} "
                     f"downstream={', '.join(downstream)}"

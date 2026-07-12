@@ -99,11 +99,15 @@ def config_to_document(config: PipelineConfig) -> Document:
         item = {
             "name": kernel.name,
             "kind": kernel.kind,
-            "input": kernel.input,
             "parameters": deepcopy(kernel.parameters),
             "read_timeout": kernel.read_timeout,
             "pause_sleep": kernel.pause_sleep,
         }
+        if len(kernel.trigger_inputs) > 1:
+            item["inputs"] = list(kernel.trigger_inputs)
+            item["trigger_policy"] = kernel.trigger_policy
+        else:
+            item["input"] = kernel.input
         if len(kernel.all_outputs) > 1:
             item["outputs"] = list(kernel.all_outputs)
         else:

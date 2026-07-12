@@ -35,6 +35,13 @@ class KernelContext:
         return self.shared_memory[self.config.input]
 
     @property
+    def trigger_input_specs(self) -> tuple[SharedMemoryConfig, ...]:
+        """Return all dynamic trigger stream specifications in order."""
+        return tuple(
+            self.shared_memory[name] for name in self.config.trigger_inputs
+        )
+
+    @property
     def auxiliary_specs(self) -> tuple[SharedMemoryConfig, ...]:
         """Return auxiliary stream specifications in config order."""
         return tuple(
@@ -64,6 +71,7 @@ class Kernel(ABC):
 
     kind = "kernel.base"
     storage = "cpu"
+    input_arity: int | None = 1
     auxiliary_arity: int | None = 0
     output_arity: int | None = 1
 
@@ -78,6 +86,14 @@ class Kernel(ABC):
         shared_memory: Mapping[str, SharedMemoryConfig],
     ) -> None:
         """Validate arity and storage constraints before build."""
+        if (
+            cls.input_arity is not None
+            and len(config.trigger_inputs) != cls.input_arity
+        ):
+            raise ConfigValidationError(
+                f"kernel kind {cls.kind!r} expects {cls.input_arity} trigger "
+                f"input stream(s), got {len(config.trigger_inputs)}"
+            )
         if (
             cls.auxiliary_arity is not None
             and len(config.auxiliary) != cls.auxiliary_arity

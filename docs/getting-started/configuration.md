@@ -38,7 +38,7 @@ shutdown unless `shutdown(unlink_external=True)` is requested.
 
 ## Kernel definitions
 
-Each kernel consumes one trigger input stream and writes one output stream:
+Most kernels consume one trigger input stream and write one output stream:
 
 ```yaml
 - name: scale_stage
@@ -54,12 +54,39 @@ Supported fields:
 - `name`: unique kernel name
 - `kind`: registered kernel kind such as `cpu.scale` or `gpu.affine_transform`
 - `input`: trigger input stream name
+- `inputs`: ordered trigger stream names for a multi-input kernel; mutually
+  exclusive with `input`
+- `trigger_policy`: `any_new` (single-input default) or `all_new` (multi-input
+  default)
 - `output`: output stream name
 - `auxiliary`: optional extra stream bindings
 - `operation`: expression string for `custom_operation` kernels
 - `parameters`: kind-specific parameter mapping
 - `read_timeout`: trigger read timeout in seconds
 - `pause_sleep`: worker pause polling interval in seconds
+
+## Synchronized multi-input kernels
+
+Multi-input kernels can wait until every dynamic input has published a new
+value. `cpu.concatenate` and `gpu.concatenate` require this mode:
+
+```yaml
+- name: synchronized_join
+  kind: cpu.concatenate
+  inputs: [wfs0_slopes, wfs1_slopes, wfs2_slopes]
+  trigger_policy: all_new
+  output: combined_slopes
+  parameters:
+    axis: 0
+```
+
+The worker tracks a consumed publication count per trigger, waits until all of
+them advance, acquires all input/output locks in sorted order, and rechecks the
+counts before computing. This guarantees that every concatenation uses a new
+value from every input. Publication counts do not by themselves prove that the
+values share an external hardware frame ID if upstream stages dropped different
+frames; applications needing that stronger guarantee must propagate and check
+a hardware sequence token.
 
 ## Auxiliary inputs
 
@@ -81,6 +108,7 @@ The loader and graph layer validate several important invariants before workers 
 - kernel names must be unique
 - every referenced stream must exist
 - a kernel cannot reuse the same stream as both input and output
+- a kernel cannot repeat a stream in `inputs`
 - a kernel cannot reuse the same auxiliary binding multiple times
 - a stream cannot have more than one producer kernel
 

@@ -67,6 +67,52 @@ def test_wait_for_trigger_times_out_returns_none():
     )
 
 
+def test_wait_for_all_triggers_requires_every_input_to_advance():
+    streams = {
+        "a": _FakeStream("a", [1.0], count=2),
+        "b": _FakeStream("b", [2.0], count=1),
+    }
+    assert (
+        runtime._wait_for_triggers(
+            streams,
+            {"a": 1, "b": 1},
+            policy="all_new",
+            timeout=0.001,
+        )
+        is None
+    )
+    streams["b"].count = 2
+    assert runtime._wait_for_triggers(
+        streams,
+        {"a": 1, "b": 1},
+        policy="all_new",
+        timeout=0.001,
+    ) == {"a": 2, "b": 2}
+
+
+def test_locked_inputs_returns_ordered_multi_input_tuple():
+    config = KernelConfig.from_dict(
+        {
+            "name": "join",
+            "kind": "cpu.concatenate",
+            "inputs": ["a", "b"],
+            "output": "out",
+        }
+    )
+    triggers = {
+        "a": _FakeStream("a", [1.0], count=3),
+        "b": _FakeStream("b", [2.0], count=4),
+    }
+    output = _FakeStream("out", np.zeros(2, dtype=np.float32))
+    with runtime._locked_inputs_and_outputs(
+        config, triggers, {}, {"out": output}
+    ) as (counts, values, auxiliary):
+        assert counts == {"a": 3, "b": 4}
+        assert auxiliary == {}
+        np.testing.assert_array_equal(values[0], [1.0])
+        np.testing.assert_array_equal(values[1], [2.0])
+
+
 def test_compute_rolling_throughput_hz():
     from collections import deque
 

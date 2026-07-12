@@ -200,6 +200,7 @@ Register via:
 | Kind | Description |
 |------|-------------|
 | `cpu.copy` / `gpu.copy` | Identity copy |
+| `cpu.concatenate` / `gpu.concatenate` | Synchronized multi-input concatenation (`trigger_policy: all_new`) |
 | `cpu.scale` / `gpu.scale` | Multiply by scalar |
 | `cpu.add_constant` / `gpu.add_constant` | Add scalar |
 | `cpu.scale_offset` / `gpu.scale_offset` | `out = gain*x - offset` (1 auxiliary) |
@@ -212,7 +213,9 @@ Register via:
 | `cpu.leaky_integrator` / `gpu.leaky_integrator` | `u_k = leak*u_{k-1} + gain*e_k` |
 | `cpu.centroid` / `gpu.centroid` | Shack-Hartmann centroid (alias for `shack_hartmann_centroid`) |
 | `cpu.shack_hartmann_centroid` / `gpu.shack_hartmann_centroid` | Tiled Shack-Hartmann centroid |
-| `cpu.spot_centroid` | Single-spot centroid |
+| `cpu.spot_centroid` / `gpu.spot_centroid` | Single-spot centroid |
+| `cpu.tip_tilt_controller` / `gpu.tip_tilt_controller` | Fused spot centroid + leaky integrator + affine rotation (tip/tilt loop) |
+| `gpu.tomographic_controller` | Fused batched WFS calibration + centroid + reconstruction + integration + command clip (tomographic AO loop) |
 | `cpu.reduce` | Reduce input to a scalar: `operation` = sum/mean/max/min |
 | `cpu.custom_operation` / `gpu.custom_operation` | Numba/torch expression evaluated at runtime |
 | `cpu.raise_error` / `gpu.raise_error` | Test kernel that raises intentionally |
