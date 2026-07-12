@@ -496,6 +496,11 @@ Every change must leave the repository green on both gates that CI enforces
    **80%** floor (`fail_under = 80` in `[tool.coverage.report]`). New code must
    ship with tests in the appropriate `tests/test_*.py` module (do not create
    ad-hoc "misc" test files).
+3. **Changelog** — every user-facing change (new kernel/source/sink kind, new
+   config field, behavior/perf/bugfix, new example) must add a bullet to the
+   `## [Unreleased]` section of `CHANGELOG.md` under the right Keep a Changelog
+   heading (`Added` / `Changed` / `Fixed` / `Removed`), created if absent.
+   Internal-only refactors with no observable effect may skip it.
 
 The coverage gate excludes code that headless CI cannot meaningfully exercise —
 GPU kernels (`kernels/gpu/*`, no CUDA on CI) and the PySide6 GUI

@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Synchronized multi-input kernels.** `KernelConfig` accepts `inputs: [...]`
+  and `trigger_policy` (`any_new` or `all_new`); the legacy single `input` is
+  normalized to a one-item trigger tuple. The worker runtime waits on the vector
+  of trigger streams, re-checks all publication counts inside the sorted lock
+  scope before computing, and advances the consumed counts only after a
+  successful publication. Graph, document round-trip, and manager notify policy
+  all understand the trigger vector.
+- **`cpu.concatenate` / `gpu.concatenate`** kernels: synchronized fan-in that
+  validates dtype and non-concatenated dimensions and writes directly into the
+  output (`trigger_policy: all_new`, variable trigger arity).
+- **`gpu.spot_centroid`** with the same contract as `cpu.spot_centroid`.
+- **Fused AO controllers** `cpu.tip_tilt_controller` / `gpu.tip_tilt_controller`
+  (spot centroid + leaky integrator + affine rotation) and
+  `gpu.tomographic_controller` (batched single-cube or eight-stream `all_new`
+  WFS calibration + centroid + reconstruction + integration + command clip).
+- **Built-in endpoints** in the default registry so example and test pipelines
+  run through `shmpipeline run` without an entry-point package:
+  `synthetic.array` (self-paced single-stream CPU/GPU pattern source) and
+  `null.sink` (on-device drain with optional `device_delay_s` and consume-time
+  percentiles).
+- **`plugin_metrics()`** hook on source/sink plugins; the manager merges the
+  result into each endpoint status snapshot. `_SinkController` additionally
+  reports `missed_writes` (publication-count gaps) for every sink.
+- **`examples/tomographic_ao_stress/`**: a synthetic three-loop tomographic AO
+  stress workload with CPU and GPU pipelines, fused sustained/batched variants,
+  and a multi-terminal benchmark runner (`--gpu-unbatched` exercises the
+  eight-camera `all_new` barrier at full scale).
+
+### Fixed
+
+- OpenBLAS thread control now also probes NumPy's bundled `libopenblas` and the
+  `scipy_openblas` symbol names, so `blas_threads` overrides take effect on more
+  installations.
+
 ## [1.0.4] - 2026-07-11
 
 ### Performance and usability
