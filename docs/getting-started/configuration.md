@@ -29,12 +29,42 @@ Supported fields:
   workers or sinks where supported
 - `mode`: stream lifecycle policy: `create_or_attach` (default), `create`,
   `attach`, or `replace`
+- `initial`: optional deterministic value published during `build()`, before
+  workers and sources start
 
 `create_or_attach` reuses a compatible stream and replaces an incompatible
 one. `attach` never creates or replaces a stream, `create` fails when the name
 already exists, and `replace` explicitly recreates an existing stream.
 Streams attached from outside the manager are closed but not unlinked during
 shutdown unless `shutdown(unlink_external=True)` is requested.
+
+Initializers make a YAML pipeline self-contained for the CLI and GUI. They are
+written directly into the final shared CPU/GPU buffer, including large arrays:
+
+```yaml
+- name: lower_limit
+  shape: [4096]
+  dtype: float32
+  storage: gpu
+  gpu_device: cuda:0
+  initial: {pattern: constant, value: -2.5}
+
+- name: reconstructor
+  shape: [4096, 65536]
+  dtype: float32
+  storage: gpu
+  gpu_device: cuda:0
+  initial:
+    pattern: normal
+    seed: 4242
+    mean: 0.0
+    std: 0.001
+```
+
+Supported patterns are `constant` (`value`), `normal` (`seed`, `mean`, `std`),
+`values` (an explicitly shaped nested list), and `identity` (2-D arrays, with
+optional `scale`). Initializers are deterministic and are applied on every
+manager build, including when a compatible persistent stream is reused.
 
 ## Kernel definitions
 

@@ -186,6 +186,7 @@ class SharedMemoryConfig:
     cpu_mirror: bool | None = None
     notify: bool | None = None
     mode: str = "create_or_attach"
+    initial: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SharedMemoryConfig":
@@ -203,6 +204,7 @@ class SharedMemoryConfig:
                 "cpu_mirror",
                 "notify",
                 "mode",
+                "initial",
             },
         )
         name = _normalize_name(data.get("name"), context="shared memory name")
@@ -241,6 +243,65 @@ class SharedMemoryConfig:
                 f"mode for shared memory {name!r} must be one of "
                 "'create', 'attach', 'create_or_attach', or 'replace'"
             )
+        initial_raw = data.get("initial")
+        initial = None
+        if initial_raw is not None:
+            initial = _normalize_parameters(
+                initial_raw,
+                context=f"initial value for shared memory {name!r}",
+            )
+            pattern = _normalize_name(
+                initial.get("pattern"),
+                context=f"initial pattern for shared memory {name!r}",
+            ).lower()
+            if pattern not in {"constant", "normal", "values", "identity"}:
+                raise ConfigValidationError(
+                    f"initial pattern for shared memory {name!r} must be "
+                    "'constant', 'normal', 'values', or 'identity'"
+                )
+            initial["pattern"] = pattern
+            allowed_initial = {
+                "constant": {"pattern", "value"},
+                "normal": {"pattern", "seed", "mean", "std"},
+                "values": {"pattern", "values"},
+                "identity": {"pattern", "scale"},
+            }[pattern]
+            unexpected = sorted(set(initial) - allowed_initial)
+            if unexpected:
+                raise ConfigValidationError(
+                    f"initial value for shared memory {name!r} contains "
+                    f"unsupported fields: {', '.join(unexpected)}"
+                )
+            if pattern == "constant" and not isinstance(
+                initial.get("value"), (int, float, bool, complex)
+            ):
+                raise ConfigValidationError(
+                    f"constant initializer for shared memory {name!r} "
+                    "requires numeric 'value'"
+                )
+            if pattern == "normal":
+                std = initial.get("std", 1.0)
+                if not isinstance(std, (int, float)) or std < 0.0:
+                    raise ConfigValidationError(
+                        f"normal initializer for shared memory {name!r} "
+                        "requires non-negative numeric 'std'"
+                    )
+                seed = initial.get("seed", 0)
+                if not isinstance(seed, int) or isinstance(seed, bool):
+                    raise ConfigValidationError(
+                        f"normal initializer for shared memory {name!r} "
+                        "requires integer 'seed'"
+                    )
+            if pattern == "values" and "values" not in initial:
+                raise ConfigValidationError(
+                    f"values initializer for shared memory {name!r} "
+                    "requires 'values'"
+                )
+            if pattern == "identity" and len(shape) != 2:
+                raise ConfigValidationError(
+                    f"identity initializer for shared memory {name!r} "
+                    "requires a 2D shape"
+                )
         return cls(
             name=name,
             shape=shape,
@@ -250,6 +311,7 @@ class SharedMemoryConfig:
             cpu_mirror=cpu_mirror,
             notify=notify,
             mode=mode,
+            initial=initial,
         )
 
     def __post_init__(self) -> None:

@@ -74,3 +74,12 @@ stage still pays process synchronization, CUDA IPC, and snapshot overhead. A
 small operation with a roughly 10 microsecond CPU floor can be slower on the
 GPU path. Prefer CPU streams for light arithmetic and reserve GPU stages for
 work large enough to amortize that fixed cost.
+
+For a fused GPU kernel whose producer uses pyshmem's synchronized publication
+API, `parameters.borrow_gpu_inputs: true` opts into a zero-copy locked input
+view. The runtime then holds the input lock for the entire compute call, so the
+producer cannot overwrite the tensor until the consumer finishes. This removes
+the safe-read clone and CUDA synchronization, but it also lengthens producer
+lock hold time and must not be used with a producer that mutates CUDA storage
+outside pyshmem's `write`/write-view transaction. The batched tomography
+profile uses this mode to sustain 1 kHz with one 2 MiB camera cube per frame.

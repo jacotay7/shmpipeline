@@ -111,6 +111,12 @@ class SharedMemoryDialog(QDialog):
         self.cpu_mirror_check.setChecked(
             bool(initial.get("cpu_mirror", False))
         )
+        self.initial_edit = QPlainTextEdit()
+        self.initial_edit.setPlainText(
+            document_to_yaml(initial.get("initial", {})).strip()
+            if initial.get("initial")
+            else ""
+        )
 
         form = QFormLayout()
         form.addRow("Name", self.name_edit)
@@ -119,6 +125,7 @@ class SharedMemoryDialog(QDialog):
         form.addRow("Storage", self.storage_combo)
         form.addRow("GPU device", self.gpu_device_edit)
         form.addRow("", self.cpu_mirror_check)
+        form.addRow("Initial value YAML", self.initial_edit)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -158,6 +165,11 @@ class SharedMemoryDialog(QDialog):
             )
             if self.cpu_mirror_check.isChecked():
                 record["cpu_mirror"] = True
+        initial = parse_inline_yaml(
+            self.initial_edit.toPlainText(), fallback={}
+        )
+        if initial:
+            record["initial"] = initial
         return record
 
 

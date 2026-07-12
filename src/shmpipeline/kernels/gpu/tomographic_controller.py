@@ -29,6 +29,11 @@ class TomographicControllerGpuKernel(GpuKernel):
             raise ConfigValidationError(
                 f"kernel {config.name!r} requires trigger_policy 'all_new'"
             )
+        borrow_gpu_inputs = config.parameters.get("borrow_gpu_inputs", False)
+        if not isinstance(borrow_gpu_inputs, bool):
+            raise ConfigValidationError(
+                f"kernel {config.name!r} borrow_gpu_inputs must be boolean"
+            )
         batched = len(config.trigger_inputs) == 1
         if len(config.trigger_inputs) not in {1, 8}:
             raise ConfigValidationError(
@@ -153,11 +158,19 @@ class TomographicControllerGpuKernel(GpuKernel):
         tiles_y = rows // self.tile_size
         tiles_x = columns // self.tile_size
         dtype = self.output_buffer.dtype
+        calibrated_shape = (
+            (8, rows, columns) if self._batched else (rows, columns)
+        )
+        centroid_shape = (
+            (8, tiles_y, tiles_x, 2)
+            if self._batched
+            else (tiles_y, tiles_x, 2)
+        )
         self._calibrated = torch.empty(
-            (rows, columns), dtype=dtype, device=self.device
+            calibrated_shape, dtype=dtype, device=self.device
         )
         self._centroids = torch.empty(
-            (tiles_y, tiles_x, 2), dtype=dtype, device=self.device
+            centroid_shape, dtype=dtype, device=self.device
         )
         self._slopes_per_wfs = tiles_y * tiles_x * 2
         self._slopes = torch.empty(
@@ -227,19 +240,66 @@ class TomographicControllerGpuKernel(GpuKernel):
             out=destination,
         )
 
+    def _batched_centroids_into_slopes(
+        self,
+        images: torch.Tensor,
+        auxiliary_inputs: Mapping[str, Any],
+    ) -> None:
+        """Calibrate and centroid all eight WFS images with batched launches."""
+        torch.sub(
+            images,
+            self._aux(auxiliary_inputs, "wfs_dark"),
+            out=self._calibrated,
+        )
+        torch.mul(
+            self._calibrated,
+            self._aux(auxiliary_inputs, "wfs_inverse_flat"),
+            out=self._calibrated,
+        )
+        _, rows, columns = self._calibrated.shape
+        patches = self._calibrated.reshape(
+            8,
+            rows // self.tile_size,
+            self.tile_size,
+            columns // self.tile_size,
+            self.tile_size,
+        ).permute(0, 1, 3, 2, 4)
+        total = patches.sum(dim=(-1, -2))
+        y_weighted = (patches * self._y_coords).sum(dim=(-1, -2))
+        x_weighted = (patches * self._x_coords).sum(dim=(-1, -2))
+        safe_total = total.clamp_min(torch.finfo(total.dtype).tiny)
+        self._centroids[..., 0].copy_(y_weighted / safe_total - self._center)
+        self._centroids[..., 1].copy_(x_weighted / safe_total - self._center)
+        self._centroids.masked_fill_(~(total > 0).unsqueeze(-1), 0.0)
+        torch.mul(
+            self._centroids.reshape(-1),
+            self.slope_gain,
+            out=self._slopes,
+        )
+        torch.sub(
+            self._slopes,
+            self._aux(auxiliary_inputs, "wfs_slope_offset").reshape(-1),
+            out=self._slopes,
+        )
+
     def compute_into(
         self,
         trigger_input: Any,
         output: Any,
         auxiliary_inputs: Mapping[str, Any],
     ) -> None:
-        images = trigger_input if self._batched else tuple(trigger_input)
-        for index, image in enumerate(images):
-            self._centroid_into_slopes(
-                as_gpu_tensor(image, device=self.device),
+        if self._batched:
+            self._batched_centroids_into_slopes(
+                as_gpu_tensor(trigger_input, device=self.device),
                 auxiliary_inputs,
-                index,
             )
+        else:
+            for index, image in enumerate(trigger_input):
+                self._centroid_into_slopes(
+                    as_gpu_tensor(image, device=self.device),
+                    auxiliary_inputs,
+                    index,
+                )
         torch.matmul(
             self._aux(auxiliary_inputs, "reconstructor"),
             self._slopes,

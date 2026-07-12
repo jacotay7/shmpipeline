@@ -1,0 +1,225 @@
+# Highest-throughput GPU tomography profile.
+# Eight hardware-synchronized WFS frames are transported as one camera cube,
+# eliminating seven CUDA IPC snapshots per control cycle.
+
+shared_memory:
+  - name: tomo_wfs_cube_raw
+    shape: [8, 256, 256]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+  - name: tomo_wfs_dark
+    shape: [8, 256, 256]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 0.0
+  - name: tomo_wfs_inverse_flat
+    shape: [8, 256, 256]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
+  - name: tomo_wfs_slope_offset
+    shape: [8, 64, 64, 2]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 0.0
+  - name: tomo_reconstructor
+    shape: [4096, 65536]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: normal
+      seed: 4242
+      mean: 0.0
+      std: 0.001
+  - name: tomo_reconstructor_bias
+    shape: [4096]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: normal
+      seed: 4243
+      mean: 0.0
+      std: 0.02
+  - name: tomo_command_offset
+    shape: [4096]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: normal
+      seed: 4244
+      mean: 0.0
+      std: 0.01
+  - name: tomo_command_low
+    shape: [4096]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: -2.5
+  - name: tomo_command_high
+    shape: [4096]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 2.5
+  - name: tomo_dm_command
+    shape: [4096]
+    dtype: float32
+    storage: gpu
+    gpu_device: cuda:0
+  - name: tt_a_image
+    shape: [16, 16]
+    dtype: float32
+    storage: cpu
+  - name: tt_a_rotation
+    shape: [2, 2]
+    dtype: float32
+    storage: cpu
+    initial:
+      pattern: values
+      values: [[0.9781476, -0.2079117], [0.2079117, 0.9781476]]
+  - name: tt_a_bias
+    shape: [2]
+    dtype: float32
+    storage: cpu
+    initial:
+      pattern: normal
+      seed: 4250
+      mean: 0.0
+      std: 0.01
+  - name: tt_a_command
+    shape: [2]
+    dtype: float32
+    storage: cpu
+  - name: tt_b_image
+    shape: [16, 16]
+    dtype: float32
+    storage: cpu
+  - name: tt_b_rotation
+    shape: [2, 2]
+    dtype: float32
+    storage: cpu
+    initial:
+      pattern: values
+      values: [[0.9925462, 0.1218693], [-0.1218693, 0.9925462]]
+  - name: tt_b_bias
+    shape: [2]
+    dtype: float32
+    storage: cpu
+    initial:
+      pattern: normal
+      seed: 4260
+      mean: 0.0
+      std: 0.01
+  - name: tt_b_command
+    shape: [2]
+    dtype: float32
+    storage: cpu
+
+sources:
+  - name: wfs_camera_cube
+    kind: synthetic.array
+    stream: tomo_wfs_cube_raw
+    parameters:
+      pattern: random
+      seed: 2401
+      amplitude: 1.0
+      offset: 10.0
+      rate_hz: 1000.0
+  - name: tt_a_source
+    kind: synthetic.array
+    stream: tt_a_image
+    parameters:
+      pattern: random
+      seed: 11
+      amplitude: 1.0
+      offset: 10.0
+      rate_hz: 100.0
+  - name: tt_b_source
+    kind: synthetic.array
+    stream: tt_b_image
+    parameters:
+      pattern: random
+      seed: 12
+      amplitude: 1.0
+      offset: 10.0
+      rate_hz: 1000.0
+
+kernels:
+  - name: tomo_controller
+    kind: gpu.tomographic_controller
+    input: tomo_wfs_cube_raw
+    trigger_policy: all_new
+    output: tomo_dm_command
+    auxiliary:
+      wfs_dark: tomo_wfs_dark
+      wfs_inverse_flat: tomo_wfs_inverse_flat
+      wfs_slope_offset: tomo_wfs_slope_offset
+      reconstructor: tomo_reconstructor
+      reconstructor_bias: tomo_reconstructor_bias
+      command_offset: tomo_command_offset
+      command_low: tomo_command_low
+      command_high: tomo_command_high
+    parameters:
+      tile_size: 4
+      slope_gain: 1.0
+      leak: 0.985
+      control_gain: 0.28
+      command_gain: 1.0
+      # The source synchronizes CUDA before publishing and the runtime holds
+      # the stream lock through compute, so this avoids a redundant 2 MiB
+      # snapshot and device synchronization on every frame.
+      borrow_gpu_inputs: true
+    read_timeout: 1.0
+  - name: tt_a_controller
+    kind: cpu.tip_tilt_controller
+    input: tt_a_image
+    output: tt_a_command
+    auxiliary: [tt_a_rotation, tt_a_bias]
+    parameters:
+      background: 0.0
+      threshold: 0.0
+      leak: 0.97
+      control_gain: 0.35
+    read_timeout: 0.1
+  - name: tt_b_controller
+    kind: cpu.tip_tilt_controller
+    input: tt_b_image
+    output: tt_b_command
+    auxiliary: [tt_b_rotation, tt_b_bias]
+    parameters:
+      background: 0.0
+      threshold: 0.0
+      leak: 0.94
+      control_gain: 0.22
+    read_timeout: 0.1
+
+sinks:
+  - name: tomo_dm_command_sink
+    kind: null.sink
+    stream: tomo_dm_command
+    read_timeout: 0.5
+  - name: tt_a_command_sink
+    kind: null.sink
+    stream: tt_a_command
+    read_timeout: 0.5
+  - name: tt_b_command_sink
+    kind: null.sink
+    stream: tt_b_command
+    read_timeout: 0.5

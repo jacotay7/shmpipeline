@@ -558,7 +558,85 @@ class PipelineManager:
             )
         for spec in self.config.shared_memory:
             self._streams[spec.name] = self._build_stream(spec)
+        for spec in self.config.shared_memory:
+            if spec.initial is not None:
+                self._initialize_stream(spec, self._streams[spec.name])
         self._transition_state(PipelineState.BUILT, reason="build complete")
+
+    def _initialize_stream(
+        self, spec: SharedMemoryConfig, stream: Any
+    ) -> None:
+        """Publish a configured deterministic initial value in-place."""
+        assert spec.initial is not None
+        initial = spec.initial
+        pattern = initial["pattern"]
+        with stream.write_view() as view:
+            is_gpu = bool(getattr(stream, "gpu_enabled", False))
+            if pattern == "constant":
+                value = initial["value"]
+                if is_gpu:
+                    view.fill_(value)
+                else:
+                    view.fill(value)
+            elif pattern == "normal":
+                mean = float(initial.get("mean", 0.0))
+                std = float(initial.get("std", 1.0))
+                seed = int(initial.get("seed", 0))
+                if is_gpu:
+                    import torch
+
+                    if not view.dtype.is_floating_point:
+                        raise ConfigValidationError(
+                            f"normal initializer for {spec.name!r} requires "
+                            "a floating-point dtype"
+                        )
+                    generator = torch.Generator(device=view.device)
+                    generator.manual_seed(seed)
+                    view.normal_(mean=mean, std=std, generator=generator)
+                else:
+                    if not np.issubdtype(spec.dtype, np.floating):
+                        raise ConfigValidationError(
+                            f"normal initializer for {spec.name!r} requires "
+                            "a floating-point dtype"
+                        )
+                    generator = np.random.default_rng(seed)
+                    generator.standard_normal(
+                        size=spec.shape, dtype=spec.dtype, out=view
+                    )
+                    if std != 1.0:
+                        np.multiply(view, std, out=view)
+                    if mean != 0.0:
+                        np.add(view, mean, out=view)
+            elif pattern == "values":
+                values = np.asarray(initial["values"], dtype=spec.dtype)
+                if values.shape != spec.shape:
+                    raise ConfigValidationError(
+                        f"values initializer for {spec.name!r} has shape "
+                        f"{values.shape}, expected {spec.shape}"
+                    )
+                if is_gpu:
+                    import torch
+
+                    view.copy_(torch.as_tensor(values, device=view.device))
+                else:
+                    np.copyto(view, values)
+            elif pattern == "identity":
+                scale = float(initial.get("scale", 1.0))
+                if is_gpu:
+                    view.zero_()
+                    view.diagonal().fill_(scale)
+                else:
+                    view.fill(0)
+                    np.fill_diagonal(view, scale)
+            else:  # pragma: no cover - guarded by config validation
+                raise AssertionError(
+                    f"unknown initializer pattern {pattern!r}"
+                )
+        self._logger.info(
+            "initialized shared memory: name=%s pattern=%s",
+            spec.name,
+            pattern,
+        )
 
     def _build_stream(self, spec) -> Any:
         """Create, attach, or replace one stream according to ``spec.mode``."""

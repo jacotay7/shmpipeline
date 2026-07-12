@@ -71,6 +71,39 @@ def test_shared_memory_wait_and_lifecycle_options():
     assert spec.mode == "attach"
 
 
+def test_shared_memory_initializers_are_parsed_and_validated():
+    from shmpipeline.config import SharedMemoryConfig
+
+    normal = SharedMemoryConfig.from_dict(
+        {
+            "name": "matrix",
+            "shape": [2, 3],
+            "dtype": "float32",
+            "initial": {
+                "pattern": "normal",
+                "seed": 7,
+                "mean": 0.1,
+                "std": 0.01,
+            },
+        }
+    )
+    assert normal.initial == {
+        "pattern": "normal",
+        "seed": 7,
+        "mean": 0.1,
+        "std": 0.01,
+    }
+    with pytest.raises(ConfigValidationError, match="identity.*2D"):
+        SharedMemoryConfig.from_dict(
+            {
+                "name": "bad",
+                "shape": [3],
+                "dtype": "float32",
+                "initial": {"pattern": "identity"},
+            }
+        )
+
+
 @pytest.mark.parametrize("mode", ["bad", "reuse", "create-or-attach"])
 def test_shared_memory_rejects_unknown_lifecycle_mode(mode):
     with pytest.raises(ConfigValidationError, match="mode"):

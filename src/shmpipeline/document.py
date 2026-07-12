@@ -92,6 +92,8 @@ def config_to_document(config: PipelineConfig) -> Document:
             item["notify"] = spec.notify
         if spec.mode != "create_or_attach":
             item["mode"] = spec.mode
+        if spec.initial is not None:
+            item["initial"] = deepcopy(spec.initial)
         shared_memory.append(item)
 
     kernels = []

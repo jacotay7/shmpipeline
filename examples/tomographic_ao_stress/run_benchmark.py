@@ -35,6 +35,12 @@ RECONSTRUCTOR_SHAPE = (4096, 65536)
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("cpu", "gpu"), default="cpu")
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Override pipeline_<backend>.yaml (for example the batched GPU profile).",
+    )
     parser.add_argument("--duration", type=float, default=5.0)
     parser.add_argument("--warmup", type=float, default=1.0)
     parser.add_argument(
@@ -85,11 +91,17 @@ def _load_calibrations(manager: PipelineManager) -> None:
     """
     logger = logging.getLogger("shmpipeline.example.tomographic_ao")
     logger.info("initializing static calibration streams")
-    for index in range(WFS_COUNT):
-        prefix = f"tomo_wfs{index}"
-        _fill_stream(manager.get_stream(f"{prefix}_dark"), 0.0)
-        _fill_stream(manager.get_stream(f"{prefix}_inverse_flat"), 1.0)
-        _fill_stream(manager.get_stream(f"{prefix}_slope_offset"), 0.0)
+    names = manager.config.shared_memory_by_name
+    if "tomo_wfs_cube_raw" in names:
+        _fill_stream(manager.get_stream("tomo_wfs_dark"), 0.0)
+        _fill_stream(manager.get_stream("tomo_wfs_inverse_flat"), 1.0)
+        _fill_stream(manager.get_stream("tomo_wfs_slope_offset"), 0.0)
+    else:
+        for index in range(WFS_COUNT):
+            prefix = f"tomo_wfs{index}"
+            _fill_stream(manager.get_stream(f"{prefix}_dark"), 0.0)
+            _fill_stream(manager.get_stream(f"{prefix}_inverse_flat"), 1.0)
+            _fill_stream(manager.get_stream(f"{prefix}_slope_offset"), 0.0)
     _fill_stream(manager.get_stream("tomo_reconstructor"), 0.0)
     _fill_stream(manager.get_stream("tomo_reconstructor_bias"), 0.0)
     _fill_stream(manager.get_stream("tomo_command_offset"), 0.0)
@@ -202,10 +214,14 @@ def _start_sources(manager: PipelineManager, args, trace=None):
     stop = threading.Event()
     stats: dict[str, int] = {}
     rng = np.random.default_rng(args.seed)
-    camera_streams = [
-        manager.get_stream(f"tomo_wfs{index}_raw")
-        for index in range(WFS_COUNT)
-    ]
+    names = manager.config.shared_memory_by_name
+    if "tomo_wfs_cube_raw" in names:
+        camera_streams = [manager.get_stream("tomo_wfs_cube_raw")]
+    else:
+        camera_streams = [
+            manager.get_stream(f"tomo_wfs{index}_raw")
+            for index in range(WFS_COUNT)
+        ]
     camera_payloads = [
         _make_payload(stream, 1.0 + 0.01 * index)
         for index, stream in enumerate(camera_streams)
@@ -340,7 +356,11 @@ def _environment_metadata(backend: str) -> dict[str, Any]:
 def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.duration <= 0.0 or args.warmup < 0.0:
         raise ValueError("duration must be positive and warmup non-negative")
-    config_path = Path(__file__).with_name(f"pipeline_{args.backend}.yaml")
+    config_path = (
+        args.config
+        if args.config is not None
+        else Path(__file__).with_name(f"pipeline_{args.backend}.yaml")
+    )
     config = PipelineConfig.from_yaml(config_path)
     # The harness owns the cameras (rate control + frame-id timestamps), so
     # drop the YAML's self-contained camera/tip-tilt sources.

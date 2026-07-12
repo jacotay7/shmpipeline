@@ -187,7 +187,12 @@ def _locked_inputs_and_outputs(
             name: stream.count for name, stream in trigger_streams.items()
         }
         trigger_values = tuple(
-            _read_worker_input(trigger_streams[name])
+            _read_worker_input(
+                trigger_streams[name],
+                borrow_gpu=bool(
+                    kernel_config.parameters.get("borrow_gpu_inputs", False)
+                ),
+            )
             for name in kernel_config.trigger_inputs
         )
         trigger_input = (
@@ -226,11 +231,14 @@ def _locked_inputs_and_outputs(
 def _read_worker_input(
     stream: Any,
     *,
+    borrow_gpu: bool = False,
     cache: dict[str, tuple[Any, Any]] | None = None,
     cache_key: str | None = None,
 ):
     """Return one worker input snapshot with storage-aware consistency."""
     if getattr(stream, "gpu_enabled", False):
+        if borrow_gpu:
+            return stream.read(safe=False)
         count = getattr(stream, "count", None)
         if cache is not None and cache_key is not None:
             cached = cache.get(cache_key)

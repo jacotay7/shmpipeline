@@ -34,6 +34,44 @@ remains.
   frame_id, and a versioned JSON report with git/version/platform/CPU/CUDA
   metadata (§7, §8). `generate_calibrations.py`, `expected_dimensions.json`,
   `results/README.md`.
+- Declarative `shared_memory.initial` startup values (constant, seeded normal,
+  explicit values, or identity) are applied in-place during `build()`. The GUI
+  configs therefore initialize inverse flats, the 1 GiB reconstructor,
+  controller biases/offsets, command limits, and tip/tilt rotations before any
+  source starts. The checked-in sources run WFS cameras at 500 Hz, tip/tilt A
+  at 100 Hz, and tip/tilt B at 1000 Hz, producing nonzero commands without the
+  benchmark harness.
+
+**Audit findings**
+
+- The implementation agrees with the original functional vision: full 65536
+  slopes, eight-frame freshness and hardware-frame identity, closed-loop state,
+  calibrated/bounded DM commands, independent auxiliary loops, fake endpoints,
+  CPU/GPU configs, and reproducible measurement are all present.
+- The main intentional divergence is topology. The original diagram exposed
+  calibration, centroid, slope correction, concatenation, reconstruction, and
+  control as separate workers. The shipped performance configs fuse those
+  logical stages into `*.tomographic_controller`; this preserves the numerical
+  operations but sacrifices intermediate-stream observability to avoid process,
+  lock, CUDA IPC, and synchronization overhead. The expanded graph was useful
+  during characterization but is not the right production-performance default.
+- The GUI and CLI now use meaningful seeded initial values, whereas the
+  benchmark harness deliberately replaces them with cheap zero/one arrays
+  outside its timed interval. Results must state which initialization path was
+  used.
+- A requested-1-kHz measurement of the standard eight-stream GPU config on the
+  RTX 5090 delivered 534.4 Hz (5344/8263 measured source generations). The
+  fused kernel itself averaged 1.312 ms, already exceeding the 1 ms period;
+  eight camera publications and eight safe CUDA IPC snapshots add further
+  overhead. The current representation cannot reach 1 kHz on this host.
+- The optimized `pipeline_gpu_batched.yaml` profile implements the resulting
+  fast path: one `(8, 256, 256)` publication, batched/vectorized centroid
+  reductions, one fused controller process, and a borrowed locked GPU input
+  view. A 10-second requested-1-kHz run produced 10,000 camera cubes and the
+  controller worker sustained 1000.00 Hz at 0.812 ms average compute time. The
+  terminal window observed 9,997 commands because three publications were in
+  flight at the measurement boundary. This demonstrates that 1 kHz is feasible
+  on the RTX 5090 without reducing the 65536-slope or 4096-actuator dimensions.
 
 **Remaining / deferred**
 
@@ -49,6 +87,12 @@ remains.
   the strict "publish next set only after DM reaches sink" closed-loop mode.
 - Full NumPy/Torch reference correctness verification of a few frames
   (`--verify-frames`, §6/§10 item 14) beyond the unit-test-level kernel checks.
+- Further GPU headroom beyond 1 kHz: remove remaining per-frame reduction
+  temporaries, capture the fused path in a CUDA graph, replace unconditional
+  device synchronization with publication-scoped CUDA events, and benchmark an
+  FP16/BF16 reconstructor with FP32 accumulation/state. Keep the standard
+  eight-stream profile as the hardware-integration/reference form and the
+  batched profile as the maximum-performance form.
 
 ## 1. Goal
 
@@ -97,9 +141,11 @@ before building the pipeline
 and fail early with an actionable message when host RAM or CUDA memory is
 insufficient.
 
-## 3. Target graph
+## 3. Target logical graph
 
-The main loop has eight parallel front ends followed by a synchronized fan-in:
+The main loop has eight parallel logical front ends followed by a synchronized
+fan-in. In the shipped performance configs these operations execute inside one
+fused controller worker rather than as individual process nodes:
 
 ```text
 coordinated camera-set source (frame_id N, per-camera jitter)

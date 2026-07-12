@@ -32,6 +32,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs0_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -52,6 +55,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs1_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -72,6 +78,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs2_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -92,6 +101,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs3_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -112,6 +124,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs4_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -132,6 +147,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs5_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -152,6 +170,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs6_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -172,6 +193,9 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 1.0
   - name: tomo_wfs7_slope_offset
     shape: [64, 64, 2]
     dtype: float32
@@ -182,26 +206,47 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: normal
+      seed: 4242
+      mean: 0.0
+      std: 0.001
   - name: tomo_reconstructor_bias
     shape: [4096]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: normal
+      seed: 4243
+      mean: 0.0
+      std: 0.02
   - name: tomo_command_offset
     shape: [4096]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: normal
+      seed: 4244
+      mean: 0.0
+      std: 0.01
   - name: tomo_command_low
     shape: [4096]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: -2.5
   - name: tomo_command_high
     shape: [4096]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
+    initial:
+      pattern: constant
+      value: 2.5
   - name: tomo_dm_command
     shape: [4096]
     dtype: float32
@@ -215,10 +260,18 @@ shared_memory:
     shape: [2, 2]
     dtype: float32
     storage: cpu
+    initial:
+      pattern: values
+      values: [[0.9781476, -0.2079117], [0.2079117, 0.9781476]]
   - name: tt_a_bias
     shape: [2]
     dtype: float32
     storage: cpu
+    initial:
+      pattern: normal
+      seed: 4250
+      mean: 0.0
+      std: 0.01
   - name: tt_a_command
     shape: [2]
     dtype: float32
@@ -231,10 +284,18 @@ shared_memory:
     shape: [2, 2]
     dtype: float32
     storage: cpu
+    initial:
+      pattern: values
+      values: [[0.9925462, 0.1218693], [-0.1218693, 0.9925462]]
   - name: tt_b_bias
     shape: [2]
     dtype: float32
     storage: cpu
+    initial:
+      pattern: normal
+      seed: 4260
+      mean: 0.0
+      std: 0.01
   - name: tt_b_command
     shape: [2]
     dtype: float32
@@ -247,7 +308,9 @@ sources:
     parameters:
       pattern: random
       seed: 2401
-      rate_hz: null
+      amplitude: 1.0
+      offset: 10.0
+      rate_hz: 500.0
       jitter_us: 0.0
       assign_frame_id: true
   - name: tt_a_source
@@ -256,14 +319,18 @@ sources:
     parameters:
       pattern: random
       seed: 11
-      rate_hz: 700.0
+      amplitude: 1.0
+      offset: 10.0
+      rate_hz: 100.0
   - name: tt_b_source
     kind: synthetic.array
     stream: tt_b_image
     parameters:
       pattern: random
       seed: 12
-      rate_hz: 233.0
+      amplitude: 1.0
+      offset: 10.0
+      rate_hz: 1000.0
 
 kernels:
   - name: tomo_controller

@@ -258,6 +258,59 @@ def test_multi_input_concatenate_waits_for_all_new_streams(shm_prefix):
         manager.shutdown(force=True)
 
 
+def test_build_publishes_deterministic_stream_initializers(shm_prefix):
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_constant",
+                    "shape": [3],
+                    "dtype": "float32",
+                    "initial": {"pattern": "constant", "value": 2.5},
+                },
+                {
+                    "name": f"{shm_prefix}_normal",
+                    "shape": [2, 2],
+                    "dtype": "float32",
+                    "initial": {
+                        "pattern": "normal",
+                        "seed": 17,
+                        "std": 0.2,
+                    },
+                },
+                {
+                    "name": f"{shm_prefix}_identity",
+                    "shape": [2, 2],
+                    "dtype": "float32",
+                    "initial": {"pattern": "identity", "scale": 3.0},
+                },
+            ],
+            "sinks": [
+                {
+                    "name": "sink",
+                    "kind": "null.sink",
+                    "stream": f"{shm_prefix}_constant",
+                }
+            ],
+        }
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    try:
+        np.testing.assert_array_equal(
+            manager.get_stream(f"{shm_prefix}_constant").read(),
+            [2.5, 2.5, 2.5],
+        )
+        first = manager.get_stream(f"{shm_prefix}_normal").read()
+        assert np.any(first != 0.0)
+        np.testing.assert_array_equal(
+            manager.get_stream(f"{shm_prefix}_identity").read(),
+            np.eye(2, dtype=np.float32) * 3.0,
+        )
+    finally:
+        manager.shutdown(force=True)
+
+
 def _make_affine_pipeline_config_for_storage(shm_prefix: str, *, storage: str):
     return PipelineConfig.from_dict(
         {

@@ -9,6 +9,17 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- **Declarative stream initialization.** Shared-memory entries accept an
+  `initial` mapping with `constant`, seeded `normal`, explicit `values`, or
+  `identity` patterns. `PipelineManager.build()` publishes initial data
+  directly into the final CPU/GPU buffer before workers or sources start, and
+  the GUI preserves/edits the initializer YAML.
+- **1-kHz batched tomography path.** The GPU tomographic controller vectorizes
+  a `(8, rows, columns)` camera cube, and the runtime supports the controller's
+  opt-in locked borrowed GPU input. `pipeline_gpu_batched.yaml` removes seven
+  CUDA IPC snapshots and sustained a 1-kHz controller rate on the development
+  RTX 5090 while retaining 65536 slopes and 4096 actuators.
+
 - **Synchronized multi-input kernels.** `KernelConfig` accepts `inputs: [...]`
   and `trigger_policy` (`any_new` or `all_new`); the legacy single `input` is
   normalized to a one-item trigger tuple. The worker runtime waits on the vector

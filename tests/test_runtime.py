@@ -153,6 +153,19 @@ def test_read_worker_input_uses_safe_read_for_gpu():
     assert calls["safe"] is False
 
 
+def test_read_worker_input_can_borrow_locked_gpu_view():
+    calls = []
+
+    class _Probe(_FakeStream):
+        def read(self, safe=False):
+            calls.append(safe)
+            return self._array
+
+    stream = _Probe("g", [1.0], gpu_enabled=True)
+    runtime._read_worker_input(stream, borrow_gpu=True)
+    assert calls == [False]
+
+
 def test_locked_inputs_and_outputs_reads_all_streams():
     config = KernelConfig.from_dict(
         {
