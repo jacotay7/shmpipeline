@@ -27,6 +27,9 @@ from shmpipeline.kernels.cpu.spot_centroid import SpotCentroidCpuKernel
 from shmpipeline.kernels.cpu.tip_tilt_controller import (
     TipTiltControllerCpuKernel,
 )
+from shmpipeline.kernels.cpu.tomographic_controller import (
+    TomographicControllerCpuKernel,
+)
 
 __all__ = [
     "AddConstantCpuKernel",
@@ -47,5 +50,6 @@ __all__ = [
     "ScaleOffsetCpuKernel",
     "SpotCentroidCpuKernel",
     "TipTiltControllerCpuKernel",
+    "TomographicControllerCpuKernel",
     "ShackHartmannCentroidCpuKernel",
 ]

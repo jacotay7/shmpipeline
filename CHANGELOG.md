@@ -34,6 +34,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
   exclusive with `stream:`); such a source overrides `produce(writers)` and
   publishes every output stream itself, so one coordinator can drive several
   streams with controlled per-stream jitter and optional drop injection.
+- **`cpu.tomographic_controller`** host-side fused controller mirroring the GPU
+  kernel (eight-WFS calibration + centroids + reconstruction + control + clip),
+  so the CPU and GPU example topologies are identical.
+- **End-to-end latency tracing** in the tomographic benchmark
+  (`run_benchmark.py --trace-latency`): stamps a frame_id per camera set,
+  propagates it to the DM command, and reports input-to-sink latency
+  percentiles, plus a versioned JSON report with git/version/platform/CPU/CUDA
+  metadata, `generate_calibrations.py`, and `expected_dimensions.json`.
 - **Frame-id propagation and `matching_frame_id` synchronization.** Kernels can
   gate a multi-input fan-in on pyshmem's `frame_id` token via
   `synchronization: {mode: matching_frame_id, max_skew_generations, max_wait_s,

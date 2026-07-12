@@ -39,6 +39,7 @@ _DEFAULT_CPU_KINDS = (
     "cpu.shack_hartmann_centroid",
     "cpu.spot_centroid",
     "cpu.tip_tilt_controller",
+    "cpu.tomographic_controller",
     "cpu.centroid",
 )
 
@@ -85,6 +86,7 @@ def _load_default_cpu_kernel(kind: str) -> type[Kernel]:
         ShackHartmannCentroidCpuKernel,
         SpotCentroidCpuKernel,
         TipTiltControllerCpuKernel,
+        TomographicControllerCpuKernel,
     )
 
     _cpu_map: dict[str, type[Kernel]] = {
@@ -107,6 +109,7 @@ def _load_default_cpu_kernel(kind: str) -> type[Kernel]:
         "cpu.centroid": ShackHartmannCentroidCpuKernel,
         SpotCentroidCpuKernel.kind: SpotCentroidCpuKernel,
         TipTiltControllerCpuKernel.kind: TipTiltControllerCpuKernel,
+        TomographicControllerCpuKernel.kind: TomographicControllerCpuKernel,
     }
     result = _cpu_map.get(kind)
     if result is None:

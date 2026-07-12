@@ -223,7 +223,7 @@ Register via:
 | `cpu.shack_hartmann_centroid` / `gpu.shack_hartmann_centroid` | Tiled Shack-Hartmann centroid |
 | `cpu.spot_centroid` / `gpu.spot_centroid` | Single-spot centroid |
 | `cpu.tip_tilt_controller` / `gpu.tip_tilt_controller` | Fused spot centroid + leaky integrator + affine rotation (tip/tilt loop) |
-| `gpu.tomographic_controller` | Fused batched WFS calibration + centroid + reconstruction + integration + command clip (tomographic AO loop) |
+| `cpu.tomographic_controller` / `gpu.tomographic_controller` | Fused 8-WFS calibration + centroid + reconstruction + integration + command clip (tomographic AO loop; batched or eight-input) |
 | `cpu.reduce` | Reduce input to a scalar: `operation` = sum/mean/max/min |
 | `cpu.custom_operation` / `gpu.custom_operation` | Numba/torch expression evaluated at runtime |
 | `cpu.raise_error` / `gpu.raise_error` | Test kernel that raises intentionally |

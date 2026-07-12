@@ -1,0 +1,376 @@
+{
+  "actuators": 4096,
+  "slopes_per_wfs": 8192,
+  "streams": {
+    "tomo_command_high": {
+      "bytes": 16384,
+      "dtype": "float32",
+      "shape": [
+        4096
+      ]
+    },
+    "tomo_command_low": {
+      "bytes": 16384,
+      "dtype": "float32",
+      "shape": [
+        4096
+      ]
+    },
+    "tomo_command_offset": {
+      "bytes": 16384,
+      "dtype": "float32",
+      "shape": [
+        4096
+      ]
+    },
+    "tomo_dm_command": {
+      "bytes": 16384,
+      "dtype": "float32",
+      "shape": [
+        4096
+      ]
+    },
+    "tomo_reconstructor": {
+      "bytes": 1073741824,
+      "dtype": "float32",
+      "shape": [
+        4096,
+        65536
+      ]
+    },
+    "tomo_reconstructor_bias": {
+      "bytes": 16384,
+      "dtype": "float32",
+      "shape": [
+        4096
+      ]
+    },
+    "tomo_wfs0_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs0_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs0_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs0_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tomo_wfs1_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs1_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs1_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs1_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tomo_wfs2_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs2_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs2_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs2_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tomo_wfs3_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs3_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs3_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs3_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tomo_wfs4_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs4_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs4_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs4_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tomo_wfs5_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs5_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs5_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs5_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tomo_wfs6_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs6_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs6_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs6_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tomo_wfs7_dark": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs7_inverse_flat": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs7_raw": {
+      "bytes": 262144,
+      "dtype": "float32",
+      "shape": [
+        256,
+        256
+      ]
+    },
+    "tomo_wfs7_slope_offset": {
+      "bytes": 32768,
+      "dtype": "float32",
+      "shape": [
+        64,
+        64,
+        2
+      ]
+    },
+    "tt_a_bias": {
+      "bytes": 8,
+      "dtype": "float32",
+      "shape": [
+        2
+      ]
+    },
+    "tt_a_command": {
+      "bytes": 8,
+      "dtype": "float32",
+      "shape": [
+        2
+      ]
+    },
+    "tt_a_image": {
+      "bytes": 1024,
+      "dtype": "float32",
+      "shape": [
+        16,
+        16
+      ]
+    },
+    "tt_a_rotation": {
+      "bytes": 16,
+      "dtype": "float32",
+      "shape": [
+        2,
+        2
+      ]
+    },
+    "tt_b_bias": {
+      "bytes": 8,
+      "dtype": "float32",
+      "shape": [
+        2
+      ]
+    },
+    "tt_b_command": {
+      "bytes": 8,
+      "dtype": "float32",
+      "shape": [
+        2
+      ]
+    },
+    "tt_b_image": {
+      "bytes": 1024,
+      "dtype": "float32",
+      "shape": [
+        16,
+        16
+      ]
+    },
+    "tt_b_rotation": {
+      "bytes": 16,
+      "dtype": "float32",
+      "shape": [
+        2,
+        2
+      ]
+    }
+  },
+  "tomographic_vector": 65536,
+  "total_stream_bytes": 1080379456,
+  "wfs_count": 8
+}

@@ -1,77 +1,75 @@
 # Tomographic AO Stress Example
 
-This in-progress example exercises a full-grid tomographic adaptive-optics
-pipeline with eight synchronized 256 x 256 Shack-Hartmann sensors, two
-independent tip/tilt loops, and CPU/GPU variants.
+A reproducible synthetic three-loop adaptive-optics workload that stresses
+`shmpipeline`: eight hardware-synchronized 256×256 Shack-Hartmann WFS cameras
+feed one fused tomographic controller, alongside two independent 16×16 tip/tilt
+loops running at their own rates.
 
-Each WFS uses 4 x 4 pixel tiles and produces `(64, 64, 2)` centroids. All 8192
-slopes from every WFS are retained, giving a 65536-element tomographic vector.
-The float32 `(4096, 65536)` reconstructor occupies exactly 1 GiB.
+Each WFS uses 4×4 pixel tiles → `(64, 64, 2)` centroids = 8192 slopes; all eight
+give a 65536-element tomographic vector reconstructed to 4096 actuators. The
+float32 `(4096, 65536)` reconstructor is exactly 1 GiB.
 
-Validate the graphs without allocating their streams:
+There is **one CPU and one GPU pipeline**, identical in topology:
+
+```text
+synthetic.frame_set (8 WFS, one frame_id token per generation)
+  └─ tomographic_controller (8 inputs, synchronization: matching_frame_id)
+        fuses dark/flat · tiled centroids · slope cal · 4096×65536 reconstruct
+        · leaky integrator · command cal · per-actuator clip
+     └─ tomo_dm_command → null.sink   (fake DM)
+synthetic.array → tt_a_controller → null.sink   (700 Hz tip/tilt)
+synthetic.array → tt_b_controller → null.sink   (233 Hz tip/tilt)
+```
+
+The fan-in only combines WFS frames carrying a **matching `frame_id` token**, so
+the reconstructor consumes synchronized sets even under load; skewed branches are
+dropped (`drop_older`) within `max_skew_generations` / `max_wait_s`.
+
+## Run it
+
+Validate or run either pipeline directly — they are self-contained (built-in
+`synthetic.frame_set` / `synthetic.array` sources and `null.sink` endpoints):
 
 ```bash
-shmpipeline validate examples/tomographic_ao_stress/pipeline_cpu.yaml
 shmpipeline validate examples/tomographic_ao_stress/pipeline_gpu.yaml
+shmpipeline run examples/tomographic_ao_stress/pipeline_cpu.yaml --duration 5
 ```
 
-Run the initial synthetic harness:
+## Benchmark
+
+`run_benchmark.py` substitutes an instrumented camera source (rate control +
+frame-id timestamps), loads deterministic calibrations, and reports throughput,
+delivery ratio, per-loop rates, `matching_frame_id` skew counters, and — with
+`--trace-latency` — true input-to-sink latency percentiles. It emits a versioned
+JSON report with git revision, package versions, platform, CPU, and CUDA device.
 
 ```bash
+# GPU, sustained 150 Hz camera sets, with end-to-end latency tracing
 python examples/tomographic_ao_stress/run_benchmark.py \
-  --backend cpu --warmup 1 --duration 5
+  --backend gpu --main-rate 150 --warmup 5 --duration 30 \
+  --trace-latency --json-out results/gpu_sustained_150hz.json
 
+# CPU (the 1 GiB matrix-vector multiply dominates; run a lower rate)
 python examples/tomographic_ao_stress/run_benchmark.py \
-  --backend gpu --profile sustained --main-rate 675 \
-  --warmup 5 --duration 30
+  --backend cpu --main-rate 20 --warmup 3 --duration 30 --trace-latency
 ```
 
-The default `sustained` profile is optimized for long-running fixed camera
-rates. On GPU it publishes one synchronized `(8, 256, 256)` camera-set tensor,
-fuses dark/flat calibration, all centroids, slope calibration, reconstruction,
-integration, command calibration, and bounds into one CUDA worker, and keeps
-the small tip/tilt controllers on CPU. This reduces the hot path from 43 CUDA
-processes to one CUDA process plus two small CPU workers.
+Omit `--main-rate` for unthrottled saturation mode. On the development RTX 5090
+the GPU pipeline sustains ~150–200 Hz through the eight-camera matching barrier
+(the per-stream GPU consistency syncs are the ceiling) at ~2 ms p50 end-to-end
+latency; the CPU pipeline is bounded by host memory bandwidth on the 1 GiB
+reconstructor read.
 
-Pass `--gpu-unbatched` to drive the same fused controller from eight separate
-`(256, 256)` camera streams through the runtime's `all_new` multi-input barrier
-(`pipeline_gpu_sustained.yaml`) instead of one pre-stacked cube. This variant
-exercises the synchronized fan-in at full tomographic scale and quantifies the
-cost of the eight-stream barrier relative to the batched single-cube source:
+## Files
 
-```bash
-python examples/tomographic_ao_stress/run_benchmark.py \
-  --backend gpu --profile sustained --gpu-unbatched --main-rate 100 \
-  --warmup 5 --duration 30
-```
+| File | Purpose |
+|------|---------|
+| `pipeline_cpu.yaml`, `pipeline_gpu.yaml` | The two self-contained pipelines |
+| `run_benchmark.py` | Instrumented stress/latency harness |
+| `generate_calibrations.py` | Materialize `.npy` calibrations + `expected_dimensions.json` |
+| `expected_dimensions.json` | Every stream's shape/dtype/bytes (≈1 GiB total) |
+| `results/` | Checked-in benchmark JSON reports |
+| `IMPLEMENTATION_PLAN.md` | Design plan and current status |
 
-On the development RTX 5090 host the sustained profile completed a 30-second
-run at 675 Hz with 20,250/20,250 main frames delivered, while simultaneously
-delivering 21,000/21,000 loop-A frames at 700 Hz and 6,990 terminal loop-B
-frames at 233 Hz (one boundary publication was still in flight). The fused main
-kernel averaged 1.2465 ms with 5.6 microseconds RMS compute jitter. Overload
-began at 700 Hz and saturated near 680 Hz on that host.
-
-For comparison, the CPU sustained profile uses the expanded diagnostic graph,
-disables single-core affinity for the reconstructor, and uses 16 OpenBLAS
-threads by default:
-
-```bash
-python examples/tomographic_ao_stress/run_benchmark.py \
-  --backend cpu --profile sustained --main-rate 40 \
-  --blas-threads 16 --warmup 3 --duration 30
-```
-
-The same host sustained 40 Hz without main-loop loss. Higher requested rates
-saturated around 43 Hz because the physical 1 GiB matrix read is limited by
-host memory bandwidth.
-
-The main camera-set source publishes the eight images sequentially from one
-coordinator thread. The synchronized concatenate stage runs only after all
-eight slope streams have advanced. The two 16 x 16 sources run at 700 Hz and
-233 Hz by default.
-
-This first build reports terminal publication rates and worker compute metrics.
-Propagated hardware frame IDs, true input-to-sink latency, built-in null hardware
-sinks, missed-generation metrics, and fault injection remain tracked in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md).
+The 1 GiB reconstructor and `.npy` calibrations are never committed; they are
+regenerated deterministically.

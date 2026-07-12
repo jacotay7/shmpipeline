@@ -1,3 +1,21 @@
+# Tomographic AO stress example (gpu profile).
+#
+# Fastest sustained, fully-fused three-loop workload: eight synchronized
+# 256x256 WFS cameras feed one gpu.tomographic_controller that fuses
+# dark/flat calibration, tiled centroids, slope calibration, the 4096x65536
+# tomographic reconstruction, the leaky-integrator control law, and the final
+# command clip; two independent 16x16 tip/tilt loops run at their own rates.
+# The synchronized fan-in combines only WFS frames carrying a matching
+# frame_id token (synchronization.mode: matching_frame_id).
+#
+# Self-contained: synthetic.frame_set drives the cameras (stamping one frame_id
+# per generation), synthetic.array drives the tip/tilt sources, and null.sink
+# stands in for the three fake hardware endpoints, so `shmpipeline run` works
+# without extra code. run_benchmark.py substitutes its own instrumented
+# sources/sinks and loads real calibration arrays for measurement.
+#
+# This file is generated; see IMPLEMENTATION_PLAN.md.
+
 shared_memory:
   - name: tomo_wfs0_raw
     shape: [256, 256]
@@ -14,28 +32,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs0_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs0_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs0_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs0_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs0_slopes
-    shape: [8192]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -54,28 +52,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs1_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs1_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs1_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs1_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs1_slopes
-    shape: [8192]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -94,28 +72,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs2_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs2_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs2_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs2_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs2_slopes
-    shape: [8192]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -134,28 +92,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs3_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs3_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs3_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs3_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs3_slopes
-    shape: [8192]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -174,28 +112,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs4_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs4_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs4_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs4_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs4_slopes
-    shape: [8192]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -214,28 +132,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs5_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs5_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs5_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs5_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs5_slopes
-    shape: [8192]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -254,28 +152,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs6_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs6_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs6_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs6_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs6_slopes
-    shape: [8192]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -294,33 +172,8 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_wfs7_calibrated
-    shape: [256, 256]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs7_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_wfs7_slope_offset
     shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs7_corrected_centroids
-    shape: [64, 64, 2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_wfs7_slopes
-    shape: [8192]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_all_slopes
-    shape: [65536]
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
@@ -334,22 +187,7 @@ shared_memory:
     dtype: float32
     storage: gpu
     gpu_device: cuda:0
-  - name: tomo_residual_command
-    shape: [4096]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_integrated_command
-    shape: [4096]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
   - name: tomo_command_offset
-    shape: [4096]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tomo_calibrated_command
     shape: [4096]
     dtype: float32
     storage: gpu
@@ -372,426 +210,149 @@ shared_memory:
   - name: tt_a_image
     shape: [16, 16]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tt_a_centroid
-    shape: [2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tt_a_integrated
-    shape: [2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
   - name: tt_a_rotation
     shape: [2, 2]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
   - name: tt_a_bias
     shape: [2]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
   - name: tt_a_command
     shape: [2]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
   - name: tt_b_image
     shape: [16, 16]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tt_b_centroid
-    shape: [2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
-  - name: tt_b_integrated
-    shape: [2]
-    dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
   - name: tt_b_rotation
     shape: [2, 2]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
   - name: tt_b_bias
     shape: [2]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
   - name: tt_b_command
     shape: [2]
     dtype: float32
-    storage: gpu
-    gpu_device: cuda:0
+    storage: cpu
+
+sources:
+  - name: wfs_cameras
+    kind: synthetic.frame_set
+    streams: [tomo_wfs0_raw, tomo_wfs1_raw, tomo_wfs2_raw, tomo_wfs3_raw, tomo_wfs4_raw, tomo_wfs5_raw, tomo_wfs6_raw, tomo_wfs7_raw]
+    parameters:
+      pattern: random
+      seed: 2401
+      rate_hz: null
+      jitter_us: 0.0
+      assign_frame_id: true
+  - name: tt_a_source
+    kind: synthetic.array
+    stream: tt_a_image
+    parameters:
+      pattern: random
+      seed: 11
+      rate_hz: 700.0
+  - name: tt_b_source
+    kind: synthetic.array
+    stream: tt_b_image
+    parameters:
+      pattern: random
+      seed: 12
+      rate_hz: 233.0
 
 kernels:
-  - name: tomo_wfs0_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs0_raw
-    output: tomo_wfs0_calibrated
-    auxiliary:
-      dark: tomo_wfs0_dark
-      inverse_flat: tomo_wfs0_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs0_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs0_calibrated
-    output: tomo_wfs0_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs0_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs0_centroids
-    output: tomo_wfs0_corrected_centroids
-    auxiliary: [tomo_wfs0_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs0_flatten
-    kind: gpu.flatten
-    input: tomo_wfs0_corrected_centroids
-    output: tomo_wfs0_slopes
-    read_timeout: 0.1
-
-  - name: tomo_wfs1_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs1_raw
-    output: tomo_wfs1_calibrated
-    auxiliary:
-      dark: tomo_wfs1_dark
-      inverse_flat: tomo_wfs1_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs1_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs1_calibrated
-    output: tomo_wfs1_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs1_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs1_centroids
-    output: tomo_wfs1_corrected_centroids
-    auxiliary: [tomo_wfs1_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs1_flatten
-    kind: gpu.flatten
-    input: tomo_wfs1_corrected_centroids
-    output: tomo_wfs1_slopes
-    read_timeout: 0.1
-
-  - name: tomo_wfs2_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs2_raw
-    output: tomo_wfs2_calibrated
-    auxiliary:
-      dark: tomo_wfs2_dark
-      inverse_flat: tomo_wfs2_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs2_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs2_calibrated
-    output: tomo_wfs2_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs2_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs2_centroids
-    output: tomo_wfs2_corrected_centroids
-    auxiliary: [tomo_wfs2_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs2_flatten
-    kind: gpu.flatten
-    input: tomo_wfs2_corrected_centroids
-    output: tomo_wfs2_slopes
-    read_timeout: 0.1
-
-  - name: tomo_wfs3_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs3_raw
-    output: tomo_wfs3_calibrated
-    auxiliary:
-      dark: tomo_wfs3_dark
-      inverse_flat: tomo_wfs3_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs3_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs3_calibrated
-    output: tomo_wfs3_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs3_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs3_centroids
-    output: tomo_wfs3_corrected_centroids
-    auxiliary: [tomo_wfs3_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs3_flatten
-    kind: gpu.flatten
-    input: tomo_wfs3_corrected_centroids
-    output: tomo_wfs3_slopes
-    read_timeout: 0.1
-
-  - name: tomo_wfs4_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs4_raw
-    output: tomo_wfs4_calibrated
-    auxiliary:
-      dark: tomo_wfs4_dark
-      inverse_flat: tomo_wfs4_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs4_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs4_calibrated
-    output: tomo_wfs4_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs4_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs4_centroids
-    output: tomo_wfs4_corrected_centroids
-    auxiliary: [tomo_wfs4_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs4_flatten
-    kind: gpu.flatten
-    input: tomo_wfs4_corrected_centroids
-    output: tomo_wfs4_slopes
-    read_timeout: 0.1
-
-  - name: tomo_wfs5_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs5_raw
-    output: tomo_wfs5_calibrated
-    auxiliary:
-      dark: tomo_wfs5_dark
-      inverse_flat: tomo_wfs5_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs5_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs5_calibrated
-    output: tomo_wfs5_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs5_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs5_centroids
-    output: tomo_wfs5_corrected_centroids
-    auxiliary: [tomo_wfs5_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs5_flatten
-    kind: gpu.flatten
-    input: tomo_wfs5_corrected_centroids
-    output: tomo_wfs5_slopes
-    read_timeout: 0.1
-
-  - name: tomo_wfs6_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs6_raw
-    output: tomo_wfs6_calibrated
-    auxiliary:
-      dark: tomo_wfs6_dark
-      inverse_flat: tomo_wfs6_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs6_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs6_calibrated
-    output: tomo_wfs6_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs6_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs6_centroids
-    output: tomo_wfs6_corrected_centroids
-    auxiliary: [tomo_wfs6_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs6_flatten
-    kind: gpu.flatten
-    input: tomo_wfs6_corrected_centroids
-    output: tomo_wfs6_slopes
-    read_timeout: 0.1
-
-  - name: tomo_wfs7_calibration
-    kind: gpu.custom_operation
-    operation: (input - dark) * inverse_flat
-    input: tomo_wfs7_raw
-    output: tomo_wfs7_calibrated
-    auxiliary:
-      dark: tomo_wfs7_dark
-      inverse_flat: tomo_wfs7_inverse_flat
-    read_timeout: 0.1
-
-  - name: tomo_wfs7_centroid
-    kind: gpu.shack_hartmann_centroid
-    input: tomo_wfs7_calibrated
-    output: tomo_wfs7_centroids
-    parameters:
-      tile_size: 4
-    read_timeout: 0.1
-
-  - name: tomo_wfs7_slope_calibration
-    kind: gpu.scale_offset
-    input: tomo_wfs7_centroids
-    output: tomo_wfs7_corrected_centroids
-    auxiliary: [tomo_wfs7_slope_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_wfs7_flatten
-    kind: gpu.flatten
-    input: tomo_wfs7_corrected_centroids
-    output: tomo_wfs7_slopes
-    read_timeout: 0.1
-
-  - name: tomo_synchronized_concatenate
-    kind: gpu.concatenate
-    inputs: [tomo_wfs0_slopes, tomo_wfs1_slopes, tomo_wfs2_slopes, tomo_wfs3_slopes, tomo_wfs4_slopes, tomo_wfs5_slopes, tomo_wfs6_slopes, tomo_wfs7_slopes]
+  - name: tomo_controller
+    kind: gpu.tomographic_controller
+    inputs:
+      - tomo_wfs0_raw
+      - tomo_wfs1_raw
+      - tomo_wfs2_raw
+      - tomo_wfs3_raw
+      - tomo_wfs4_raw
+      - tomo_wfs5_raw
+      - tomo_wfs6_raw
+      - tomo_wfs7_raw
     trigger_policy: all_new
-    output: tomo_all_slopes
-    parameters:
-      axis: 0
-    read_timeout: 0.1
-
-  - name: tomo_reconstruction
-    kind: gpu.affine_transform
-    input: tomo_all_slopes
-    output: tomo_residual_command
-    auxiliary: [tomo_reconstructor, tomo_reconstructor_bias]
-    parameters: {}
-    read_timeout: 1.0
-
-  - name: tomo_closed_loop_integrator
-    kind: gpu.leaky_integrator
-    input: tomo_residual_command
-    output: tomo_integrated_command
-    parameters:
-      leak: 0.985
-      gain: 0.28
-    read_timeout: 0.1
-
-  - name: tomo_command_calibration
-    kind: gpu.scale_offset
-    input: tomo_integrated_command
-    output: tomo_calibrated_command
-    auxiliary: [tomo_command_offset]
-    parameters:
-      gain: 1.0
-    read_timeout: 0.1
-
-  - name: tomo_command_bounds
-    kind: gpu.custom_operation
-    operation: clip(input, low, high)
-    input: tomo_calibrated_command
+    synchronization:
+      mode: matching_frame_id
+      max_skew_generations: 32
+      max_wait_s: 0.050
     output: tomo_dm_command
     auxiliary:
-      low: tomo_command_low
-      high: tomo_command_high
-    read_timeout: 0.1
-
-  - name: tt_a_centroid_stage
-    kind: gpu.spot_centroid
+      wfs0_dark: tomo_wfs0_dark
+      wfs0_inverse_flat: tomo_wfs0_inverse_flat
+      wfs0_slope_offset: tomo_wfs0_slope_offset
+      wfs1_dark: tomo_wfs1_dark
+      wfs1_inverse_flat: tomo_wfs1_inverse_flat
+      wfs1_slope_offset: tomo_wfs1_slope_offset
+      wfs2_dark: tomo_wfs2_dark
+      wfs2_inverse_flat: tomo_wfs2_inverse_flat
+      wfs2_slope_offset: tomo_wfs2_slope_offset
+      wfs3_dark: tomo_wfs3_dark
+      wfs3_inverse_flat: tomo_wfs3_inverse_flat
+      wfs3_slope_offset: tomo_wfs3_slope_offset
+      wfs4_dark: tomo_wfs4_dark
+      wfs4_inverse_flat: tomo_wfs4_inverse_flat
+      wfs4_slope_offset: tomo_wfs4_slope_offset
+      wfs5_dark: tomo_wfs5_dark
+      wfs5_inverse_flat: tomo_wfs5_inverse_flat
+      wfs5_slope_offset: tomo_wfs5_slope_offset
+      wfs6_dark: tomo_wfs6_dark
+      wfs6_inverse_flat: tomo_wfs6_inverse_flat
+      wfs6_slope_offset: tomo_wfs6_slope_offset
+      wfs7_dark: tomo_wfs7_dark
+      wfs7_inverse_flat: tomo_wfs7_inverse_flat
+      wfs7_slope_offset: tomo_wfs7_slope_offset
+      reconstructor: tomo_reconstructor
+      reconstructor_bias: tomo_reconstructor_bias
+      command_offset: tomo_command_offset
+      command_low: tomo_command_low
+      command_high: tomo_command_high
+    parameters:
+      tile_size: 4
+      slope_gain: 1.0
+      leak: 0.985
+      control_gain: 0.28
+      command_gain: 1.0
+    read_timeout: 1.0
+  - name: tt_a_controller
+    kind: cpu.tip_tilt_controller
     input: tt_a_image
-    output: tt_a_centroid
-    parameters:
-      threshold: 0.0
-      background: 0.0
-      weight_power: 1.0
-    read_timeout: 0.1
-
-  - name: tt_a_closed_loop_integrator
-    kind: gpu.leaky_integrator
-    input: tt_a_centroid
-    output: tt_a_integrated
-    parameters:
-      leak: 0.97
-      gain: 0.35
-    read_timeout: 0.1
-
-  - name: tt_a_rotation
-    kind: gpu.affine_transform
-    input: tt_a_integrated
     output: tt_a_command
     auxiliary: [tt_a_rotation, tt_a_bias]
-    parameters: {}
-    read_timeout: 0.1
-
-  - name: tt_b_centroid_stage
-    kind: gpu.spot_centroid
-    input: tt_b_image
-    output: tt_b_centroid
     parameters:
-      threshold: 0.0
       background: 0.0
-      weight_power: 1.0
+      threshold: 0.0
+      leak: 0.97
+      control_gain: 0.35
     read_timeout: 0.1
-
-  - name: tt_b_closed_loop_integrator
-    kind: gpu.leaky_integrator
-    input: tt_b_centroid
-    output: tt_b_integrated
-    parameters:
-      leak: 0.94
-      gain: 0.22
-    read_timeout: 0.1
-
-  - name: tt_b_rotation
-    kind: gpu.affine_transform
-    input: tt_b_integrated
+  - name: tt_b_controller
+    kind: cpu.tip_tilt_controller
+    input: tt_b_image
     output: tt_b_command
     auxiliary: [tt_b_rotation, tt_b_bias]
-    parameters: {}
+    parameters:
+      background: 0.0
+      threshold: 0.0
+      leak: 0.94
+      control_gain: 0.22
     read_timeout: 0.1
 
-
+sinks:
+  - name: tomo_dm_command_sink
+    kind: null.sink
+    stream: tomo_dm_command
+    read_timeout: 0.5
+  - name: tt_a_command_sink
+    kind: null.sink
+    stream: tt_a_command
+    read_timeout: 0.5
+  - name: tt_b_command_sink
+    kind: null.sink
+    stream: tt_b_command
+    read_timeout: 0.5

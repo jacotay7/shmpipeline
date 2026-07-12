@@ -1,5 +1,55 @@
 # Tomographic AO Stress Example: Implementation Plan
 
+## 0. Implementation status (last updated 2026-07-11)
+
+Most of the plan is implemented. This section tracks what is done and what
+remains.
+
+**Done**
+
+- Multi-input trigger model: `inputs:` + `trigger_policy` (`any_new`/`all_new`),
+  runtime waits on the trigger vector and re-checks counts under the sorted lock
+  (§5.1 count path, §4). Config/graph/document round-trip.
+- `cpu.concatenate` / `gpu.concatenate` synchronized fan-in (§5.2).
+- `gpu.spot_centroid` with CPU parity (§5.4).
+- Fused controllers: `cpu.tip_tilt_controller` / `gpu.tip_tilt_controller` and
+  `cpu.tomographic_controller` / `gpu.tomographic_controller` (batched cube or
+  eight-stream forms).
+- Built-in endpoints (§5.5): `synthetic.array`, coordinated multi-output
+  `synthetic.frame_set` (per-camera jitter + drop injection + frame_id token),
+  and `null.sink` (on-device drain, `device_delay_s`, consume percentiles).
+  Multi-output source support (`SourceConfig.streams`, `produce()`).
+- **frame_id token propagation + `matching_frame_id` barrier** (§5.1 identity
+  path, §8): pyshmem 1.2.0 carries a uint64 `frame_id` published atomically with
+  the write sequence; shmpipeline propagates it (`propagate_frame_id`) and gates
+  fan-in on matching tokens with `drop_older` + `max_skew_generations` /
+  `max_wait_s` safeguards, reporting skew/skip/timeout counters.
+- Consolidated **one CPU + one GPU** self-contained pipeline (`pipeline_cpu.yaml`,
+  `pipeline_gpu.yaml`): eight synchronized WFS → fused controller
+  (`matching_frame_id`) → DM sink, plus two independent tip/tilt loops; runnable
+  via `shmpipeline run` (frame_set source + null sinks) and via `run_benchmark.py`
+  (instrumented sources, calibration loading).
+- Benchmark harness: throughput, delivery ratio, per-loop rates, barrier skew
+  metrics, `--trace-latency` end-to-end input-to-sink percentiles keyed by
+  frame_id, and a versioned JSON report with git/version/platform/CPU/CUDA
+  metadata (§7, §8). `generate_calibrations.py`, `expected_dimensions.json`,
+  `results/README.md`.
+
+**Remaining / deferred**
+
+- CPU/GPU affinity and NUMA placement tuning for the reconstructor (§9 CPU);
+  currently relies on defaults.
+- Optional separately-benchmarked fused vs. unfused variants for quantifying
+  process/CUDA-sync boundaries (§9); the expanded 43-stage graph was dropped in
+  favour of the single fastest fused config per the "one CPU + one GPU" scope.
+- Deeper resource metrics: per-worker CPU utilisation/RSS, CUDA
+  allocated/reserved/peak, matrix-multiply GFLOP/s (§8) — not yet reported.
+- Closed-loop-latency vs. saturation as distinct named modes (§7); the harness
+  supports throttled (`--main-rate`) and unthrottled runs but does not implement
+  the strict "publish next set only after DM reaches sink" closed-loop mode.
+- Full NumPy/Torch reference correctness verification of a few frames
+  (`--verify-frames`, §6/§10 item 14) beyond the unit-test-level kernel checks.
+
 ## 1. Goal
 
 Build a reproducible, synthetic, three-loop adaptive-optics workload that
