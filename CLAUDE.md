@@ -43,13 +43,13 @@ PipelineManager
 
 ```python
 manager = PipelineManager(config)  # INITIALIZED
-manager.build()                    # → BUILT  (streams created)
-manager.start()                    # → RUNNING (workers spawned, sources/sinks started)
-manager.pause()                    # → PAUSED
-manager.resume()                   # → RUNNING
-manager.stop()                     # → BUILT  (workers stopped, streams remain)
-manager.restart()                  # restart failed workers without full stop/start
-manager.shutdown()                 # → STOPPED (streams closed/unlinked)
+manager.build()  # → BUILT  (streams created)
+manager.start()  # → RUNNING (workers spawned, sources/sinks started)
+manager.pause()  # → PAUSED
+manager.resume()  # → RUNNING
+manager.stop()  # → BUILT  (workers stopped, streams remain)
+manager.restart()  # restart failed workers without full stop/start
+manager.shutdown()  # → STOPPED (streams closed/unlinked)
 ```
 
 Valid state transitions are enforced; illegal transitions raise `StateTransitionError`.
@@ -111,10 +111,11 @@ first of `outputs`.
 ```python
 from shmpipeline import Kernel, KernelContext
 
+
 class MyKernel(Kernel):
-    kind = "mypackage.my_kernel"   # unique kind string
-    storage = "cpu"                # "cpu" or "gpu"
-    auxiliary_arity = 0            # number of auxiliary streams (None = any)
+    kind = "mypackage.my_kernel"  # unique kind string
+    storage = "cpu"  # "cpu" or "gpu"
+    auxiliary_arity = 0  # number of auxiliary streams (None = any)
 
     def __init__(self, context: KernelContext) -> None:
         super().__init__(context)
@@ -173,24 +174,28 @@ manager = PipelineManager(config, registry=registry)
 ```python
 from shmpipeline import Source, SourceContext
 
+
 class MySource(Source):
     kind = "mypackage.my_source"
     storage = "cpu"
 
-    def open(self): ...          # called once before thread starts
-    def read(self): return array # return payload or None to skip
-    def close(self): ...         # called on thread exit
+    def open(self): ...  # called once before thread starts
+    def read(self):
+        return array  # return payload or None to skip
+
+    def close(self): ...  # called on thread exit
 ```
 
 ```python
 from shmpipeline import Sink, SinkContext
+
 
 class MySink(Sink):
     kind = "mypackage.my_sink"
     storage = "cpu"
 
     def open(self): ...
-    def consume(self, value): ...   # called for each new payload
+    def consume(self, value): ...  # called for each new payload
     def close(self): ...
 ```
 
@@ -331,8 +336,13 @@ creating any new streams it needs, without stopping existing workers:
 
 ```python
 manager.add_kernel(
-    {"name": "post", "kind": "cpu.add_constant",
-     "input": "out", "output": "final", "parameters": {"constant": 10.0}},
+    {
+        "name": "post",
+        "kind": "cpu.add_constant",
+        "input": "out",
+        "output": "final",
+        "parameters": {"constant": 10.0},
+    },
     shared_memory=[{"name": "final", "shape": [4], "dtype": "float32"}],
 )
 ```
@@ -353,7 +363,9 @@ throughput and terminal inter-arrival spacing at a terminal output stream:
 ```python
 report = manager.benchmark(
     duration_s=5.0,
-    source=SyntheticInputConfig(stream_name="input", pattern="random", rate_hz=1000.0),
+    source=SyntheticInputConfig(
+        stream_name="input", pattern="random", rate_hz=1000.0
+    ),
 )
 # report -> {throughput_hz, frames, inter_arrival_ms: {...}, latency_ms: {...}, workers: {...}}
 ```
@@ -373,6 +385,7 @@ Default placement policy is `RoundRobinPlacementPolicy`: kernel `i` is pinned to
 
 ```python
 from shmpipeline.scheduling import NoAffinityPlacementPolicy
+
 manager = PipelineManager(config, placement_policy=NoAffinityPlacementPolicy())
 ```
 
@@ -527,7 +540,7 @@ GPU kernels (`kernels/gpu/*`, no CUDA on CI) and the PySide6 GUI
 
 ## Package Info
 
-- Package name on PyPI: `shmpipeline` (v1.0.4)
+- Package name on PyPI: `shmpipeline` (v1.0.5)
 - License: GPL-3.0-only
 - Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.1.1,<2`, `PyYAML>=6.0`
 - Optional extras: `gpu` (torch), `control` (fastapi/uvicorn/httpx), `gui` (PySide6/pyqtgraph)

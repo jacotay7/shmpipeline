@@ -45,7 +45,7 @@ mirror as a NumPy array regardless of local CUDA, open it CPU-only:
 import pyshmem
 
 mirror = pyshmem.open(name, gpu_device=False)  # requires cpu_mirror: true
-frame = mirror.read()                          # numpy.ndarray from the mirror
+frame = mirror.read()  # numpy.ndarray from the mirror
 ```
 
 `gpu_device=False` raises `ValueError` if the stream was created without a CPU

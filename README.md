@@ -115,7 +115,9 @@ manager = PipelineManager(config)
 manager.build()
 manager.start()
 
-manager.get_stream("input_frame").write(np.array([1, 2, 3, 4], dtype=np.float32))
+manager.get_stream("input_frame").write(
+    np.array([1, 2, 3, 4], dtype=np.float32)
+)
 result = manager.get_stream("scaled_frame").read_new(timeout=2.0)
 print(result)
 

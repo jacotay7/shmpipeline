@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-07-26
+
 ### Added
 
 - **Declarative stream initialization.** Shared-memory entries accept an
@@ -75,6 +77,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - OpenBLAS thread control now also probes NumPy's bundled `libopenblas` and the
   `scipy_openblas` symbol names, so `blas_threads` overrides take effect on more
   installations.
+
+### Maintenance
+
+- Raised the development Ruff requirement to 0.16.0 and applied its formatter,
+  including its new formatting support for Python code blocks in Markdown.
 
 ## [1.0.4] - 2026-07-11
 

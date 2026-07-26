@@ -24,7 +24,12 @@ Programmatic registration is still useful in tests and embedded applications.
 ```python
 import numpy as np
 
-from shmpipeline import Kernel, PipelineConfig, PipelineManager, get_default_registry
+from shmpipeline import (
+    Kernel,
+    PipelineConfig,
+    PipelineManager,
+    get_default_registry,
+)
 
 
 class BiasCpuKernel(Kernel):
@@ -38,7 +43,9 @@ class BiasCpuKernel(Kernel):
             raise ValueError("example.bias requires a 'bias' parameter")
 
     def compute_into(self, trigger_input, output, auxiliary_inputs):
-        output[...] = np.asarray(trigger_input) + float(self.context.config.parameters["bias"])
+        output[...] = np.asarray(trigger_input) + float(
+            self.context.config.parameters["bias"]
+        )
 
 
 config = PipelineConfig.from_yaml("pipeline.yaml")

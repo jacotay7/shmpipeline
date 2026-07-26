@@ -84,7 +84,9 @@ manager = PipelineManager(config)
 manager.build()
 manager.start()
 manager.start_synthetic_input(
-    SyntheticInputConfig(stream_name="input_frame", pattern="random", rate_hz=500.0)
+    SyntheticInputConfig(
+        stream_name="input_frame", pattern="random", rate_hz=500.0
+    )
 )
 ```
 
