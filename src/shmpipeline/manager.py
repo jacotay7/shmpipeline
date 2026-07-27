@@ -576,12 +576,102 @@ class PipelineManager:
                 sink_config.stream,
                 sink_config.auxiliary_by_alias,
             )
+        self._validate_required_feedback_frame_ids()
         for spec in self.config.shared_memory:
             self._streams[spec.name] = self._build_stream(spec)
         for spec in self.config.shared_memory:
             if spec.initial is not None:
                 self._initialize_stream(spec, self._streams[spec.name])
         self._transition_state(PipelineState.BUILT, reason="build complete")
+
+    def _validate_required_feedback_frame_ids(self) -> None:
+        """Reject endpoint feedback paths that would silently lose a token.
+
+        Sources opt into this generic contract with
+        ``Source.required_feedback_aliases``.  For each named auxiliary
+        feedback stream, walk backward from its declaring sink to the source
+        outputs.  Every traversed kernel must explicitly propagate frame IDs;
+        otherwise a lockstep endpoint could wait forever for the response to
+        a known generation.
+        """
+        kernel_by_output = {
+            output: kernel
+            for kernel in self.config.kernels
+            for output in kernel.all_outputs
+        }
+        sink_by_output = {
+            output: sink
+            for sink in self.config.sinks
+            for output in sink.output_streams
+        }
+        for source in self.config.sources:
+            source_cls = self.registry.get_source(source.kind)
+            aliases = tuple(
+                getattr(source_cls, "required_feedback_aliases", ())
+            )
+            if not aliases:
+                continue
+            bindings = source.auxiliary_by_alias
+            for alias in aliases:
+                feedback_stream = bindings.get(alias)
+                if feedback_stream is None:
+                    raise ConfigValidationError(
+                        f"source {source.name!r} requires feedback auxiliary "
+                        f"alias {alias!r}"
+                    )
+                sink = sink_by_output.get(feedback_stream)
+                if sink is None:
+                    raise ConfigValidationError(
+                        f"feedback stream {feedback_stream!r} for source "
+                        f"{source.name!r} must be declared as a sink output"
+                    )
+                self._validate_feedback_path(
+                    source=source,
+                    stream=sink.stream,
+                    kernel_by_output=kernel_by_output,
+                    feedback_stream=feedback_stream,
+                    seen=set(),
+                )
+
+    def _validate_feedback_path(
+        self,
+        *,
+        source: Any,
+        stream: str,
+        kernel_by_output: Mapping[str, Any],
+        feedback_stream: str,
+        seen: set[str],
+    ) -> None:
+        """Trace one sink input backward to the source's published streams."""
+        if stream in source.output_streams:
+            return
+        if stream in seen:
+            raise ConfigValidationError(
+                f"feedback path for source {source.name!r} and stream "
+                f"{feedback_stream!r} contains a cycle before reaching a "
+                "source output"
+            )
+        seen.add(stream)
+        kernel = kernel_by_output.get(stream)
+        if kernel is None:
+            raise ConfigValidationError(
+                f"feedback path for source {source.name!r} and stream "
+                f"{feedback_stream!r} cannot trace sink input {stream!r} "
+                "to a source output"
+            )
+        if not kernel.propagate_frame_id:
+            raise ConfigValidationError(
+                f"kernel {kernel.name!r} on feedback path for source "
+                f"{source.name!r} must set propagate_frame_id: true"
+            )
+        for upstream_stream in kernel.trigger_inputs:
+            self._validate_feedback_path(
+                source=source,
+                stream=upstream_stream,
+                kernel_by_output=kernel_by_output,
+                feedback_stream=feedback_stream,
+                seen=seen.copy(),
+            )
 
     def _initialize_stream(
         self, spec: SharedMemoryConfig, stream: Any

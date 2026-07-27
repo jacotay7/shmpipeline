@@ -53,6 +53,16 @@ class Source(_EndpointBase, ABC):
 
     kind = "source.base"
     storage = "cpu"
+    required_feedback_aliases: tuple[str, ...] = ()
+    """Auxiliary aliases whose feedback path must preserve frame IDs.
+
+    A source that implements a lockstep request/response loop can opt in by
+    naming the auxiliary aliases through which it receives its response.  The
+    manager then traces the generic stream graph at build time and rejects a
+    feedback path containing a kernel that does not propagate the source's
+    publication token.  This is deliberately endpoint-generic: the manager
+    does not need to know what the source or endpoint models.
+    """
 
     def __init__(self, context: SourceContext) -> None:
         _EndpointBase.__init__(self)

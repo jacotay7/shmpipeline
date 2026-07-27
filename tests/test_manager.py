@@ -20,7 +20,7 @@ from shmpipeline import (
     PipelineState,
     get_default_registry,
 )
-from shmpipeline.errors import WorkerProcessError
+from shmpipeline.errors import ConfigValidationError, WorkerProcessError
 from shmpipeline.logging_utils import ColorFormatter
 from shmpipeline.shm_cleanup import close_stream
 from shmpipeline.sink import Sink
@@ -272,6 +272,75 @@ def test_stateful_sink_publishes_matching_feedback_frame_id(shm_prefix):
         assert status["outputs"] == [f"{shm_prefix}_applied"]
     finally:
         manager.shutdown(force=True)
+
+
+def test_feedback_source_requires_frame_id_propagation(shm_prefix):
+    class FeedbackSource(Source):
+        kind = "test.feedback_source"
+        required_feedback_aliases = ("state",)
+
+        def read(self):  # pragma: no cover - build-time contract only
+            return None
+
+    class FeedbackSink(Sink):
+        kind = "test.feedback_sink"
+
+        def consume(
+            self, value
+        ):  # pragma: no cover - build-time contract only
+            del value
+
+    names = {
+        "input": f"{shm_prefix}_input",
+        "command": f"{shm_prefix}_command",
+        "state": f"{shm_prefix}_state",
+    }
+    document = {
+        "shared_memory": [
+            {"name": name, "shape": [1], "dtype": "float32"}
+            for name in names.values()
+        ],
+        "sources": [
+            {
+                "name": "source",
+                "kind": FeedbackSource.kind,
+                "stream": names["input"],
+                "auxiliary": {"state": names["state"]},
+            }
+        ],
+        "kernels": [
+            {
+                "name": "controller",
+                "kind": "cpu.copy",
+                "input": names["input"],
+                "output": names["command"],
+            }
+        ],
+        "sinks": [
+            {
+                "name": "sink",
+                "kind": FeedbackSink.kind,
+                "stream": names["command"],
+                "outputs": [names["state"]],
+            }
+        ],
+    }
+    registry = get_default_registry().extended(
+        sources=(FeedbackSource,), sinks=(FeedbackSink,)
+    )
+    with pytest.raises(
+        ConfigValidationError, match="controller.*propagate_frame_id: true"
+    ):
+        PipelineManager(
+            PipelineConfig.from_dict(document), registry=registry
+        ).build()
+
+    document["kernels"][0]["propagate_frame_id"] = True
+    manager = PipelineManager(
+        PipelineConfig.from_dict(document), registry=registry
+    )
+    manager.build()
+    manager.shutdown(force=True)
 
 
 def test_multi_input_concatenate_waits_for_all_new_streams(shm_prefix):
