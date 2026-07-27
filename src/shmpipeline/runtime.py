@@ -8,6 +8,7 @@ import time
 import traceback
 from collections import deque
 from contextlib import ExitStack, contextmanager
+from pathlib import Path
 from queue import Empty
 from typing import Any, Mapping
 
@@ -300,6 +301,7 @@ def run_kernel_process(
     event_sink: Any,
     cpu_slot: int | None = None,
     registry: Any | None = None,
+    config_base_dir: Path | None = None,
 ) -> None:
     """Entry point executed in each worker subprocess."""
     logger = get_logger(f"worker.{kernel_config.name}")
@@ -307,7 +309,11 @@ def run_kernel_process(
     shared_by_name = {item.name: item for item in shared_memory}
     if registry is None:
         registry = get_default_registry()
-    kernel = registry.create(kernel_config, shared_by_name)
+    kernel = registry.create(
+        kernel_config,
+        shared_by_name,
+        config_base_dir=config_base_dir,
+    )
     trigger_streams = {
         name: _open_stream(shared_by_name[name])
         for name in kernel_config.trigger_inputs

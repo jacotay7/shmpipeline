@@ -5,6 +5,20 @@ A pipeline configuration has two top-level sections:
 - `shared_memory`: named stream definitions
 - `kernels`: processing stages wired between those streams
 
+## Configuration-relative plugin files
+
+`PipelineConfig.from_yaml("path/to/pipeline.yaml")` records the YAML file's
+directory as immutable runtime origin metadata. Every `KernelContext`,
+`SourceContext`, and `SinkContext` exposes it as `config_base_dir`, so plugin
+parameters such as `system_config: ao-system.toml` resolve beside the pipeline
+file regardless of the CLI, GUI, control-server, or worker process working
+directory. It is not a YAML field and is never written back into documents.
+
+Mapping-built configurations use the current directory at construction time by
+default. Python callers can make that explicit with
+`PipelineConfig.from_dict(mapping, base_path=...)` or
+`PipelineManager(mapping, config_base_path=...)`.
+
 ## Shared memory definitions
 
 Each shared-memory record defines a named stream:
@@ -65,6 +79,24 @@ Supported patterns are `constant` (`value`), `normal` (`seed`, `mean`, `std`),
 `values` (an explicitly shaped nested list), and `identity` (2-D arrays, with
 optional `scale`). Initializers are deterministic and are applied on every
 manager build, including when a compatible persistent stream is reused.
+
+## Source definitions
+
+Sources publish one `stream`, or several coordinated `streams` (the two forms
+are mutually exclusive). Every declared output must exist and match the source
+plugin's storage class before any stream or endpoint thread is created:
+
+```yaml
+sources:
+  - name: cameras
+    kind: synthetic.frame_set
+    streams: [camera_left, camera_right]
+    parameters: {pattern: constant}
+```
+
+The source status reports `streams` and `coordinated_generation_count`; the
+count describes source `produce()` cycles, not an assertion that capacity-one
+consumers observed every output publication.
 
 ## Kernel definitions
 

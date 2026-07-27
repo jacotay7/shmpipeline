@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import partial
 from importlib.metadata import entry_points
 from importlib.util import find_spec
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from shmpipeline.config import (
@@ -373,12 +374,22 @@ class KernelRegistry:
         self,
         config: KernelConfig,
         shared_memory: Mapping[str, SharedMemoryConfig],
+        *,
+        config_base_dir: Path | None = None,
     ) -> Kernel:
         """Instantiate a kernel after validation."""
         kernel_cls = self.get(config.kind)
         kernel_cls.validate_config(config, shared_memory)
         return kernel_cls(
-            KernelContext(config=config, shared_memory=shared_memory)
+            KernelContext(
+                config=config,
+                shared_memory=shared_memory,
+                config_base_dir=(
+                    Path.cwd().resolve()
+                    if config_base_dir is None
+                    else Path(config_base_dir).resolve()
+                ),
+            )
         )
 
     def validate_source(
@@ -394,6 +405,8 @@ class KernelRegistry:
         config: SourceConfig,
         shared_memory: Mapping[str, SharedMemoryConfig],
         streams: Mapping[str, Any] | None = None,
+        *,
+        config_base_dir: Path | None = None,
     ) -> Source:
         """Instantiate a source after validation."""
         source_cls = self.get_source(config.kind)
@@ -410,6 +423,11 @@ class KernelRegistry:
             SourceContext(
                 config=config,
                 shared_memory=shared_memory,
+                config_base_dir=(
+                    Path.cwd().resolve()
+                    if config_base_dir is None
+                    else Path(config_base_dir).resolve()
+                ),
                 auxiliary_streams=auxiliary_streams,
             )
         )
@@ -427,6 +445,8 @@ class KernelRegistry:
         config: SinkConfig,
         shared_memory: Mapping[str, SharedMemoryConfig],
         streams: Mapping[str, Any] | None = None,
+        *,
+        config_base_dir: Path | None = None,
     ) -> Sink:
         """Instantiate a sink after validation."""
         sink_cls = self.get_sink(config.kind)
@@ -443,6 +463,11 @@ class KernelRegistry:
             SinkContext(
                 config=config,
                 shared_memory=shared_memory,
+                config_base_dir=(
+                    Path.cwd().resolve()
+                    if config_base_dir is None
+                    else Path(config_base_dir).resolve()
+                ),
                 auxiliary_streams=auxiliary_streams,
             )
         )

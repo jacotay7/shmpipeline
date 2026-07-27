@@ -7,6 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-26
+
+### Added
+
+- Plugin contexts now expose an immutable `config_base_dir`. YAML pipelines use
+  the configuration file's directory; mapping-built pipelines use an explicit
+  `base_path`/`config_base_path` or the documented construction-time current
+  directory. The origin is preserved into spawned kernel workers.
+- Source status now reports every declared output stream and one coordinated
+  generation count for multi-output sources.
+
+### Fixed
+
+- Multi-output source validation, graph roles, and source-stream discovery now
+  cover every `streams:` entry instead of only the primary stream.
+
 ## [1.0.5] - 2026-07-26
 
 ### Added

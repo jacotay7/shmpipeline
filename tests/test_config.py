@@ -5,8 +5,11 @@ import textwrap
 import numpy as np
 import pytest
 
-from shmpipeline import PipelineConfig
+from shmpipeline import PipelineConfig, get_default_registry
 from shmpipeline.errors import ConfigValidationError
+from shmpipeline.graph import PipelineGraph
+from shmpipeline.sink import Sink
+from shmpipeline.source import Source
 
 pytestmark = pytest.mark.unit
 
@@ -238,6 +241,142 @@ def test_source_config_rejects_duplicate_output_stream():
                 ],
             }
         )
+
+
+def test_pipeline_config_preserves_yaml_origin_and_mapping_base_path(tmp_path):
+    config_path = tmp_path / "config" / "pipeline.yaml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        """
+shared_memory:
+  - name: frame
+    shape: [1]
+    dtype: float32
+sources:
+  - name: source
+    kind: example.source
+    stream: frame
+""",
+        encoding="utf-8",
+    )
+
+    yaml_config = PipelineConfig.from_yaml(config_path)
+    assert yaml_config.source_path == config_path.resolve()
+    assert yaml_config.base_path == config_path.parent.resolve()
+
+    mapping_config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": "frame", "shape": [1], "dtype": "float32"}
+            ],
+            "sources": [
+                {"name": "source", "kind": "example.source", "stream": "frame"}
+            ],
+        },
+        base_path=tmp_path,
+    )
+    assert mapping_config.source_path is None
+    assert mapping_config.base_path == tmp_path.resolve()
+
+
+def test_plugin_contexts_receive_config_base_dir(tmp_path):
+    class TestSource(Source):
+        kind = "test.origin_source"
+
+    class TestSink(Sink):
+        kind = "test.origin_sink"
+
+        def consume(self, value):
+            del value
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": "frame", "shape": [1], "dtype": "float32"}
+            ],
+            "sources": [
+                {"name": "source", "kind": TestSource.kind, "stream": "frame"}
+            ],
+            "sinks": [
+                {"name": "sink", "kind": TestSink.kind, "stream": "frame"}
+            ],
+        },
+        base_path=tmp_path,
+    )
+    registry = get_default_registry().extended(
+        sources=(TestSource,), sinks=(TestSink,)
+    )
+    shared = config.shared_memory_by_name
+    kernel = registry.create(
+        PipelineConfig.from_dict(
+            {
+                "shared_memory": [
+                    {"name": "in", "shape": [1], "dtype": "float32"},
+                    {"name": "out", "shape": [1], "dtype": "float32"},
+                ],
+                "kernels": [
+                    {
+                        "name": "copy",
+                        "kind": "cpu.copy",
+                        "input": "in",
+                        "output": "out",
+                    }
+                ],
+            },
+            base_path=tmp_path,
+        ).kernels[0],
+        {
+            "in": config.shared_memory[0],
+            "out": config.shared_memory[0],
+        },
+        config_base_dir=config.base_path,
+    )
+    source = registry.create_source(
+        config.sources[0], shared, config_base_dir=config.base_path
+    )
+    sink = registry.create_sink(
+        config.sinks[0], shared, config_base_dir=config.base_path
+    )
+    assert kernel.context.config_base_dir == tmp_path.resolve()
+    assert source.context.config_base_dir == tmp_path.resolve()
+    assert sink.context.config_base_dir == tmp_path.resolve()
+
+
+def test_multi_output_source_validates_every_stream_and_graph_role():
+    with pytest.raises(
+        ConfigValidationError, match="undefined shared memory: missing"
+    ):
+        PipelineConfig.from_dict(
+            {
+                "shared_memory": [
+                    {"name": "present", "shape": [1], "dtype": "float32"}
+                ],
+                "sources": [
+                    {
+                        "name": "source",
+                        "kind": "synthetic.frame_set",
+                        "streams": ["present", "missing"],
+                    }
+                ],
+            }
+        )
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": "first", "shape": [1], "dtype": "float32"},
+                {"name": "second", "shape": [1], "dtype": "float32"},
+            ],
+            "sources": [
+                {
+                    "name": "source",
+                    "kind": "synthetic.frame_set",
+                    "streams": ["first", "second"],
+                }
+            ],
+        }
+    )
+    assert PipelineGraph(config).source_streams() == ("first", "second")
 
 
 def test_pipeline_config_allows_source_and_sink_only_pipeline():

@@ -168,6 +168,8 @@ class _SourceController:
                 "name": self.spec.name,
                 "kind": self.spec.kind,
                 "stream": self.spec.stream,
+                "streams": list(self.spec.output_streams),
+                "coordinated_generation_count": self._frames_written,
                 "poll_interval": self.spec.poll_interval,
                 "alive": self._thread.is_alive(),
                 "frames_written": self._frames_written,
@@ -424,6 +426,7 @@ class PipelineManager:
         placement_policy: WorkerPlacementPolicy | None = None,
         registry: KernelRegistry | None = None,
         worker_start_timeout: float = 10.0,
+        config_base_path: str | Path | None = None,
     ) -> None:
         """Initialize a manager from a config object or YAML path.
 
@@ -442,11 +445,17 @@ class PipelineManager:
             before raising :class:`~shmpipeline.errors.WorkerProcessError`.
             Increase this when running on loaded systems where Numba JIT
             compilation takes longer than usual. Default is 10 seconds.
+        config_base_path:
+            Base directory made available to plugins when ``config`` is a
+            mapping.  Mapping configurations otherwise use the current
+            directory; YAML configurations always use their file's directory.
         """
         if isinstance(config, (str, Path)):
             config = PipelineConfig.from_yaml(config)
         elif isinstance(config, Mapping):
-            config = PipelineConfig.from_dict(config)
+            config = PipelineConfig.from_dict(
+                config, base_path=config_base_path
+            )
         self.config = config
         self.registry = registry or get_default_registry()
         self._runtime_registry = registry
@@ -541,10 +550,10 @@ class PipelineManager:
         for source_config in self.config.sources:
             self.registry.validate_source(source_config, shared_by_name)
             self._logger.info(
-                "validated source: name=%s kind=%s stream=%s auxiliary=%s",
+                "validated source: name=%s kind=%s streams=%s auxiliary=%s",
                 source_config.name,
                 source_config.kind,
-                source_config.stream,
+                source_config.output_streams,
                 source_config.auxiliary_by_alias,
             )
         for sink_config in self.config.sinks:
@@ -843,6 +852,7 @@ class PipelineManager:
                 event_writer,
                 cpu_slot,
                 self._runtime_registry,
+                self.config.base_path,
             ),
             name=f"shmpipeline-{kernel_config.name}",
         )
@@ -876,6 +886,7 @@ class PipelineManager:
                 source_config,
                 shared_by_name,
                 self._streams,
+                config_base_dir=self.config.base_path,
             )
             writers = (
                 {
@@ -903,6 +914,7 @@ class PipelineManager:
                 sink_config,
                 shared_by_name,
                 self._streams,
+                config_base_dir=self.config.base_path,
             )
             controller = _SinkController(
                 stream=self._streams[sink_config.stream],

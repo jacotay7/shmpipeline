@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 from shmpipeline._endpoint_base import _EndpointBase
@@ -17,12 +18,20 @@ class SourceContext:
 
     config: SourceConfig
     shared_memory: Mapping[str, SharedMemoryConfig]
+    config_base_dir: Path = field(default_factory=lambda: Path.cwd().resolve())
     auxiliary_streams: Mapping[str, Any] = field(default_factory=dict)
 
     @property
     def stream_spec(self) -> SharedMemoryConfig:
         """Return the shared-memory specification written by the source."""
         return self.shared_memory[self.config.stream]
+
+    @property
+    def output_specs(self) -> tuple[SharedMemoryConfig, ...]:
+        """Return every output specification in coordinated write order."""
+        return tuple(
+            self.shared_memory[name] for name in self.config.output_streams
+        )
 
     @property
     def auxiliary_specs(self) -> dict[str, SharedMemoryConfig]:
@@ -56,11 +65,12 @@ class Source(_EndpointBase, ABC):
         shared_memory: Mapping[str, SharedMemoryConfig],
     ) -> None:
         """Validate storage compatibility before the source is built."""
-        if shared_memory[config.stream].storage != cls.storage:
-            raise ConfigValidationError(
-                f"source {config.name!r} of kind {cls.kind!r} requires "
-                f"{cls.storage} shared memory for {config.stream!r}"
-            )
+        for output_name in config.output_streams:
+            if shared_memory[output_name].storage != cls.storage:
+                raise ConfigValidationError(
+                    f"source {config.name!r} of kind {cls.kind!r} requires "
+                    f"{cls.storage} shared memory for {output_name!r}"
+                )
         for binding in config.auxiliary:
             if shared_memory[binding.name].storage != cls.storage:
                 raise ConfigValidationError(

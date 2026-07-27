@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 from shmpipeline._endpoint_base import _EndpointBase
@@ -17,6 +18,7 @@ class SinkContext:
 
     config: SinkConfig
     shared_memory: Mapping[str, SharedMemoryConfig]
+    config_base_dir: Path = field(default_factory=lambda: Path.cwd().resolve())
     auxiliary_streams: Mapping[str, Any] = field(default_factory=dict)
 
     @property

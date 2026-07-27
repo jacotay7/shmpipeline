@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
@@ -21,6 +22,7 @@ class KernelContext:
 
     config: KernelConfig
     shared_memory: Mapping[str, SharedMemoryConfig]
+    config_base_dir: Path = field(default_factory=lambda: Path.cwd().resolve())
 
     @property
     def input_specs(self) -> tuple[SharedMemoryConfig, ...]:

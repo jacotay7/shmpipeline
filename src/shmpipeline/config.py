@@ -860,10 +860,28 @@ class PipelineConfig:
     kernels: tuple[KernelConfig, ...]
     sources: tuple[SourceConfig, ...] = field(default_factory=tuple)
     sinks: tuple[SinkConfig, ...] = field(default_factory=tuple)
+    base_path: Path = field(
+        default_factory=lambda: Path.cwd().resolve(),
+        repr=False,
+        compare=False,
+    )
+    source_path: Path | None = field(default=None, repr=False, compare=False)
 
     @classmethod
-    def from_dict(cls, raw: Mapping[str, Any]) -> "PipelineConfig":
-        """Create a pipeline configuration from a plain mapping."""
+    def from_dict(
+        cls,
+        raw: Mapping[str, Any],
+        *,
+        base_path: str | Path | None = None,
+    ) -> "PipelineConfig":
+        """Create a pipeline configuration from a plain mapping.
+
+        Mapping-built configurations resolve plugin-relative files from
+        ``base_path`` when supplied, otherwise from the current directory at
+        construction time.  The origin is runtime metadata, never a YAML
+        field, so saving a configuration cannot accidentally serialize a
+        machine-specific path.
+        """
         data = _expect_mapping(raw, context="pipeline config")
         _reject_unexpected_keys(
             data,
@@ -906,17 +924,30 @@ class PipelineConfig:
                 SourceConfig.from_dict(item) for item in sources_raw
             ),
             sinks=tuple(SinkConfig.from_dict(item) for item in sinks_raw),
+            base_path=(
+                Path.cwd().resolve()
+                if base_path is None
+                else Path(base_path).expanduser().resolve()
+            ),
         )
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "PipelineConfig":
         """Load a pipeline configuration from a YAML file."""
-        config_path = Path(path)
+        config_path = Path(path).expanduser().resolve()
         raw = yaml.load(
             config_path.read_text(encoding="utf-8"), Loader=_LineMarkLoader
         )
         try:
-            return cls.from_dict(raw)
+            config = cls.from_dict(raw, base_path=config_path.parent)
+            return cls(
+                shared_memory=config.shared_memory,
+                kernels=config.kernels,
+                sources=config.sources,
+                sinks=config.sinks,
+                base_path=config.base_path,
+                source_path=config_path,
+            )
         except ConfigValidationError as exc:
             raise ConfigValidationError(
                 _augment_error_with_line(str(exc), raw, config_path)
@@ -924,6 +955,8 @@ class PipelineConfig:
 
     def __post_init__(self) -> None:
         """Validate name uniqueness and shared-memory references."""
+        if not self.base_path.is_absolute():
+            raise ConfigValidationError("pipeline base_path must be absolute")
         shared_names = [item.name for item in self.shared_memory]
         if len(shared_names) != len(set(shared_names)):
             raise ConfigValidationError("shared memory names must be unique")
@@ -967,7 +1000,7 @@ class PipelineConfig:
         for source in self.sources:
             missing = [
                 name
-                for name in (source.stream, *source.auxiliary_names)
+                for name in (*source.output_streams, *source.auxiliary_names)
                 if name not in available
             ]
             if missing:

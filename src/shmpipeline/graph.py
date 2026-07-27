@@ -159,7 +159,11 @@ class PipelineGraph:
 
     def source_streams(self) -> tuple[str, ...]:
         """Return streams that are only written externally into the graph."""
-        explicit_sources = {source.stream for source in self.config.sources}
+        explicit_sources = {
+            stream_name
+            for source in self.config.sources
+            for stream_name in source.output_streams
+        }
         return tuple(
             sorted(
                 explicit_sources
