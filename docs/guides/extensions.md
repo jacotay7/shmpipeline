@@ -145,3 +145,9 @@ All three plugin contexts expose `config_base_dir`: an absolute directory for
 resolving files named in plugin parameters. It is the pipeline YAML's parent
 directory, or the documented mapping-construction base path; never use the
 process working directory for configuration-relative assets.
+
+Stateful sinks can declare `outputs: [...]` and override
+`Sink.consume_publication(publication, writers)`. `publication` is the atomic
+pyshmem payload/metadata snapshot; `writers` is keyed by the declared output
+stream names. The default implementation preserves the legacy
+`consume(publication.payload)` behavior.

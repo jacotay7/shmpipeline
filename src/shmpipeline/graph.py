@@ -39,6 +39,9 @@ class PipelineGraph:
         self._source_producers = {
             stream_name: [] for stream_name in self._shared_by_name
         }
+        self._sink_producers = {
+            stream_name: [] for stream_name in self._shared_by_name
+        }
         self._kernel_consumers = {
             stream_name: [] for stream_name in self._shared_by_name
         }
@@ -62,6 +65,8 @@ class PipelineGraph:
                 self._source_consumers[binding.name].append(source.name)
         for sink in config.sinks:
             self._sink_consumers[sink.stream].append(sink.name)
+            for stream_name in sink.output_streams:
+                self._sink_producers[stream_name].append(sink.name)
             for binding in sink.auxiliary:
                 self._sink_consumers[binding.name].append(sink.name)
 
@@ -69,6 +74,7 @@ class PipelineGraph:
             stream_name: [
                 *self._source_producers[stream_name],
                 *self._kernel_producers[stream_name],
+                *self._sink_producers[stream_name],
             ]
             for stream_name in self._shared_by_name
         }
@@ -155,6 +161,15 @@ class PipelineGraph:
                     stream=sink.stream,
                 )
             )
+            for stream_name in sink.output_streams:
+                edges.append(
+                    GraphEdge(
+                        source=sink.name,
+                        target=stream_name,
+                        role="sink_output",
+                        stream=stream_name,
+                    )
+                )
         return tuple(edges)
 
     def source_streams(self) -> tuple[str, ...]:

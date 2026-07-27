@@ -98,6 +98,28 @@ The source status reports `streams` and `coordinated_generation_count`; the
 count describes source `produce()` cycles, not an assertion that capacity-one
 consumers observed every output publication.
 
+## Stateful sink definitions
+
+Sinks normally consume one `stream`. A generic stateful endpoint may also
+declare `outputs`, making its writer handles visible to graph validation and
+its plugin call. The runtime passes the sink an atomic input publication
+(`payload`, count, frame ID, and write time) and a mapping keyed by each
+declared output stream name. Such a sink must publish feedback with the input
+publication's `frame_id` when it represents the same causal generation:
+
+```yaml
+sinks:
+  - name: actuator
+    kind: example.stateful_endpoint
+    stream: requested_command
+    outputs: [applied_state]
+```
+
+Existing sinks need no changes: their `consume(value)` method is still called
+through the compatibility default. New stateful endpoints override
+`consume_publication(publication, writers)` and call, for example,
+`writers["applied_state"].write(value, frame_id=publication.frame_id)`.
+
 ## Kernel definitions
 
 Most kernels consume one trigger input stream and write one output stream:

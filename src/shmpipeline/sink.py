@@ -27,6 +27,13 @@ class SinkContext:
         return self.shared_memory[self.config.stream]
 
     @property
+    def output_specs(self) -> tuple[SharedMemoryConfig, ...]:
+        """Return declared state-output specifications in write order."""
+        return tuple(
+            self.shared_memory[name] for name in self.config.output_streams
+        )
+
+    @property
     def auxiliary_specs(self) -> dict[str, SharedMemoryConfig]:
         """Return auxiliary shared-memory specs keyed by alias."""
         return {
@@ -69,6 +76,12 @@ class Sink(_EndpointBase, ABC):
                     f"sink {config.name!r} of kind {cls.kind!r} requires "
                     f"{cls.storage} shared memory for auxiliary {binding.name!r}"
                 )
+        for output_name in config.output_streams:
+            if shared_memory[output_name].storage != cls.storage:
+                raise ConfigValidationError(
+                    f"sink {config.name!r} of kind {cls.kind!r} requires "
+                    f"{cls.storage} shared memory for output {output_name!r}"
+                )
 
     def open(self) -> None:
         """Prepare the sink before the runtime thread starts."""
@@ -76,6 +89,20 @@ class Sink(_EndpointBase, ABC):
     @abstractmethod
     def consume(self, value: Any) -> None:
         """Handle one payload read from the configured stream."""
+
+    def consume_publication(
+        self,
+        publication: Any,
+        writers: Mapping[str, Any],
+    ) -> None:
+        """Handle an atomic input publication and declared output writers.
+
+        Stateful endpoints override this method and write through ``writers``
+        with the input publication's frame ID. The compatibility default keeps
+        existing sinks on their :meth:`consume` payload-only contract.
+        """
+        del writers
+        self.consume(publication.payload)
 
     def close(self) -> None:
         """Release any external resources owned by the sink."""

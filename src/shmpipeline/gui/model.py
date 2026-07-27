@@ -122,7 +122,9 @@ def runtime_source_entries(
             {
                 "name": source.get("name", ""),
                 "kind": source.get("kind", ""),
-                "stream": source.get("stream", ""),
+                "stream": ", ".join(
+                    source.get("streams", [source.get("stream", "")])
+                ),
                 "alive": bool(source_status.get("alive", False)),
                 "frames": source_status.get("frames_written", 0),
                 "rate_hz": source_status.get("effective_rate_hz"),

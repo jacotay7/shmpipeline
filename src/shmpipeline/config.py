@@ -774,6 +774,7 @@ class SinkConfig:
     read_timeout: float = 1.0
     pause_sleep: float = 0.01
     consume_timeout: float | None = None
+    outputs: tuple[str, ...] = field(default_factory=tuple)
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SinkConfig":
@@ -786,6 +787,7 @@ class SinkConfig:
                 "name",
                 "kind",
                 "stream",
+                "outputs",
                 "auxiliary",
                 "parameters",
                 "read_timeout",
@@ -820,6 +822,13 @@ class SinkConfig:
             data.get("consume_timeout"),
             context=f"consume_timeout for sink {name!r}",
         )
+        outputs = (
+            _normalize_names(
+                data.get("outputs"), context=f"outputs for {name}"
+            )
+            if "outputs" in data
+            else ()
+        )
         return cls(
             name=name,
             kind=kind,
@@ -829,12 +838,26 @@ class SinkConfig:
             read_timeout=read_timeout,
             pause_sleep=pause_sleep,
             consume_timeout=consume_timeout,
+            outputs=outputs,
         )
+
+    def __post_init__(self) -> None:
+        """Reject duplicate state outputs before graph construction."""
+        if len(set(self.outputs)) != len(self.outputs):
+            raise ConfigValidationError(
+                f"sink {self.name!r} cannot declare the same output stream "
+                "more than once"
+            )
 
     @property
     def auxiliary_names(self) -> tuple[str, ...]:
         """Return auxiliary shared-memory names in config order."""
         return tuple(binding.name for binding in self.auxiliary)
+
+    @property
+    def output_streams(self) -> tuple[str, ...]:
+        """Return streams this stateful endpoint may publish."""
+        return self.outputs
 
     @property
     def auxiliary_aliases(self) -> tuple[str, ...]:
@@ -1012,7 +1035,11 @@ class PipelineConfig:
         for sink in self.sinks:
             missing = [
                 name
-                for name in (sink.stream, *sink.auxiliary_names)
+                for name in (
+                    sink.stream,
+                    *sink.auxiliary_names,
+                    *sink.output_streams,
+                )
                 if name not in available
             ]
             if missing:

@@ -17,6 +17,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
   directory. The origin is preserved into spawned kernel workers.
 - Source status now reports every declared output stream and one coordinated
   generation count for multi-output sources.
+- Stateful sinks may declare `outputs: [...]` and override
+  `consume_publication(publication, writers)`. The runtime provides an atomic
+  pyshmem input publication plus explicitly declared output handles while the
+  legacy `consume(value)` sink contract remains unchanged.
 
 ### Fixed
 

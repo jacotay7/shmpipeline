@@ -58,10 +58,9 @@ def _read_sink_payload(
     previous_count: int,
     *,
     timeout: float,
-) -> tuple[int, Any]:
-    """Wait for and read one stable payload through pyshmem."""
-    payload = stream.read_after(previous_count, timeout=timeout)
-    return stream.last_read_count, payload
+) -> Any:
+    """Wait for one payload plus matching pyshmem publication metadata."""
+    return stream.read_after_publication(previous_count, timeout=timeout)
 
 
 def _call_with_optional_timeout(
@@ -262,10 +261,19 @@ class _SourceController:
 class _SinkController:
     """Manager-owned thread controller for one configured sink plugin."""
 
-    def __init__(self, *, stream: Any, sink: Any, spec: Any, pause_event: Any):
+    def __init__(
+        self,
+        *,
+        stream: Any,
+        sink: Any,
+        spec: Any,
+        pause_event: Any,
+        writers: Mapping[str, Any] | None = None,
+    ):
         self.stream = stream
         self.sink = sink
         self.spec = spec
+        self._writers = dict(writers or {})
         self._pause_event = pause_event
         self._stop_event = threading.Event()
         self._logger = get_logger(f"sink.{spec.name}")
@@ -325,6 +333,7 @@ class _SinkController:
                 "name": self.spec.name,
                 "kind": self.spec.kind,
                 "stream": self.spec.stream,
+                "outputs": list(self.spec.output_streams),
                 "read_timeout": self.spec.read_timeout,
                 "pause_sleep": self.spec.pause_sleep,
                 "alive": self._thread.is_alive(),
@@ -367,25 +376,27 @@ class _SinkController:
                         return
                     continue
                 try:
-                    current_count, payload = _read_sink_payload(
+                    publication = _read_sink_payload(
                         self.stream,
                         last_seen_count,
                         timeout=self.spec.read_timeout,
                     )
                 except TimeoutError:
                     continue
-                if current_count <= last_seen_count:
+                if publication.count <= last_seen_count:
                     continue
-                missed = int(current_count - last_seen_count - 1)
+                missed = publication.missed_publications
                 started = time.perf_counter()
                 _call_with_optional_timeout(
-                    lambda: self.sink.consume(payload),
+                    lambda: self.sink.consume_publication(
+                        publication, self._writers
+                    ),
                     timeout=self._consume_timeout,
                     executor=self._executor,
                     label=f"sink {self.spec.name!r} consume()",
                 )
                 finished = time.perf_counter()
-                last_seen_count = current_count
+                last_seen_count = publication.count
                 with self._lock:
                     self._frames_consumed += 1
                     if missed > 0:
@@ -921,6 +932,10 @@ class PipelineManager:
                 sink=sink,
                 spec=sink_config,
                 pause_event=self._pause_event,
+                writers={
+                    name: self._streams[name]
+                    for name in sink_config.output_streams
+                },
             )
             controller.start()
             self._sinks[sink_config.name] = controller

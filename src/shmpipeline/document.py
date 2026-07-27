@@ -176,6 +176,8 @@ def config_to_document(config: PipelineConfig) -> Document:
             "read_timeout": sink.read_timeout,
             "pause_sleep": sink.pause_sleep,
         }
+        if sink.output_streams:
+            item["outputs"] = list(sink.output_streams)
         if sink.auxiliary:
             if all(
                 binding.alias == binding.name for binding in sink.auxiliary

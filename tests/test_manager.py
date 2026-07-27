@@ -23,6 +23,7 @@ from shmpipeline import (
 from shmpipeline.errors import WorkerProcessError
 from shmpipeline.logging_utils import ColorFormatter
 from shmpipeline.shm_cleanup import close_stream
+from shmpipeline.sink import Sink
 from shmpipeline.source import Source
 
 try:
@@ -212,6 +213,65 @@ def _make_affine_pipeline_config(shm_prefix: str):
             ],
         }
     )
+
+
+def test_stateful_sink_publishes_matching_feedback_frame_id(shm_prefix):
+    class FeedbackSink(Sink):
+        kind = "test.feedback"
+
+        def consume(self, value):  # pragma: no cover - compatibility guard
+            raise AssertionError(f"payload-only fallback used: {value}")
+
+        def consume_publication(self, publication, writers):
+            writers[f"{shm_prefix}_applied"].write(
+                publication.payload + 1,
+                frame_id=publication.frame_id,
+            )
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": f"{shm_prefix}_command",
+                    "shape": [2],
+                    "dtype": "float32",
+                },
+                {
+                    "name": f"{shm_prefix}_applied",
+                    "shape": [2],
+                    "dtype": "float32",
+                },
+            ],
+            "sinks": [
+                {
+                    "name": "feedback",
+                    "kind": FeedbackSink.kind,
+                    "stream": f"{shm_prefix}_command",
+                    "outputs": [f"{shm_prefix}_applied"],
+                    "read_timeout": 0.05,
+                }
+            ],
+        }
+    )
+    manager = PipelineManager(
+        config,
+        registry=get_default_registry().extended_sinks(FeedbackSink),
+    )
+    manager.build()
+    manager.start()
+    try:
+        command = manager.get_stream(f"{shm_prefix}_command")
+        applied = manager.get_stream(f"{shm_prefix}_applied")
+        baseline = applied.count
+        command.write(np.array([2.0, 3.0], dtype=np.float32), frame_id=41)
+        assert applied.wait_for_count(after=baseline, timeout=2.0) > baseline
+        publication = applied.read_publication()
+        np.testing.assert_array_equal(publication.payload, [3.0, 4.0])
+        assert publication.frame_id == 41
+        status = manager.status()["sinks"]["feedback"]
+        assert status["outputs"] == [f"{shm_prefix}_applied"]
+    finally:
+        manager.shutdown(force=True)
 
 
 def test_multi_input_concatenate_waits_for_all_new_streams(shm_prefix):
