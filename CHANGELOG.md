@@ -7,7 +7,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-07-26
+## [1.1.1] - 2026-07-26
 
 ### Added
 
@@ -21,6 +21,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
   `consume_publication(publication, writers)`. The runtime provides an atomic
   pyshmem input publication plus explicitly declared output handles while the
   legacy `consume(value)` sink contract remains unchanged.
+
+### Changed
+
+- Relicensed shmpipeline under MIT after a first-party authorship and
+  provenance audit. Third-party dependencies retain their own licenses.
 
 ### Fixed
 
