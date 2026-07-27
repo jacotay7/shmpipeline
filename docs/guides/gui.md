@@ -177,10 +177,29 @@ Viewer windows are launched as separate processes so they can keep updating even
 
 Viewers are currently local-only. The GUI will only launch them when the connected control server is running on the same host, because the viewer process attaches directly to local shared-memory streams.
 
-The viewer status distinguishes between:
+Use the mouse wheel to zoom and drag to pan an image. The viewer preserves the
+current zoom and pan while same-sized live frames arrive, and automatically
+fits the view again only when the image dimensions change.
 
-- stream rate derived from shared-memory metadata
+The compact **Frame statistics** panel is visible by default and separates:
+
+- published frame count
+- average and p99 stream rates derived from shared-memory metadata
 - viewer refresh rate derived from the local timer
+
+Static shared-memory configuration is hidden from the live view. Open
+**Stream > Shared Memory Details** when you need the stream name, configured
+shape and dtype, storage backend, GPU device, CPU-mirror setting, initializer,
+or any additional configuration fields.
+
+Viewer menu actions all have window-scoped keyboard shortcuts:
+
+| Action | Shortcut |
+| --- | --- |
+| Show shared-memory details | `Ctrl+,` |
+| Close viewer | `Ctrl+W` |
+| Toggle frame statistics | `Ctrl+I` |
+| Fit the current data to the window | `F` |
 
 :::{figure} ../_static/images/gui/gui-viewer-window.png
 :alt: Stream viewer window in the shmpipeline GUI displaying a live grayscale image and update rates.

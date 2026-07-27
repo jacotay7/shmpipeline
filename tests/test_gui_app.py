@@ -101,6 +101,7 @@ class _FakePlotWidget(_QT_WIDGET_BASE):
             super().__init__()
         self.background = None
         self.curve = _FakePlotCurve()
+        self.auto_range_calls = 0
 
     def plot(self, pen=None):
         self.curve = _FakePlotCurve(pen=pen)
@@ -109,8 +110,14 @@ class _FakePlotWidget(_QT_WIDGET_BASE):
     def setBackground(self, background) -> None:
         self.background = background
 
+    def autoRange(self) -> None:
+        self.auto_range_calls += 1
+
 
 class _FakeImagePlot:
+    def __init__(self) -> None:
+        self.auto_range_calls = 0
+
     def hideAxis(self, *_args) -> None:
         return None
 
@@ -121,7 +128,7 @@ class _FakeImagePlot:
         return None
 
     def autoRange(self) -> None:
-        return None
+        self.auto_range_calls += 1
 
 
 class _FakeGraphicsLayoutWidget(_QT_WIDGET_BASE):
@@ -606,13 +613,49 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
     )
 
     viewer = viewers_module.SharedMemoryViewer(
-        {"name": "demo", "storage": "cpu"}
+        {
+            "name": "demo",
+            "shape": [4, 4],
+            "dtype": "float32",
+            "storage": "cpu",
+        }
     )
     try:
+        viewer._timer.stop()
+        assert viewer._image_plot.auto_range_calls == 1
         viewer.refresh()
-        assert "Shape: (4, 4)" in viewer._status_label.text()
-        assert "Stream Hz avg" in viewer._status_label.text()
-        assert "Viewer Hz avg" in viewer._status_label.text()
+        assert viewer._image_plot.auto_range_calls == 1
+        assert viewer._stat_values["count"].text() == "2"
+        assert viewer._stat_values["stream_avg"].text().endswith(" Hz")
+        assert viewer._stat_values["stream_p99"].text().endswith(" Hz")
+        assert viewer._stat_values["viewer_avg"].text().endswith(" Hz")
+        assert viewer._status_label.isHidden()
+
+        assert viewer._stats_action.isChecked()
+        assert viewer._stats_action.shortcut().toString() == "Ctrl+I"
+        assert viewer._details_action.shortcut().toString() == "Ctrl+,"
+        assert viewer._fit_action.shortcut().toString() == "F"
+        assert viewer._close_action.shortcut().toString() == "Ctrl+W"
+        viewer._stats_action.setChecked(False)
+        assert viewer._stats_group.isHidden()
+        viewer._stats_action.setChecked(True)
+        assert not viewer._stats_group.isHidden()
+
+        viewer.show()
+        qapp.processEvents()
+        viewer._fit_action.trigger()
+        assert viewer._image_plot.auto_range_calls == 2
+
+        viewer._show_stream_details()
+        details_dialog = viewer._stream_details_dialog
+        assert details_dialog is not None
+        assert details_dialog._value_labels["shape"].text() == "[4, 4]"
+        assert details_dialog._value_labels["dtype"].text() == "float32"
+        assert not details_dialog.isHidden()
+        details_dialog.close()
+
+        viewer._render_array(np.zeros((8, 6), dtype=np.float32))
+        assert viewer._image_plot.auto_range_calls == 3
     finally:
         viewer.close()
 
@@ -635,7 +678,11 @@ def test_gpu_viewer_can_open_without_cpu_mirror(qapp, monkeypatch):
         assert open_calls == [
             ("demo", {"gpu_device": "cuda:0", "readonly": True})
         ]
-        assert "Mode: passive-gpu" in viewer._status_label.text()
+        viewer._show_stream_details()
+        details_dialog = viewer._stream_details_dialog
+        assert details_dialog is not None
+        assert details_dialog._value_labels["gpu_device"].text() == "cuda:0"
+        details_dialog.close()
     finally:
         viewer.close()
 
