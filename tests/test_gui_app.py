@@ -27,7 +27,11 @@ try:
     from shmpipeline.gui import themes as themes_module
     from shmpipeline.gui import viewers as viewers_module
     from shmpipeline.gui.app import (
+        KernelDialog,
         MainWindow,
+        SharedMemoryDialog,
+        SinkDialog,
+        SourceDialog,
         SyntheticInputDialog,
     )
     from shmpipeline.gui.app import (
@@ -39,6 +43,10 @@ except Exception as exc:  # pragma: no cover - GUI stack unavailable
     viewers_module = None
     themes_module = None
     MainWindow = None
+    KernelDialog = None
+    SharedMemoryDialog = None
+    SinkDialog = None
+    SourceDialog = None
     SyntheticInputDialog = None
     ControlWindow = None
     gui_main = None
@@ -183,6 +191,107 @@ def test_main_window_can_start_in_light_theme(qapp):
         assert window.current_theme_name == "light"
     finally:
         window.close()
+
+
+def test_kernel_dialog_preserves_frame_id_and_advanced_wiring(qapp):
+    initial = {
+        "name": "control",
+        "kind": "cpu.copy",
+        "inputs": ["delta", "gain"],
+        "outputs": ["command", "telemetry"],
+        "trigger_policy": "all_new",
+        "synchronization": {
+            "mode": "matching_frame_id",
+            "max_skew_generations": 4,
+            "on_skew": "drop_older",
+        },
+        "propagate_frame_id": True,
+        "poll_interval": 0.001,
+        "auxiliary": {"reconstructor": "reconstructor"},
+        "parameters": {"gain": 0.1, "leak": 0.99},
+    }
+    dialog = KernelDialog(
+        ["delta", "gain", "command", "telemetry"],
+        ["cpu.copy"],
+        initial=initial,
+    )
+    try:
+        value = dialog.value()
+        assert value["propagate_frame_id"] is True
+        assert value["inputs"] == ["delta", "gain"]
+        assert value["outputs"] == ["command", "telemetry"]
+        assert "input" not in value
+        assert "output" not in value
+        assert value["trigger_policy"] == "all_new"
+        assert value["synchronization"] == initial["synchronization"]
+        assert value["poll_interval"] == 0.001
+        assert value["auxiliary"] == initial["auxiliary"]
+        assert value["parameters"] == initial["parameters"]
+    finally:
+        dialog.close()
+
+
+def test_gui_row_dialogs_preserve_unrepresented_config_fields(qapp):
+    shared = SharedMemoryDialog(
+        initial={
+            "name": "matrix",
+            "shape": [2, 2],
+            "dtype": "float64",
+            "notify": True,
+            "mode": "replace",
+            "initial": {"pattern": "identity", "scale": 2.0},
+        }
+    )
+    source = SourceDialog(
+        ["a", "b", "ready"],
+        ["test.source"],
+        initial={
+            "name": "source",
+            "kind": "test.source",
+            "streams": ["a", "b"],
+            "auxiliary": {"ready": "ready"},
+            "parameters": {"path": "asset.npy"},
+            "read_timeout": 0.5,
+        },
+    )
+    sink = SinkDialog(
+        ["a", "b", "ready"],
+        ["test.sink"],
+        initial={
+            "name": "sink",
+            "kind": "test.sink",
+            "stream": "a",
+            "outputs": ["b"],
+            "auxiliary": {"ready": "ready"},
+            "parameters": {"path": "asset.npy"},
+            "consume_timeout": 0.5,
+        },
+    )
+    try:
+        shared_value = shared.value()
+        assert shared_value["notify"] is True
+        assert shared_value["mode"] == "replace"
+        assert shared_value["initial"] == {
+            "pattern": "identity",
+            "scale": 2.0,
+        }
+
+        source_value = source.value()
+        assert source_value["streams"] == ["a", "b"]
+        assert "stream" not in source_value
+        assert source_value["auxiliary"] == {"ready": "ready"}
+        assert source_value["parameters"] == {"path": "asset.npy"}
+        assert source_value["read_timeout"] == 0.5
+
+        sink_value = sink.value()
+        assert sink_value["outputs"] == ["b"]
+        assert sink_value["auxiliary"] == {"ready": "ready"}
+        assert sink_value["parameters"] == {"path": "asset.npy"}
+        assert sink_value["consume_timeout"] == 0.5
+    finally:
+        shared.close()
+        source.close()
+        sink.close()
 
 
 def test_main_window_can_switch_themes(qapp):

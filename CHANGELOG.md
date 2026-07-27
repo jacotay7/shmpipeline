@@ -9,6 +9,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- GUI row editors now preserve frame-ID propagation, synchronization,
+  multi-stream wiring, auxiliary bindings, endpoint outputs, and other
+  configuration fields that are not directly editable in their basic forms.
+  Dialog YAML fields now serialize fragments without injecting empty
+  top-level pipeline sections into kernel/endpoint parameters.
 - GUI and control-server pipelines now retain the directory of the selected
   YAML file as the non-serialized configuration base path. Relative plugin
   assets therefore resolve beside the loaded pipeline after GUI build/start,

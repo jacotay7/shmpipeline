@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pyqtgraph as pg
+import yaml
 from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import (
     QAction,
@@ -86,6 +87,15 @@ class SharedMemoryRecord:
     cpu_mirror: bool
 
 
+def _yaml_fragment(value: Any) -> str:
+    """Serialize one dialog field without adding pipeline document keys."""
+    return yaml.safe_dump(
+        value,
+        sort_keys=False,
+        allow_unicode=False,
+    ).strip()
+
+
 class SharedMemoryDialog(QDialog):
     """Edit one shared-memory definition."""
 
@@ -97,6 +107,7 @@ class SharedMemoryDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Shared Memory")
         initial = dict(initial or {})
+        self._initial = initial
 
         self.name_edit = QLineEdit(initial.get("name", ""))
         self.shape_edit = QLineEdit(
@@ -113,7 +124,7 @@ class SharedMemoryDialog(QDialog):
         )
         self.initial_edit = QPlainTextEdit()
         self.initial_edit.setPlainText(
-            document_to_yaml(initial.get("initial", {})).strip()
+            _yaml_fragment(initial.get("initial", {}))
             if initial.get("initial")
             else ""
         )
@@ -153,23 +164,33 @@ class SharedMemoryDialog(QDialog):
             for part in self.shape_edit.text().split(",")
             if part.strip()
         ]
-        record = {
-            "name": self.name_edit.text().strip(),
-            "shape": shape,
-            "dtype": self.dtype_edit.text().strip(),
-            "storage": self.storage_combo.currentText(),
-        }
+        record = dict(self._initial)
+        record.update(
+            {
+                "name": self.name_edit.text().strip(),
+                "shape": shape,
+                "dtype": self.dtype_edit.text().strip(),
+                "storage": self.storage_combo.currentText(),
+            }
+        )
         if record["storage"] == "gpu":
             record["gpu_device"] = (
                 self.gpu_device_edit.text().strip() or "cuda:0"
             )
             if self.cpu_mirror_check.isChecked():
                 record["cpu_mirror"] = True
+            else:
+                record.pop("cpu_mirror", None)
+        else:
+            record.pop("gpu_device", None)
+            record.pop("cpu_mirror", None)
         initial = parse_inline_yaml(
             self.initial_edit.toPlainText(), fallback={}
         )
         if initial:
             record["initial"] = initial
+        else:
+            record.pop("initial", None)
         return record
 
 
@@ -186,6 +207,7 @@ class KernelDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Kernel")
         initial = dict(initial or {})
+        self._initial = initial
 
         self.name_edit = QLineEdit(initial.get("name", ""))
         self.kind_combo = QComboBox()
@@ -195,27 +217,51 @@ class KernelDialog(QDialog):
         self.input_combo = QComboBox()
         self.input_combo.setEditable(True)
         self.input_combo.addItems(shared_names)
+        initial_inputs = initial.get("inputs", ())
         self.input_combo.setCurrentText(
-            initial.get("input", shared_names[0] if shared_names else "")
+            initial.get(
+                "input",
+                initial_inputs[0]
+                if initial_inputs
+                else shared_names[0]
+                if shared_names
+                else "",
+            )
         )
         self.output_combo = QComboBox()
         self.output_combo.setEditable(True)
         self.output_combo.addItems(shared_names)
+        initial_outputs = initial.get("outputs", ())
         self.output_combo.setCurrentText(
-            initial.get("output", shared_names[0] if shared_names else "")
+            initial.get(
+                "output",
+                initial_outputs[0]
+                if initial_outputs
+                else shared_names[0]
+                if shared_names
+                else "",
+            )
         )
+        if initial_inputs:
+            self.input_combo.setEnabled(False)
+            self.input_combo.setToolTip(
+                "Multi-input wiring is preserved from YAML."
+            )
+        if initial_outputs:
+            self.output_combo.setEnabled(False)
+            self.output_combo.setToolTip(
+                "Multi-output wiring is preserved from YAML."
+            )
         self.auxiliary_edit = QPlainTextEdit()
         self.auxiliary_edit.setPlainText(
             ""
             if "auxiliary" not in initial
-            else document_to_yaml({"auxiliary": initial.get("auxiliary")})
-            .split("auxiliary:", 1)[1]
-            .strip()
+            else _yaml_fragment(initial.get("auxiliary"))
         )
         self.operation_edit = QLineEdit(initial.get("operation", ""))
         self.parameters_edit = QPlainTextEdit()
         self.parameters_edit.setPlainText(
-            document_to_yaml(initial.get("parameters", {})).strip()
+            _yaml_fragment(initial.get("parameters", {}))
             if initial.get("parameters")
             else "{}"
         )
@@ -224,6 +270,10 @@ class KernelDialog(QDialog):
         )
         self.pause_sleep_edit = QLineEdit(
             str(initial.get("pause_sleep", 0.01))
+        )
+        self.propagate_frame_id_check = QCheckBox()
+        self.propagate_frame_id_check.setChecked(
+            bool(initial.get("propagate_frame_id", False))
         )
 
         form = QFormLayout()
@@ -236,6 +286,7 @@ class KernelDialog(QDialog):
         form.addRow("Parameters YAML", self.parameters_edit)
         form.addRow("Read timeout", self.read_timeout_edit)
         form.addRow("Pause sleep", self.pause_sleep_edit)
+        form.addRow("Propagate frame ID", self.propagate_frame_id_check)
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
@@ -255,19 +306,30 @@ class KernelDialog(QDialog):
         parameters = parse_inline_yaml(
             self.parameters_edit.toPlainText(), fallback={}
         )
-        record: dict[str, Any] = {
-            "name": self.name_edit.text().strip(),
-            "kind": self.kind_combo.currentText().strip(),
-            "input": self.input_combo.currentText().strip(),
-            "output": self.output_combo.currentText().strip(),
-            "auxiliary": auxiliary,
-            "parameters": parameters,
-            "read_timeout": float(self.read_timeout_edit.text().strip()),
-            "pause_sleep": float(self.pause_sleep_edit.text().strip()),
-        }
+        record: dict[str, Any] = dict(self._initial)
+        record.update(
+            {
+                "name": self.name_edit.text().strip(),
+                "kind": self.kind_combo.currentText().strip(),
+                "auxiliary": auxiliary,
+                "parameters": parameters,
+                "read_timeout": float(self.read_timeout_edit.text().strip()),
+                "pause_sleep": float(self.pause_sleep_edit.text().strip()),
+            }
+        )
+        if "inputs" not in record:
+            record["input"] = self.input_combo.currentText().strip()
+        if "outputs" not in record:
+            record["output"] = self.output_combo.currentText().strip()
+        if self.propagate_frame_id_check.isChecked():
+            record["propagate_frame_id"] = True
+        else:
+            record.pop("propagate_frame_id", None)
         operation = self.operation_edit.text().strip()
         if operation:
             record["operation"] = operation
+        else:
+            record.pop("operation", None)
         return record
 
 
@@ -284,6 +346,7 @@ class SourceDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Source")
         initial = dict(initial or {})
+        self._initial = initial
 
         self.name_edit = QLineEdit(initial.get("name", ""))
         self.kind_combo = QComboBox()
@@ -298,12 +361,25 @@ class SourceDialog(QDialog):
         self.stream_combo = QComboBox()
         self.stream_combo.setEditable(True)
         self.stream_combo.addItems(shared_names)
+        initial_streams = initial.get("streams", ())
         self.stream_combo.setCurrentText(
-            initial.get("stream", shared_names[0] if shared_names else "")
+            initial.get(
+                "stream",
+                initial_streams[0]
+                if initial_streams
+                else shared_names[0]
+                if shared_names
+                else "",
+            )
         )
+        if initial_streams:
+            self.stream_combo.setEnabled(False)
+            self.stream_combo.setToolTip(
+                "Multi-output wiring is preserved from YAML."
+            )
         self.parameters_edit = QPlainTextEdit()
         self.parameters_edit.setPlainText(
-            document_to_yaml(initial.get("parameters", {})).strip()
+            _yaml_fragment(initial.get("parameters", {}))
             if initial.get("parameters")
             else "{}"
         )
@@ -333,13 +409,18 @@ class SourceDialog(QDialog):
         parameters = parse_inline_yaml(
             self.parameters_edit.toPlainText(), fallback={}
         )
-        return {
-            "name": self.name_edit.text().strip(),
-            "kind": self.kind_combo.currentText().strip(),
-            "stream": self.stream_combo.currentText().strip(),
-            "parameters": parameters,
-            "poll_interval": float(self.poll_interval_edit.text().strip()),
-        }
+        record = dict(self._initial)
+        record.update(
+            {
+                "name": self.name_edit.text().strip(),
+                "kind": self.kind_combo.currentText().strip(),
+                "parameters": parameters,
+                "poll_interval": float(self.poll_interval_edit.text().strip()),
+            }
+        )
+        if "streams" not in record:
+            record["stream"] = self.stream_combo.currentText().strip()
+        return record
 
 
 class SinkDialog(QDialog):
@@ -355,6 +436,7 @@ class SinkDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Sink")
         initial = dict(initial or {})
+        self._initial = initial
 
         self.name_edit = QLineEdit(initial.get("name", ""))
         self.kind_combo = QComboBox()
@@ -374,7 +456,7 @@ class SinkDialog(QDialog):
         )
         self.parameters_edit = QPlainTextEdit()
         self.parameters_edit.setPlainText(
-            document_to_yaml(initial.get("parameters", {})).strip()
+            _yaml_fragment(initial.get("parameters", {}))
             if initial.get("parameters")
             else "{}"
         )
@@ -408,14 +490,18 @@ class SinkDialog(QDialog):
         parameters = parse_inline_yaml(
             self.parameters_edit.toPlainText(), fallback={}
         )
-        return {
-            "name": self.name_edit.text().strip(),
-            "kind": self.kind_combo.currentText().strip(),
-            "stream": self.stream_combo.currentText().strip(),
-            "parameters": parameters,
-            "read_timeout": float(self.read_timeout_edit.text().strip()),
-            "pause_sleep": float(self.pause_sleep_edit.text().strip()),
-        }
+        record = dict(self._initial)
+        record.update(
+            {
+                "name": self.name_edit.text().strip(),
+                "kind": self.kind_combo.currentText().strip(),
+                "stream": self.stream_combo.currentText().strip(),
+                "parameters": parameters,
+                "read_timeout": float(self.read_timeout_edit.text().strip()),
+                "pause_sleep": float(self.pause_sleep_edit.text().strip()),
+            }
+        )
+        return record
 
 
 class SyntheticInputDialog(QDialog):
