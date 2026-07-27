@@ -49,6 +49,7 @@ class ManagerService:
         self._placement_policy = placement_policy
         self._registry = registry
         self._config_path = None
+        self._config_base_path = Path.cwd().resolve()
         self._document = self._load_initial_document(config)
         self._document_revision = 1
         self._manager = self._create_manager_locked()
@@ -98,6 +99,7 @@ class ManagerService:
             registry = self._registry or get_default_registry()
             return {
                 "config_path": self._config_path,
+                "config_base_path": str(self._config_base_path),
                 "state": self._manager.state.value,
                 "commands": [
                     "build",
@@ -119,6 +121,7 @@ class ManagerService:
         with self._lock:
             return {
                 "config_path": self._config_path,
+                "config_base_path": str(self._config_base_path),
                 "revision": self._document_revision,
                 "document": clone_document(self._document),
             }
@@ -149,6 +152,7 @@ class ManagerService:
             payload = self._apply_document_locked(
                 candidate,
                 config_path=self._config_path,
+                base_path=self._config_base_path,
                 validation=validation,
             )
         self._publish_event(
@@ -162,15 +166,19 @@ class ManagerService:
 
     def load_document_path(self, path: str | Path) -> dict[str, Any]:
         """Load one config document from disk and replace the current server config."""
-        resolved_path = str(Path(path).expanduser().resolve())
+        resolved = Path(path).expanduser().resolve()
+        resolved_path = str(resolved)
         candidate = load_document(resolved_path)
         with self._lock:
-            validation = self._validate_document_locked(candidate)
+            validation = self._validate_document_locked(
+                candidate, base_path=resolved.parent
+            )
             if validation["errors"]:
                 raise ConfigValidationError(validation["errors"][0])
             payload = self._apply_document_locked(
                 candidate,
                 config_path=resolved_path,
+                base_path=resolved.parent,
                 validation=validation,
             )
         self._publish_event(
@@ -188,6 +196,7 @@ class ManagerService:
             status = self._manager.status(poll=not self._is_polling_active())
             status["document_revision"] = self._document_revision
             status["config_path"] = self._config_path
+            status["config_base_path"] = str(self._config_base_path)
             return status
 
     def snapshot(self) -> dict[str, Any]:
@@ -199,7 +208,9 @@ class ManagerService:
         """Return the derived pipeline graph payload."""
         with self._lock:
             return PipelineGraph.from_config(
-                PipelineConfig.from_dict(self._document)
+                PipelineConfig.from_dict(
+                    self._document, base_path=self._config_base_path
+                )
             ).to_dict()
 
     def build(self) -> dict[str, Any]:
@@ -380,15 +391,23 @@ class ManagerService:
         config: PipelineConfig | Mapping[str, Any] | str | Path,
     ) -> dict[str, Any]:
         if isinstance(config, PipelineConfig):
+            self._config_path = (
+                None if config.source_path is None else str(config.source_path)
+            )
+            self._config_base_path = config.base_path
             return config_to_document(config)
         if isinstance(config, (str, Path)):
-            self._config_path = str(config)
-            return load_document(config)
+            resolved = Path(config).expanduser().resolve()
+            self._config_path = str(resolved)
+            self._config_base_path = resolved.parent
+            return load_document(resolved)
         return normalize_document(config)
 
     def _create_manager_locked(self) -> PipelineManager:
         return PipelineManager(
-            PipelineConfig.from_dict(self._document),
+            PipelineConfig.from_dict(
+                self._document, base_path=self._config_base_path
+            ),
             spawn_method=self._spawn_method,
             placement_policy=self._placement_policy,
             registry=self._registry,
@@ -399,6 +418,7 @@ class ManagerService:
         document: Mapping[str, Any],
         *,
         config_path: str | None,
+        base_path: Path,
         validation: dict[str, Any],
     ) -> dict[str, Any]:
         state = self._manager.state
@@ -414,10 +434,12 @@ class ManagerService:
             self._manager.shutdown(force=True)
         self._document = clone_document(document)
         self._config_path = config_path
+        self._config_base_path = base_path.resolve()
         self._document_revision += 1
         self._manager = self._create_manager_locked()
         return {
             "config_path": self._config_path,
+            "config_base_path": str(self._config_base_path),
             "revision": self._document_revision,
             "document": clone_document(self._document),
             **validation,
@@ -426,9 +448,14 @@ class ManagerService:
     def _validate_document_locked(
         self,
         document: Mapping[str, Any],
+        *,
+        base_path: Path | None = None,
     ) -> dict[str, Any]:
         try:
-            config = PipelineConfig.from_dict(document)
+            config = PipelineConfig.from_dict(
+                document,
+                base_path=self._config_base_path if base_path is None else base_path,
+            )
         except ConfigValidationError as exc:
             return {
                 "valid": False,

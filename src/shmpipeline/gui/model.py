@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import sys
+from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
@@ -50,10 +51,14 @@ __all__ = [
 ]
 
 
-def validate_document(document: Mapping[str, Any]) -> list[str]:
+def validate_document(
+    document: Mapping[str, Any], *, base_path: str | Path | None = None
+) -> list[str]:
     """Return config and kernel-validation errors for one document."""
     try:
-        config = PipelineConfig.from_dict(normalize_document(document))
+        config = PipelineConfig.from_dict(
+            normalize_document(document), base_path=base_path
+        )
     except ConfigValidationError as exc:
         return [str(exc)]
 
@@ -74,9 +79,13 @@ def recommended_spawn_method(config: PipelineConfig) -> str:
     return "spawn"
 
 
-def create_manager(document: Mapping[str, Any]) -> PipelineManager:
+def create_manager(
+    document: Mapping[str, Any], *, base_path: str | Path | None = None
+) -> PipelineManager:
     """Instantiate a pipeline manager from the current GUI document."""
-    config = PipelineConfig.from_dict(normalize_document(document))
+    config = PipelineConfig.from_dict(
+        normalize_document(document), base_path=base_path
+    )
     return PipelineManager(
         config,
         spawn_method=recommended_spawn_method(config),

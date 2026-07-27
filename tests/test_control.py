@@ -217,7 +217,29 @@ def test_remote_manager_client_can_load_document_path(tmp_path):
         payload = client.load_document_path(str(replacement_path))
 
         assert payload["config_path"] == str(replacement_path.resolve())
+        assert payload["config_base_path"] == str(replacement_path.parent)
         assert payload["document"]["kernels"][0]["name"] == "copy_stage"
+
+
+def test_control_service_preserves_yaml_base_path_after_document_update(
+    tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "example"
+    config_dir.mkdir()
+    config_path = config_dir / "pipeline.yaml"
+    _write_valid_config(config_path)
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    monkeypatch.chdir(other_dir)
+
+    service = ManagerService(config_path, poll_interval=0.01)
+    try:
+        assert service._manager.config.base_path == config_dir
+        document = service.document()["document"]
+        service.update_document(document)
+        assert service._manager.config.base_path == config_dir
+    finally:
+        service.close()
 
 
 def test_manager_service_uses_custom_registry_for_info_and_validation():

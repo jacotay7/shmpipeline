@@ -7,6 +7,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- GUI and control-server pipelines now retain the directory of the selected
+  YAML file as the non-serialized configuration base path. Relative plugin
+  assets therefore resolve beside the loaded pipeline after GUI build/start,
+  rather than relative to the GUI or control-server working directory.
+
 ## [1.1.1] - 2026-07-26
 
 ### Added

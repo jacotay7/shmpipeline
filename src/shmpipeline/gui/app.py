@@ -909,6 +909,12 @@ class MainWindow(QMainWindow):
         self._manager_dirty = True
         self._refresh_all()
 
+    def _document_base_path(self) -> Path | None:
+        """Return the selected YAML directory for relative plugin paths."""
+        if self._current_path is None:
+            return None
+        return self._current_path.expanduser().resolve().parent
+
     def _refresh_all(self) -> None:
         self._refresh_shared_table()
         self._refresh_source_table()
@@ -1062,7 +1068,9 @@ class MainWindow(QMainWindow):
 
     def _refresh_graph_preview(self) -> None:
         try:
-            config = PipelineConfig.from_dict(self._document)
+            config = PipelineConfig.from_dict(
+                self._document, base_path=self._document_base_path()
+            )
         except ConfigValidationError as exc:
             self._graph_preview.setPlainText(f"Graph unavailable: {exc}")
             return
@@ -1382,7 +1390,9 @@ class MainWindow(QMainWindow):
                 validation = self._manager.validate_document(self._document)
                 errors = validation.get("errors", [])
             else:
-                errors = validate_document(self._document)
+                errors = validate_document(
+                    self._document, base_path=self._document_base_path()
+                )
         except Exception as exc:
             self._set_validation_status("failed", "Validation: failed")
             self._log_error("Validation Failed", str(exc))
@@ -1415,9 +1425,11 @@ class MainWindow(QMainWindow):
 
     def _prepare_local_server_config(self) -> Path:
         if self._managed_server_config_path is None:
+            directory = self._document_base_path()
             with tempfile.NamedTemporaryFile(
                 prefix="shmpipeline-gui-",
                 suffix=".yaml",
+                dir=directory,
                 delete=False,
             ) as handle:
                 self._managed_server_config_path = Path(handle.name)
@@ -1794,10 +1806,19 @@ class MainWindow(QMainWindow):
             self._refresh_runtime_status()
 
     def _load_document_path(self, path: str | Path) -> None:
-        document_path = Path(path)
+        document_path = Path(path).expanduser().resolve()
         document = load_document(document_path)
+        if self._manager is not None and self._manager.is_local:
+            payload = self._manager.load_document_path(str(document_path))
+            document = payload["document"]
+            self._manager_dirty = False
         self._close_viewers()
+        if self._managed_server_config_path is not None:
+            self._managed_server_config_path.unlink(missing_ok=True)
+            self._managed_server_config_path = None
         self._set_document(document, path=document_path)
+        if self._manager is not None and self._manager.is_local:
+            self._manager_dirty = False
         self._log_info(f"Loaded {document_path}")
 
     def load_document_from_disk(self) -> None:
