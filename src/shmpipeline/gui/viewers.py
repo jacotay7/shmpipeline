@@ -37,6 +37,7 @@ from shmpipeline.gui.themes import (
 )
 
 VIEWER_METRICS_WINDOW = 300
+COLORBAR_LEVEL_SAMPLE_SIZE = 65_536
 STREAM_DETAIL_LABELS = {
     "name": "Stream name",
     "shape": "Shape",
@@ -46,6 +47,27 @@ STREAM_DETAIL_LABELS = {
     "cpu_mirror": "CPU mirror",
     "initial": "Initializer",
 }
+
+
+def _scalar_image_levels(image: np.ndarray) -> tuple[float, float]:
+    """Estimate finite display limits without scanning very large images."""
+    sample = image
+    while sample.size > COLORBAR_LEVEL_SAMPLE_SIZE:
+        if sample.shape[0] >= sample.shape[1]:
+            sample = sample[::2, :]
+        else:
+            sample = sample[:, ::2]
+
+    finite = sample[np.isfinite(sample)]
+    if finite.size == 0:
+        return 0.0, 1.0
+
+    low = float(np.min(finite))
+    high = float(np.max(finite))
+    if low == high:
+        half_span = max(abs(low) * 0.005, 0.5)
+        return low - half_span, high + half_span
+    return low, high
 
 
 def _compute_view_rate_hz(refresh_intervals_s: deque[float]) -> float:
@@ -268,6 +290,13 @@ class SharedMemoryViewer(QMainWindow):
         self._image_plot.addItem(self._image_item)
         self._colorbar = pg.ColorBarItem(
             width=18,
+            colorMap=pg.ColorMap(
+                [0.0, 1.0],
+                [
+                    (0, 0, 0, 255),
+                    (255, 255, 255, 255),
+                ],
+            ),
             interactive=False,
             colorMapMenu=False,
         )
@@ -308,6 +337,9 @@ class SharedMemoryViewer(QMainWindow):
         self._plot_widget.setBackground(theme.plot_background)
         self._plot_curve.setPen(pg.mkPen(color=theme.accent, width=2))
         self._image_widget.setBackground(theme.plot_background)
+        colorbar_pen = pg.mkPen(color=theme.plot_foreground)
+        self._colorbar.axis.setPen(colorbar_pen)
+        self._colorbar.axis.setTextPen(colorbar_pen)
         self._stats_group.setStyleSheet(
             "QGroupBox#frameStats {"
             f" background-color: {theme.alternate_base};"
@@ -558,8 +590,20 @@ class SharedMemoryViewer(QMainWindow):
 
     def _render_image(self, image: np.ndarray) -> None:
         """Render an image without resetting an existing zoom or pan."""
-        self._image_item.setImage(image, autoLevels=True)
-        self._set_image_supports_colorbar(image.ndim == 2)
+        supports_colorbar = image.ndim == 2
+        if supports_colorbar:
+            levels = _scalar_image_levels(image)
+            self._image_item.setImage(
+                image,
+                autoLevels=False,
+            )
+            # ColorBarItem is the authority for linked ImageItem levels.
+            # Updating both together avoids pyqtgraph restoring its initial
+            # (0, 1) limits when the image emits sigLevelsChanged.
+            self._colorbar.setLevels(levels)
+        else:
+            self._image_item.setImage(image, autoLevels=True)
+        self._set_image_supports_colorbar(supports_colorbar)
         image_shape = (int(image.shape[0]), int(image.shape[1]))
         if image_shape != self._image_shape:
             self._image_shape = image_shape

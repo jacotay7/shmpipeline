@@ -148,16 +148,34 @@ class _FakeGraphicsLayoutWidget(_QT_WIDGET_BASE):
 class _FakeImageItem:
     def __init__(self) -> None:
         self.image = None
+        self.auto_levels = None
+        self.levels = None
 
-    def setImage(self, image, autoLevels=True) -> None:
+    def setImage(self, image, autoLevels=True, levels=None) -> None:
         self.image = image
+        self.auto_levels = autoLevels
+        self.levels = levels
+
+
+class _FakeAxis:
+    def __init__(self) -> None:
+        self.pen = None
+        self.text_pen = None
+
+    def setPen(self, pen) -> None:
+        self.pen = pen
+
+    def setTextPen(self, pen) -> None:
+        self.text_pen = pen
 
 
 class _FakeColorBarItem:
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
+        self.axis = _FakeAxis()
         self.image_item = None
         self.insert_in = None
+        self.levels = None
         self.visible = True
 
     def setImageItem(self, image_item, insert_in=None) -> None:
@@ -172,6 +190,11 @@ class _FakeColorBarItem:
 
     def isVisible(self) -> bool:
         return self.visible
+
+    def setLevels(self, levels, update_items=True) -> None:
+        self.levels = levels
+        if update_items and self.image_item is not None:
+            self.image_item.levels = levels
 
 
 def _patch_viewer_pyqtgraph(monkeypatch) -> None:
@@ -679,8 +702,13 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
         assert not viewer._colorbar.isVisible()
         viewer._render_array(np.zeros((8, 6), dtype=np.float32))
         assert viewer._colorbar.isVisible()
+        assert viewer._colorbar.levels == (-0.5, 0.5)
+        assert viewer._image_item.levels == (-0.5, 0.5)
+        assert viewer._image_item.auto_levels is False
+        assert viewer._colorbar.kwargs["colorMap"] is not None
         viewer._render_array(np.zeros((8, 6, 3), dtype=np.uint8))
         assert not viewer._colorbar.isVisible()
+        assert viewer._image_item.auto_levels is True
         viewer._colorbar_action.setChecked(False)
 
         viewer.show()
@@ -700,6 +728,19 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
         assert viewer._image_plot.auto_range_calls == 3
     finally:
         viewer.close()
+
+
+@pytest.mark.parametrize(
+    ("image", "expected"),
+    [
+        (np.array([[-2.0, 1.0], [4.0, 6.0]]), (-2.0, 6.0)),
+        (np.full((2, 2), 8.0), (7.5, 8.5)),
+        (np.array([[np.nan, 3.0], [np.inf, 9.0]]), (3.0, 9.0)),
+        (np.full((2, 2), np.nan), (0.0, 1.0)),
+    ],
+)
+def test_scalar_image_levels_are_finite_and_non_degenerate(image, expected):
+    assert viewers_module._scalar_image_levels(image) == pytest.approx(expected)
 
 
 def test_gpu_viewer_can_open_without_cpu_mirror(qapp, monkeypatch):

@@ -27,7 +27,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
   present frame telemetry in a compact toggleable panel, and move static
   shared-memory configuration into an on-demand details dialog. Viewer menu
   actions include keyboard shortcuts for statistics, scalar-image colorbars,
-  details, fit, and close.
+  details, fit, and close. Colorbars use an opaque grayscale ramp and track
+  finite per-frame display limits.
 - GUI row editors now preserve frame-ID propagation, synchronization,
   multi-stream wiring, auxiliary bindings, endpoint outputs, and other
   configuration fields that are not directly editable in their basic forms.
