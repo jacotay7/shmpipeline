@@ -454,7 +454,9 @@ class ManagerService:
         try:
             config = PipelineConfig.from_dict(
                 document,
-                base_path=self._config_base_path if base_path is None else base_path,
+                base_path=self._config_base_path
+                if base_path is None
+                else base_path,
             )
         except ConfigValidationError as exc:
             return {

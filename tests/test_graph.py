@@ -4,6 +4,7 @@ import pytest
 
 from shmpipeline import PipelineConfig, PipelineGraph, get_default_registry
 from shmpipeline.graph import validate_pipeline_config
+from shmpipeline.sink import Sink
 from shmpipeline.source import Source
 
 pytestmark = pytest.mark.unit
@@ -284,3 +285,104 @@ def test_validate_pipeline_config_rejects_source_and_kernel_conflict():
     )
 
     assert any("multiple producers" in error for error in errors)
+
+
+def test_validate_pipeline_config_rejects_sink_output_producer_conflict():
+    class _StateSink(Sink):
+        kind = "test.state_sink"
+
+        def consume(self, value):
+            del value
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": "input", "shape": [1], "dtype": "float32"},
+                {"name": "state", "shape": [1], "dtype": "float32"},
+            ],
+            "kernels": [
+                {
+                    "name": "copy",
+                    "kind": "cpu.copy",
+                    "input": "input",
+                    "output": "state",
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "stateful",
+                    "kind": _StateSink.kind,
+                    "stream": "input",
+                    "outputs": ["state"],
+                }
+            ],
+        }
+    )
+
+    errors = validate_pipeline_config(
+        config,
+        registry=get_default_registry().extended_sinks(_StateSink),
+    )
+
+    assert any("multiple producers" in error for error in errors)
+
+
+def test_validate_pipeline_config_rejects_feedback_without_frame_id_propagation():
+    class _FeedbackSource(Source):
+        kind = "test.graph_feedback_source"
+        required_feedback_aliases = ("state",)
+
+        def read(self):
+            return None
+
+    class _FeedbackSink(Sink):
+        kind = "test.graph_feedback_sink"
+
+        def consume(self, value):
+            del value
+
+    document = {
+        "shared_memory": [
+            {"name": name, "shape": [1], "dtype": "float32"}
+            for name in ("measurement", "command", "state")
+        ],
+        "sources": [
+            {
+                "name": "sensor",
+                "kind": _FeedbackSource.kind,
+                "stream": "measurement",
+                "auxiliary": {"state": "state"},
+            }
+        ],
+        "kernels": [
+            {
+                "name": "controller",
+                "kind": "cpu.copy",
+                "input": "measurement",
+                "output": "command",
+            }
+        ],
+        "sinks": [
+            {
+                "name": "mirror",
+                "kind": _FeedbackSink.kind,
+                "stream": "command",
+                "outputs": ["state"],
+            }
+        ],
+    }
+    registry = get_default_registry().extended(
+        sources=(_FeedbackSource,), sinks=(_FeedbackSink,)
+    )
+    errors = validate_pipeline_config(
+        PipelineConfig.from_dict(document), registry=registry
+    )
+    assert any(
+        "controller" in error and "propagate_frame_id" in error
+        for error in errors
+    )
+
+    document["kernels"][0]["propagate_frame_id"] = True
+    assert not validate_pipeline_config(
+        PipelineConfig.from_dict(document), registry=registry
+    )

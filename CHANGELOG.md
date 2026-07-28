@@ -7,8 +7,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Deprecated
+
+- AO-only centroid, tip/tilt, and tomographic built-ins are retained as
+  warning-emitting 1.x compatibility kernels. Current AO guidance lives in
+  the `shmpipeline-ao` plugin package; removal is reserved for 2.0 and no
+  reverse dependency was introduced.
+
 ### Fixed
 
+- Static pipeline validation now enforces frame-ID propagation along every
+  endpoint-declared feedback path, so token gaps fail before shared memory or
+  worker endpoints start.
+- Corrected stale contributor terms that still named GPL-3.0-only after the
+  project moved to MIT.
+- Stateful sink failure records now include every declared output stream,
+  matching graph, status, CLI, control-plane, and GUI ownership views.
 - Live viewers now preserve zoom and pan while same-sized frames update,
   present frame telemetry in a compact toggleable panel, and move static
   shared-memory configuration into an on-demand details dialog. Viewer menu

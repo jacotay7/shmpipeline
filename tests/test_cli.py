@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import shmpipeline.cli as cli_module
 from shmpipeline.cli import main
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
@@ -120,6 +121,52 @@ def test_cli_run_starts_and_stops_pipeline(tmp_path):
     )
 
     assert exit_code == 0
+
+
+def test_cli_run_preserves_config_directory_from_another_cwd(
+    tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    config_path = config_dir / "pipeline.yaml"
+    _write_valid_config(config_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    captured = {}
+
+    class _Manager:
+        def __init__(self, config):
+            captured["base_path"] = config.base_path
+
+        def build(self):
+            return None
+
+        def start(self):
+            return None
+
+        def runtime_snapshot(self):
+            return {"state": "running"}
+
+        def shutdown(self, *, force):
+            assert force is True
+
+    monkeypatch.setattr(cli_module, "PipelineManager", _Manager)
+
+    assert (
+        main(
+            [
+                "run",
+                str(config_path),
+                "--duration",
+                "0",
+                "--poll-interval",
+                "0.001",
+            ]
+        )
+        == 0
+    )
+    assert captured["base_path"] == config_dir.resolve()
 
 
 def test_cli_module_entrypoint_runs_main(tmp_path, monkeypatch, capsys):

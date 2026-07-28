@@ -363,6 +363,7 @@ class _SinkController:
                 "component_type": "sink",
                 "kind": self.spec.kind,
                 "stream": self.spec.stream,
+                "outputs": list(self.spec.output_streams),
                 "error": self._last_error,
                 "traceback": self._traceback,
             }

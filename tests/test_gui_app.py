@@ -1049,3 +1049,26 @@ def test_main_window_shows_synthetic_inputs_in_source_editor_table(qapp):
         assert window._source_table.item(0, 3).text() == "15.50 Hz"
     finally:
         window.close()
+
+
+def test_gui_local_launch_config_stays_beside_selected_yaml(
+    qapp, tmp_path, monkeypatch
+):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    selected_path = config_dir / "pipeline.yaml"
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    window = MainWindow(theme_name="light")
+    generated = None
+    try:
+        window._document = default_document()
+        window._current_path = selected_path
+        generated = window._prepare_local_server_config()
+        assert generated.parent == config_dir.resolve()
+        assert generated.is_file()
+    finally:
+        window.close()
+        if generated is not None:
+            generated.unlink(missing_ok=True)

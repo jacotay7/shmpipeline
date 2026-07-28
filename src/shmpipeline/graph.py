@@ -240,7 +240,8 @@ class PipelineGraph:
         """Return graph-level validation errors.
 
         The current graph validation rejects ambiguous write ownership where
-        more than one kernel produces the same shared-memory stream.
+        more than one kernel, source, or stateful sink produces the same
+        shared-memory stream.
         """
         errors: list[str] = []
         for stream_name in sorted(self._shared_by_name):
@@ -249,16 +250,31 @@ class PipelineGraph:
                 producer_list = ", ".join(sorted(producers))
                 kernel_producers = self._kernel_producers[stream_name]
                 source_producers = self._source_producers[stream_name]
-                if kernel_producers and not source_producers:
+                sink_producers = self._sink_producers[stream_name]
+                producer_kinds = sum(
+                    bool(group)
+                    for group in (
+                        kernel_producers,
+                        source_producers,
+                        sink_producers,
+                    )
+                )
+                if producer_kinds == 1 and kernel_producers:
                     errors.append(
                         "shared memory "
                         f"{stream_name!r} has multiple producer kernels: "
                         f"{producer_list}"
                     )
-                elif source_producers and not kernel_producers:
+                elif producer_kinds == 1 and source_producers:
                     errors.append(
                         "shared memory "
                         f"{stream_name!r} has multiple producer sources: "
+                        f"{producer_list}"
+                    )
+                elif producer_kinds == 1 and sink_producers:
+                    errors.append(
+                        "shared memory "
+                        f"{stream_name!r} has multiple producer sinks: "
                         f"{producer_list}"
                     )
                 else:
@@ -494,4 +510,89 @@ def validate_pipeline_config(
             registry.validate_sink(sink, shared_by_name)
         except ConfigValidationError as exc:
             errors.append(str(exc))
+    errors.extend(_feedback_frame_id_errors(config, registry))
+    return errors
+
+
+def _feedback_frame_id_errors(
+    config: PipelineConfig,
+    registry: KernelRegistry,
+) -> list[str]:
+    """Validate token propagation for endpoint-declared feedback paths."""
+    errors: list[str] = []
+    kernel_by_output = {
+        output: kernel
+        for kernel in config.kernels
+        for output in kernel.all_outputs
+    }
+    sink_by_output = {
+        output: sink for sink in config.sinks for output in sink.output_streams
+    }
+
+    def trace(
+        *,
+        source: Any,
+        stream: str,
+        feedback_stream: str,
+        seen: set[str],
+    ) -> None:
+        if stream in source.output_streams:
+            return
+        if stream in seen:
+            errors.append(
+                f"feedback path for source {source.name!r} and stream "
+                f"{feedback_stream!r} contains a cycle before reaching a "
+                "source output"
+            )
+            return
+        seen.add(stream)
+        kernel = kernel_by_output.get(stream)
+        if kernel is None:
+            errors.append(
+                f"feedback path for source {source.name!r} and stream "
+                f"{feedback_stream!r} cannot trace sink input {stream!r} "
+                "to a source output"
+            )
+            return
+        if not kernel.propagate_frame_id:
+            errors.append(
+                f"kernel {kernel.name!r} on feedback path for source "
+                f"{source.name!r} must set propagate_frame_id: true"
+            )
+        for upstream_stream in kernel.trigger_inputs:
+            trace(
+                source=source,
+                stream=upstream_stream,
+                feedback_stream=feedback_stream,
+                seen=seen.copy(),
+            )
+
+    for source in config.sources:
+        try:
+            source_cls = registry.get_source(source.kind)
+        except ConfigValidationError:
+            continue
+        aliases = tuple(getattr(source_cls, "required_feedback_aliases", ()))
+        bindings = source.auxiliary_by_alias
+        for alias in aliases:
+            feedback_stream = bindings.get(alias)
+            if feedback_stream is None:
+                errors.append(
+                    f"source {source.name!r} requires feedback auxiliary "
+                    f"alias {alias!r}"
+                )
+                continue
+            sink = sink_by_output.get(feedback_stream)
+            if sink is None:
+                errors.append(
+                    f"feedback stream {feedback_stream!r} for source "
+                    f"{source.name!r} must be declared as a sink output"
+                )
+                continue
+            trace(
+                source=source,
+                stream=sink.stream,
+                feedback_stream=feedback_stream,
+                seen=set(),
+            )
     return errors

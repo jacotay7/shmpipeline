@@ -28,6 +28,7 @@ guides/runtime
 guides/performance
 guides/gui
 guides/extensions
+guides/legacy-ao-kernels
 guides/troubleshooting
 ```
 

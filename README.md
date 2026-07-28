@@ -49,18 +49,20 @@ shmpipeline validate examples/affine_transformation/pipeline.yaml
 shmpipeline describe examples/affine_transformation/pipeline.yaml --json
 ```
 
-## Open The GUI For The Observatory AO Example
+## Open The GUI
 
 Relevant docs:
 
 - [GUI guide](https://shmpipeline.readthedocs.io/en/latest/guides/gui.html)
-- [Observatory AO system example](https://shmpipeline.readthedocs.io/en/latest/examples/observatory-ao-system.html)
+- Adaptive-optics systems are supplied by the separate `shmpipeline-ao`
+  plugin package. Its supported modes resolve to ordinary pipeline YAML that
+  this GUI can open.
 
 From the repository root:
 
 ```bash
 pip install "shmpipeline[gui]"
-shmpipeline-gui examples/observatory_ao_system/pipeline.yaml
+shmpipeline-gui pipeline.yaml
 ```
 
 The full GUI can auto-launch a local loopback control server when you press
@@ -138,8 +140,7 @@ shmpipeline benchmark pipeline.yaml --duration 5.0 \
 ## Popular Example Pages
 
 - [Affine transformation](https://shmpipeline.readthedocs.io/en/latest/examples/affine-transformation.html)
-- [Basic AO system](https://shmpipeline.readthedocs.io/en/latest/examples/basic-ao-system.html)
-- [Observatory AO system](https://shmpipeline.readthedocs.io/en/latest/examples/observatory-ao-system.html)
+- [Legacy AO-kernel migration](https://shmpipeline.readthedocs.io/en/latest/guides/legacy-ao-kernels.html)
 - [Source and sink plugins](https://shmpipeline.readthedocs.io/en/latest/examples/source-sink-plugins.html)
 
 ## More Documentation
@@ -147,7 +148,7 @@ shmpipeline benchmark pipeline.yaml --duration 5.0 \
 Start with these in roughly the order most users need them:
 
 1. [Configuration guide](https://shmpipeline.readthedocs.io/en/latest/getting-started/configuration.html) for the full YAML model, parameters, and shared-memory definitions.
-2. [Worked examples](https://shmpipeline.readthedocs.io/en/latest/examples/index.html) for complete CPU, GPU, custom-operation, AO, and plugin-backed pipelines.
+2. [Worked examples](https://shmpipeline.readthedocs.io/en/latest/examples/index.html) for complete CPU, GPU, custom-operation, and plugin-backed pipelines.
 3. [CLI guide](https://shmpipeline.readthedocs.io/en/latest/guides/cli.html) for `validate`, `describe`, `run`, `benchmark`, and `serve`.
 4. [GUI guide](https://shmpipeline.readthedocs.io/en/latest/guides/gui.html) for editing configs, validating locally, inspecting graphs, and launching viewers.
 5. [Performance guide](https://shmpipeline.readthedocs.io/en/latest/guides/performance.html) for benchmark baselines, lock polling, placement, and CPU/GPU tuning.

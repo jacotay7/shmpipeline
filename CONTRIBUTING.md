@@ -31,4 +31,4 @@ scope. Changes to shared-memory ownership or the pyshmem integration contract
 should be reviewed alongside the corresponding pyshmem release.
 
 By contributing, you agree that your contribution is licensed under the
-repository's GPL-3.0-only license.
+repository's MIT License.

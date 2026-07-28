@@ -243,7 +243,9 @@ def test_source_config_rejects_duplicate_output_stream():
         )
 
 
-def test_pipeline_config_preserves_yaml_origin_and_mapping_base_path(tmp_path):
+def test_pipeline_config_preserves_yaml_origin_and_mapping_base_path(
+    tmp_path, monkeypatch
+):
     config_path = tmp_path / "config" / "pipeline.yaml"
     config_path.parent.mkdir()
     config_path.write_text(
@@ -259,6 +261,10 @@ sources:
 """,
         encoding="utf-8",
     )
+
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
 
     yaml_config = PipelineConfig.from_yaml(config_path)
     assert yaml_config.source_path == config_path.resolve()

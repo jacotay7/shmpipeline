@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from functools import partial
 from importlib.metadata import entry_points
 from importlib.util import find_spec
@@ -20,6 +21,18 @@ from shmpipeline.sink import Sink, SinkContext
 from shmpipeline.source import Source, SourceContext
 
 _TORCH_AVAILABLE = find_spec("torch") is not None
+
+LEGACY_AO_KERNEL_KINDS = frozenset(
+    {
+        "cpu.centroid",
+        "cpu.shack_hartmann_centroid",
+        "cpu.tip_tilt_controller",
+        "cpu.tomographic_controller",
+        "gpu.shack_hartmann_centroid",
+        "gpu.tip_tilt_controller",
+        "gpu.tomographic_controller",
+    }
+)
 
 _DEFAULT_CPU_KINDS = (
     "cpu.add_constant",
@@ -230,6 +243,14 @@ class KernelRegistry:
 
     def get(self, kind: str) -> type[Kernel]:
         """Return the implementation class for a kernel kind."""
+        if kind in LEGACY_AO_KERNEL_KINDS:
+            warnings.warn(
+                f"{kind!r} is a legacy AO compatibility kernel; new adaptive-"
+                "optics systems should install shmpipeline-ao and use its "
+                "entry-point kinds. Removal is reserved for shmpipeline 2.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         kernel_cls = self._kernels.get(kind)
         if kernel_cls is not None:
             return kernel_cls

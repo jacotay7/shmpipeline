@@ -263,13 +263,244 @@ def test_stateful_sink_publishes_matching_feedback_frame_id(shm_prefix):
         command = manager.get_stream(f"{shm_prefix}_command")
         applied = manager.get_stream(f"{shm_prefix}_applied")
         baseline = applied.count
+        manager.pause()
+        time.sleep(0.1)
         command.write(np.array([2.0, 3.0], dtype=np.float32), frame_id=41)
+        time.sleep(0.1)
+        assert applied.count == baseline
+        manager.resume()
         assert applied.wait_for_count(after=baseline, timeout=2.0) > baseline
         publication = applied.read_publication()
         np.testing.assert_array_equal(publication.payload, [3.0, 4.0])
         assert publication.frame_id == 41
         status = manager.status()["sinks"]["feedback"]
         assert status["outputs"] == [f"{shm_prefix}_applied"]
+    finally:
+        manager.shutdown(force=True)
+
+
+def test_duplex_endpoint_closes_a_frame_identified_feedback_cycle(shm_prefix):
+    names = {
+        "request": f"{shm_prefix}_request",
+        "marker": f"{shm_prefix}_marker",
+        "state": f"{shm_prefix}_state",
+    }
+
+    class FeedbackSource(Source):
+        kind = "test.duplex_source"
+        required_feedback_aliases = ("state",)
+
+        def __init__(self, context):
+            super().__init__(context)
+            self._generation = 1
+            self._last_state_count = 0
+
+        def produce(self, writers):
+            if self._generation > 3:
+                return None
+            if self._generation == 1:
+                value = 1.0
+            else:
+                state_stream = self.context.auxiliary_streams["state"]
+                try:
+                    state = state_stream.read_after_publication(
+                        self._last_state_count,
+                        timeout=0.01,
+                    )
+                except TimeoutError:
+                    return None
+                assert state.frame_id == self._generation - 1
+                self._last_state_count = state.count
+                value = float(state.payload[0]) + 1.0
+            payload = np.array([value], dtype=np.float32)
+            for writer in writers.values():
+                writer.write(payload, frame_id=self._generation)
+            self._generation += 1
+            return 1
+
+    class FeedbackSink(Sink):
+        kind = "test.duplex_sink"
+
+        def consume(self, value):  # pragma: no cover - compatibility guard
+            raise AssertionError(f"payload-only fallback used: {value}")
+
+        def consume_publication(self, publication, writers):
+            writers[names["state"]].write(
+                publication.payload + 10.0,
+                frame_id=publication.frame_id,
+            )
+
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": name, "shape": [1], "dtype": "float32"}
+                for name in names.values()
+            ],
+            "sources": [
+                {
+                    "name": "source",
+                    "kind": FeedbackSource.kind,
+                    "streams": [names["request"], names["marker"]],
+                    "auxiliary": {"state": names["state"]},
+                    "poll_interval": 0.001,
+                }
+            ],
+            "sinks": [
+                {
+                    "name": "sink",
+                    "kind": FeedbackSink.kind,
+                    "stream": names["request"],
+                    "outputs": [names["state"]],
+                    "read_timeout": 0.05,
+                }
+            ],
+        }
+    )
+    registry = get_default_registry().extended(
+        sources=(FeedbackSource,), sinks=(FeedbackSink,)
+    )
+    manager = PipelineManager(config, registry=registry)
+    try:
+        manager.build()
+        manager.start()
+        state_stream = manager.get_stream(names["state"])
+        state = state_stream.read_after_publication(0, timeout=2.0)
+        while state.frame_id < 3:
+            manager.poll_events()
+            manager.raise_if_failed()
+            state = state_stream.read_after_publication(
+                state.count, timeout=2.0
+            )
+        assert state.frame_id == 3
+        np.testing.assert_array_equal(state.payload, [33.0])
+        marker = manager.get_stream(names["marker"]).read_publication()
+        assert marker.frame_id == 3
+        np.testing.assert_array_equal(marker.payload, [23.0])
+    finally:
+        manager.shutdown(force=True)
+
+
+@pytest.mark.parametrize("failure_mode", ["raise", "timeout"])
+def test_stateful_sink_failure_reports_declared_outputs(
+    shm_prefix, failure_mode
+):
+    class FailingSink(Sink):
+        kind = f"test.stateful_{failure_mode}"
+
+        def consume(self, value):  # pragma: no cover - compatibility guard
+            del value
+
+        def consume_publication(self, publication, writers):
+            del publication, writers
+            if failure_mode == "timeout":
+                time.sleep(0.2)
+                return
+            raise RuntimeError("stateful endpoint failed")
+
+    command_name = f"{shm_prefix}_command"
+    state_name = f"{shm_prefix}_state"
+    sink = {
+        "name": "sink",
+        "kind": FailingSink.kind,
+        "stream": command_name,
+        "outputs": [state_name],
+        "read_timeout": 0.02,
+    }
+    if failure_mode == "timeout":
+        sink["consume_timeout"] = 0.02
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {"name": command_name, "shape": [1], "dtype": "float32"},
+                {"name": state_name, "shape": [1], "dtype": "float32"},
+            ],
+            "sinks": [sink],
+        }
+    )
+    manager = PipelineManager(
+        config,
+        registry=get_default_registry().extended_sinks(FailingSink),
+    )
+    try:
+        manager.build()
+        manager.start()
+        manager.get_stream(command_name).write(
+            np.array([1.0], dtype=np.float32), frame_id=7
+        )
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not manager.failures:
+            manager.poll_events()
+            time.sleep(0.01)
+        assert manager.failures
+        failure = manager.failures[-1]
+        assert failure["component_type"] == "sink"
+        assert failure["outputs"] == [state_name]
+        expected = "timeout" if failure_mode == "timeout" else "failed"
+        assert expected in failure["error"]
+    finally:
+        manager.shutdown(force=True)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_stateful_sink_gpu_feedback_uses_declared_writer(shm_prefix):
+    class GpuFeedbackSink(Sink):
+        kind = "test.gpu_feedback"
+        storage = "gpu"
+
+        def consume(self, value):  # pragma: no cover - compatibility guard
+            del value
+
+        def consume_publication(self, publication, writers):
+            writers[state_name].write(
+                publication.payload + 1.0,
+                frame_id=publication.frame_id,
+            )
+
+    command_name = f"{shm_prefix}_gpu_command"
+    state_name = f"{shm_prefix}_gpu_state"
+    config = PipelineConfig.from_dict(
+        {
+            "shared_memory": [
+                {
+                    "name": name,
+                    "shape": [2],
+                    "dtype": "float32",
+                    "storage": "gpu",
+                    "gpu_device": "cuda:0",
+                }
+                for name in (command_name, state_name)
+            ],
+            "sinks": [
+                {
+                    "name": "sink",
+                    "kind": GpuFeedbackSink.kind,
+                    "stream": command_name,
+                    "outputs": [state_name],
+                    "read_timeout": 0.05,
+                }
+            ],
+        }
+    )
+    manager = PipelineManager(
+        config,
+        registry=get_default_registry().extended_sinks(GpuFeedbackSink),
+    )
+    try:
+        manager.build()
+        manager.start()
+        state = manager.get_stream(state_name)
+        baseline = state.count
+        manager.get_stream(command_name).write(
+            torch.tensor([2.0, 3.0], device="cuda:0"),
+            frame_id=19,
+        )
+        state.wait_for_count(after=baseline, timeout=2.0)
+        publication = state.read_publication()
+        torch.testing.assert_close(
+            publication.payload,
+            torch.tensor([3.0, 4.0], device="cuda:0"),
+        )
+        assert publication.frame_id == 19
     finally:
         manager.shutdown(force=True)
 

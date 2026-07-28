@@ -204,6 +204,12 @@ def _frame_set_config(shm_prefix, *, drop_probability=0.0, jitter_us=0.0):
                         f"{shm_prefix}_cam2",
                     ],
                     "trigger_policy": "all_new",
+                    "synchronization": {
+                        "mode": "matching_frame_id",
+                        "max_skew_generations": 8,
+                        "max_wait_s": 0.2,
+                    },
+                    "propagate_frame_id": True,
                     "output": f"{shm_prefix}_joined",
                     "parameters": {"axis": 0},
                     "read_timeout": 0.2,
@@ -235,11 +241,16 @@ def test_synthetic_frame_set_publishes_synchronized_generations(shm_prefix):
         assert len(set(writes.values())) == 1
         assert metrics["generations"] > 20
         assert metrics["per_stream_drops"] == {name: 0 for name in writes}
-        # The three constant cameras concatenate into a length-12 vector.
+        # The WFS/truth/timing stand-ins are accepted only as one matching
+        # frame set, and the fan-in preserves that common token.
+        joined = manager.get_stream(
+            f"{shm_prefix}_joined"
+        ).read_publication()
         np.testing.assert_allclose(
-            manager.get_stream(f"{shm_prefix}_joined").read(),
+            joined.payload,
             np.ones(12, dtype=np.float32),
         )
+        assert joined.frame_id > 0
     finally:
         manager.shutdown(force=True)
 
