@@ -181,6 +181,10 @@ Use the mouse wheel to zoom and drag to pan an image. The viewer preserves the
 current zoom and pan while same-sized live frames arrive, and automatically
 fits the view again only when the image dimensions change.
 
+For scalar images, use **View > Colorbar** to show or hide a live value scale.
+The setting remains selected while the stream changes shape, but the viewer
+automatically hides the colorbar for plots, text, and RGB(A) images.
+
 The compact **Frame statistics** panel is visible by default and separates:
 
 - published frame count
@@ -199,6 +203,7 @@ Viewer menu actions all have window-scoped keyboard shortcuts:
 | Show shared-memory details | `Ctrl+,` |
 | Close viewer | `Ctrl+W` |
 | Toggle frame statistics | `Ctrl+I` |
+| Toggle scalar-image colorbar | `C` |
 | Fit the current data to the window | `F` |
 
 :::{figure} ../_static/images/gui/gui-viewer-window.png

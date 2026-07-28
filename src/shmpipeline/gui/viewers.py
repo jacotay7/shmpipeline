@@ -266,6 +266,17 @@ class SharedMemoryViewer(QMainWindow):
         self._image_plot.setAspectLocked(True)
         self._image_item = pg.ImageItem()
         self._image_plot.addItem(self._image_item)
+        self._colorbar = pg.ColorBarItem(
+            width=18,
+            interactive=False,
+            colorMapMenu=False,
+        )
+        self._colorbar.setImageItem(
+            self._image_item,
+            insert_in=self._image_plot,
+        )
+        self._colorbar.hide()
+        self._image_supports_colorbar = False
 
         self._text_widget = QTextEdit()
         self._text_widget.setReadOnly(True)
@@ -343,6 +354,18 @@ class SharedMemoryViewer(QMainWindow):
         self._stats_action.toggled.connect(self._set_stats_visible)
         view_menu.addAction(self._stats_action)
 
+        self._colorbar_action = QAction("&Colorbar", self)
+        self._colorbar_action.setCheckable(True)
+        self._colorbar_action.setChecked(False)
+        self._colorbar_action.setShortcut(QKeySequence("C"))
+        self._colorbar_action.setStatusTip(
+            "Show or hide the scalar-image colorbar"
+        )
+        self._colorbar_action.toggled.connect(
+            self._update_colorbar_visibility
+        )
+        view_menu.addAction(self._colorbar_action)
+
         self._fit_action = QAction("&Fit Data to Window", self)
         self._fit_action.setShortcut(QKeySequence("F"))
         self._fit_action.setStatusTip("Fit the current image or plot")
@@ -351,6 +374,17 @@ class SharedMemoryViewer(QMainWindow):
 
     def _set_stats_visible(self, visible: bool) -> None:
         self._stats_group.setVisible(visible)
+
+    def _update_colorbar_visibility(self, _visible: bool = False) -> None:
+        """Show the colorbar when requested for a scalar image."""
+        self._colorbar.setVisible(
+            self._colorbar_action.isChecked()
+            and self._image_supports_colorbar
+        )
+
+    def _set_image_supports_colorbar(self, supported: bool) -> None:
+        self._image_supports_colorbar = supported
+        self._update_colorbar_visibility()
 
     def _show_stream_details(self) -> None:
         if self._stream_details_dialog is None:
@@ -466,11 +500,13 @@ class SharedMemoryViewer(QMainWindow):
         self._slice_controls.hide()
 
         if array.ndim == 0:
+            self._set_image_supports_colorbar(False)
             self._text_widget.setPlainText(repr(array.item()))
             self._text_widget.show()
             return
 
         if array.ndim == 1:
+            self._set_image_supports_colorbar(False)
             self._plot_curve.setData(array.astype(np.float64, copy=False))
             self._plot_widget.show()
             return
@@ -499,6 +535,7 @@ class SharedMemoryViewer(QMainWindow):
             self._slice_controls.show()
             sliced = np.take(array, current_index, axis=0)
             if sliced.ndim == 1:
+                self._set_image_supports_colorbar(False)
                 self._plot_curve.setData(sliced.astype(np.float64, copy=False))
                 self._plot_widget.show()
                 return
@@ -512,6 +549,7 @@ class SharedMemoryViewer(QMainWindow):
             array.reshape(-1)[: min(array.size, 256)],
             precision=4,
         )
+        self._set_image_supports_colorbar(False)
         self._text_widget.setPlainText(
             f"ndim={array.ndim}\nshape={tuple(array.shape)}\ndtype={array.dtype}\n\n"
             f"Preview:\n{preview}"
@@ -521,6 +559,7 @@ class SharedMemoryViewer(QMainWindow):
     def _render_image(self, image: np.ndarray) -> None:
         """Render an image without resetting an existing zoom or pan."""
         self._image_item.setImage(image, autoLevels=True)
+        self._set_image_supports_colorbar(image.ndim == 2)
         image_shape = (int(image.shape[0]), int(image.shape[1]))
         if image_shape != self._image_shape:
             self._image_shape = image_shape

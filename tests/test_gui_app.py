@@ -153,6 +153,27 @@ class _FakeImageItem:
         self.image = image
 
 
+class _FakeColorBarItem:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.image_item = None
+        self.insert_in = None
+        self.visible = True
+
+    def setImageItem(self, image_item, insert_in=None) -> None:
+        self.image_item = image_item
+        self.insert_in = insert_in
+
+    def hide(self) -> None:
+        self.visible = False
+
+    def setVisible(self, visible: bool) -> None:
+        self.visible = visible
+
+    def isVisible(self) -> bool:
+        return self.visible
+
+
 def _patch_viewer_pyqtgraph(monkeypatch) -> None:
     monkeypatch.setattr(viewers_module.pg, "PlotWidget", _FakePlotWidget)
     monkeypatch.setattr(
@@ -161,6 +182,11 @@ def _patch_viewer_pyqtgraph(monkeypatch) -> None:
         _FakeGraphicsLayoutWidget,
     )
     monkeypatch.setattr(viewers_module.pg, "ImageItem", _FakeImageItem)
+    monkeypatch.setattr(
+        viewers_module.pg,
+        "ColorBarItem",
+        _FakeColorBarItem,
+    )
     monkeypatch.setattr(
         viewers_module.pg,
         "mkPen",
@@ -633,6 +659,7 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
 
         assert viewer._stats_action.isChecked()
         assert viewer._stats_action.shortcut().toString() == "Ctrl+I"
+        assert viewer._colorbar_action.shortcut().toString() == "C"
         assert viewer._details_action.shortcut().toString() == "Ctrl+,"
         assert viewer._fit_action.shortcut().toString() == "F"
         assert viewer._close_action.shortcut().toString() == "Ctrl+W"
@@ -641,10 +668,25 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
         viewer._stats_action.setChecked(True)
         assert not viewer._stats_group.isHidden()
 
+        assert not viewer._colorbar_action.isChecked()
+        assert not viewer._colorbar.isVisible()
+        assert viewer._colorbar.image_item is viewer._image_item
+        assert viewer._colorbar.insert_in is viewer._image_plot
+        viewer._colorbar_action.setChecked(True)
+        assert viewer._colorbar.isVisible()
+        viewer._render_array(np.zeros((8,), dtype=np.float32))
+        assert viewer._colorbar_action.isChecked()
+        assert not viewer._colorbar.isVisible()
+        viewer._render_array(np.zeros((8, 6), dtype=np.float32))
+        assert viewer._colorbar.isVisible()
+        viewer._render_array(np.zeros((8, 6, 3), dtype=np.uint8))
+        assert not viewer._colorbar.isVisible()
+        viewer._colorbar_action.setChecked(False)
+
         viewer.show()
         qapp.processEvents()
         viewer._fit_action.trigger()
-        assert viewer._image_plot.auto_range_calls == 2
+        assert viewer._image_plot.auto_range_calls == 3
 
         viewer._show_stream_details()
         details_dialog = viewer._stream_details_dialog
