@@ -15,7 +15,6 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -24,6 +23,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
+    QSlider,
+    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -271,12 +272,25 @@ class SharedMemoryViewer(QMainWindow):
         self._slice_controls = QWidget()
         slice_layout = QHBoxLayout(self._slice_controls)
         slice_layout.setContentsMargins(0, 0, 0, 0)
-        slice_layout.addWidget(QLabel("Displayed slice"))
-        self._slice_combo = QComboBox()
-        self._slice_combo.setMinimumContentsLength(12)
-        slice_layout.addWidget(self._slice_combo, 1)
+        slice_layout.addWidget(QLabel("Slice"))
+        self._slice_slider = QSlider(Qt.Orientation.Horizontal)
+        self._slice_slider.setRange(0, 0)
+        self._slice_slider.setToolTip(
+            "Select the first-axis slice displayed from this array"
+        )
+        slice_layout.addWidget(self._slice_slider, 1)
+        self._slice_spin = QSpinBox()
+        self._slice_spin.setRange(0, 0)
+        self._slice_spin.setSuffix(" / 0")
+        self._slice_spin.setKeyboardTracking(False)
+        self._slice_spin.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._slice_spin.setToolTip(
+            "Enter the first-axis slice displayed from this array"
+        )
+        slice_layout.addWidget(self._slice_spin)
         self._slice_controls.hide()
-        self._slice_combo.currentIndexChanged.connect(self._set_slice_index)
+        self._slice_slider.valueChanged.connect(self._set_slice_index)
+        self._slice_spin.valueChanged.connect(self._set_slice_index)
 
         self._plot_widget = pg.PlotWidget()
         self._plot_curve = self._plot_widget.plot(pen=pg.mkPen(width=2))
@@ -461,7 +475,38 @@ class SharedMemoryViewer(QMainWindow):
         self._stream_samples.append((count, write_time))
 
     def _set_slice_index(self, index: int) -> None:
-        self._slice_index = max(0, index)
+        maximum = self._slice_slider.maximum()
+        self._slice_index = min(max(0, index), maximum)
+        self._sync_slice_control_values()
+        array = self._cached_array
+        if array is not None and array.ndim >= 3 and not (
+            array.ndim == 3 and array.shape[-1] in (3, 4)
+        ):
+            self._render_array(array)
+
+    def _sync_slice_control_values(self) -> None:
+        """Synchronize the slider and spin box without recursive signals."""
+        for control in (self._slice_slider, self._slice_spin):
+            if control.value() == self._slice_index:
+                continue
+            was_blocked = control.blockSignals(True)
+            control.setValue(self._slice_index)
+            control.blockSignals(was_blocked)
+
+    def _configure_slice_controls(self, slice_count: int) -> int:
+        """Configure persistent first-axis slice controls for an array."""
+        maximum = max(0, slice_count - 1)
+        if self._slice_slider.maximum() != maximum:
+            for control in (self._slice_slider, self._slice_spin):
+                was_blocked = control.blockSignals(True)
+                control.setRange(0, maximum)
+                control.blockSignals(was_blocked)
+            self._slice_spin.setSuffix(f" / {maximum}")
+
+        self._slice_index = min(self._slice_index, maximum)
+        self._sync_slice_control_values()
+        self._slice_controls.show()
+        return self._slice_index
 
     def refresh(self) -> None:
         """Read the latest payload and refresh the active view."""
@@ -554,17 +599,7 @@ class SharedMemoryViewer(QMainWindow):
             return
 
         if array.ndim >= 3:
-            slice_count = array.shape[0]
-            self._slice_combo.blockSignals(True)
-            if self._slice_combo.count() != slice_count:
-                self._slice_combo.clear()
-                self._slice_combo.addItems(
-                    [f"Slice {index}" for index in range(slice_count)]
-                )
-            current_index = min(self._slice_index, slice_count - 1)
-            self._slice_combo.setCurrentIndex(current_index)
-            self._slice_combo.blockSignals(False)
-            self._slice_controls.show()
+            current_index = self._configure_slice_controls(array.shape[0])
             sliced = np.take(array, current_index, axis=0)
             if sliced.ndim == 1:
                 self._set_image_supports_colorbar(False)

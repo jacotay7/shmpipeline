@@ -28,7 +28,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
   shared-memory configuration into an on-demand details dialog. Viewer menu
   actions include keyboard shortcuts for statistics, scalar-image colorbars,
   details, fit, and close. Colorbars use an opaque grayscale ramp and track
-  finite per-frame display limits.
+  finite per-frame display limits. Multidimensional streams use a persistent
+  slider and numeric slice selector that remain operable during live updates.
 - GUI row editors now preserve frame-ID propagation, synchronization,
   multi-stream wiring, auxiliary bindings, endpoint outputs, and other
   configuration fields that are not directly editable in their basic forms.

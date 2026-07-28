@@ -730,6 +730,52 @@ def test_shared_memory_viewer_initializes_without_imageview_dependency(
         viewer.close()
 
 
+def test_viewer_slice_controls_survive_live_cube_updates(qapp, monkeypatch):
+    _patch_viewer_pyqtgraph(monkeypatch)
+    fake_stream = _FakeStream()
+    monkeypatch.setattr(
+        viewers_module.pyshmem, "open", lambda *args, **kwargs: fake_stream
+    )
+    viewer = viewers_module.SharedMemoryViewer(
+        {"name": "cube", "storage": "cpu"}
+    )
+    try:
+        viewer._timer.stop()
+        first_cube = np.arange(5 * 6 * 7, dtype=np.float32).reshape(5, 6, 7)
+        viewer._cached_array = first_cube
+        viewer._render_array(first_cube)
+
+        assert not viewer._slice_controls.isHidden()
+        assert viewer._slice_slider.minimum() == 0
+        assert viewer._slice_slider.maximum() == 4
+        assert viewer._slice_spin.suffix() == " / 4"
+
+        viewer._slice_spin.setValue(3)
+        assert viewer._slice_index == 3
+        assert viewer._slice_slider.value() == 3
+        assert np.array_equal(viewer._image_item.image, first_cube[3])
+
+        viewer._slice_spin.lineEdit().setText("4")
+        next_cube = first_cube + 1000
+        viewer._cached_array = next_cube
+        viewer._render_array(next_cube)
+        assert viewer._slice_index == 3
+        assert viewer._slice_spin.value() == 3
+        assert viewer._slice_spin.lineEdit().text().startswith("4")
+        assert viewer._slice_slider.value() == 3
+        assert np.array_equal(viewer._image_item.image, next_cube[3])
+
+        smaller_cube = next_cube[:2]
+        viewer._cached_array = smaller_cube
+        viewer._render_array(smaller_cube)
+        assert viewer._slice_index == 1
+        assert viewer._slice_spin.maximum() == 1
+        assert viewer._slice_slider.value() == 1
+        assert np.array_equal(viewer._image_item.image, smaller_cube[1])
+    finally:
+        viewer.close()
+
+
 @pytest.mark.parametrize(
     ("image", "expected"),
     [

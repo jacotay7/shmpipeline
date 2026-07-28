@@ -185,6 +185,11 @@ For scalar images, use **View > Colorbar** to show or hide a live value scale.
 The setting remains selected while the stream changes shape, but the viewer
 automatically hides the colorbar for plots, text, and RGB(A) images.
 
+For arrays with three or more dimensions, the viewer displays a first-axis
+slice. Use the persistent **Slice** slider for quick browsing or enter an exact
+index in the adjacent spin box. Live frame updates preserve the selected index;
+the selection is clamped only if a later array has fewer slices.
+
 The compact **Frame statistics** panel is visible by default and separates:
 
 - published frame count
