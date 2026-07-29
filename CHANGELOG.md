@@ -16,6 +16,9 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Control-plane commands now return actionable HTTP 400 details for plugin
+  configuration and artifact contract errors instead of hiding them behind a
+  generic Internal Server Error in GUI clients.
 - Static pipeline validation now enforces frame-ID propagation along every
   endpoint-declared feedback path, so token gaps fail before shared memory or
   worker endpoints start.

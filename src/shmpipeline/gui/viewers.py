@@ -407,9 +407,7 @@ class SharedMemoryViewer(QMainWindow):
         self._colorbar_action.setStatusTip(
             "Show or hide the scalar-image colorbar"
         )
-        self._colorbar_action.toggled.connect(
-            self._update_colorbar_visibility
-        )
+        self._colorbar_action.toggled.connect(self._update_colorbar_visibility)
         view_menu.addAction(self._colorbar_action)
 
         self._fit_action = QAction("&Fit Data to Window", self)
@@ -424,8 +422,7 @@ class SharedMemoryViewer(QMainWindow):
     def _update_colorbar_visibility(self, _visible: bool = False) -> None:
         """Show the colorbar when requested for a scalar image."""
         self._colorbar.setVisible(
-            self._colorbar_action.isChecked()
-            and self._image_supports_colorbar
+            self._colorbar_action.isChecked() and self._image_supports_colorbar
         )
 
     def _set_image_supports_colorbar(self, supported: bool) -> None:
@@ -479,8 +476,10 @@ class SharedMemoryViewer(QMainWindow):
         self._slice_index = min(max(0, index), maximum)
         self._sync_slice_control_values()
         array = self._cached_array
-        if array is not None and array.ndim >= 3 and not (
-            array.ndim == 3 and array.shape[-1] in (3, 4)
+        if (
+            array is not None
+            and array.ndim >= 3
+            and not (array.ndim == 3 and array.shape[-1] in (3, 4))
         ):
             self._render_array(array)
 

@@ -96,6 +96,7 @@ def test_control_service_error_mapping():
     cases = [
         (StateTransitionError("state"), 409),
         (ConfigValidationError("config"), 400),
+        (ValueError("plugin configuration"), 400),
         (FileNotFoundError("missing"), 404),
         (KeyError("name"), 404),
         (WorkerProcessError("worker"), 500),

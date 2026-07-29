@@ -786,7 +786,9 @@ def test_viewer_slice_controls_survive_live_cube_updates(qapp, monkeypatch):
     ],
 )
 def test_scalar_image_levels_are_finite_and_non_degenerate(image, expected):
-    assert viewers_module._scalar_image_levels(image) == pytest.approx(expected)
+    assert viewers_module._scalar_image_levels(image) == pytest.approx(
+        expected
+    )
 
 
 def test_gpu_viewer_can_open_without_cpu_mirror(qapp, monkeypatch):

@@ -243,9 +243,7 @@ def test_synthetic_frame_set_publishes_synchronized_generations(shm_prefix):
         assert metrics["per_stream_drops"] == {name: 0 for name in writes}
         # The WFS/truth/timing stand-ins are accepted only as one matching
         # frame set, and the fan-in preserves that common token.
-        joined = manager.get_stream(
-            f"{shm_prefix}_joined"
-        ).read_publication()
+        joined = manager.get_stream(f"{shm_prefix}_joined").read_publication()
         np.testing.assert_allclose(
             joined.payload,
             np.ones(12, dtype=np.float32),
