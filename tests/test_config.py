@@ -969,3 +969,123 @@ def test_from_yaml_error_includes_line_number_for_bad_dtype(tmp_path):
     message = str(excinfo.value)
     assert "pipeline.yaml" in message
     assert "line 3" in message
+
+
+def test_stream_resource_name_defaults_to_the_plain_name():
+    from shmpipeline.config import SharedMemoryConfig
+
+    spec = SharedMemoryConfig(
+        name="frames", shape=(2, 2), dtype=np.dtype("float64")
+    )
+    assert spec.namespace is None
+    assert spec.resource_name == "frames"
+
+
+def test_namespace_scopes_only_the_operating_system_name():
+    """The graph keeps readable names; only /dev/shm gets the prefix.
+
+    This is the whole point of the feature: two pipelines running at once must
+    not both claim ``frames``, but every reference inside the graph -- wiring,
+    ``get_stream``, diagnostics that identify a stream by role -- has to go on
+    working against the name the author wrote.
+    """
+    config = PipelineConfig.from_dict(
+        {
+            "namespace": "run-7",
+            "shared_memory": [
+                {"name": "frames", "shape": [2, 2], "dtype": "float64"},
+                {"name": "output", "shape": [2, 2], "dtype": "float64"},
+            ],
+            "kernels": [
+                {
+                    "name": "copy",
+                    "kind": "cpu.copy",
+                    "input": "frames",
+                    "output": "output",
+                }
+            ],
+        }
+    )
+    assert config.namespace == "run-7"
+    assert [spec.name for spec in config.shared_memory] == ["frames", "output"]
+    assert [spec.resource_name for spec in config.shared_memory] == [
+        "run-7.frames",
+        "run-7.output",
+    ]
+    # Graph wiring still refers to the logical names.
+    assert config.kernels[0].input == "frames"
+
+
+def test_two_namespaces_cannot_collide_on_the_same_stream_name():
+    names = set()
+    for namespace in ("a", "b"):
+        config = PipelineConfig.from_dict(
+            {
+                "namespace": namespace,
+                "shared_memory": [
+                    {"name": "frames", "shape": [2, 2], "dtype": "float64"},
+                    {"name": "output", "shape": [2, 2], "dtype": "float64"},
+                ],
+                "kernels": [
+                    {
+                        "name": "copy",
+                        "kind": "cpu.copy",
+                        "input": "frames",
+                        "output": "output",
+                    }
+                ],
+            }
+        )
+        names.add(config.shared_memory[0].resource_name)
+    assert names == {"a.frames", "b.frames"}
+
+
+@pytest.mark.parametrize("namespace", ["", "   ", "a/b", "a\x00b", 7])
+def test_namespace_rejects_values_that_are_not_usable_resource_prefixes(
+    namespace,
+):
+    with pytest.raises(ConfigValidationError):
+        PipelineConfig.from_dict(
+            {
+                "namespace": namespace,
+                "shared_memory": [
+                    {"name": "frames", "shape": [2, 2], "dtype": "float64"},
+                    {"name": "output", "shape": [2, 2], "dtype": "float64"},
+                ],
+                "kernels": [
+                    {
+                        "name": "copy",
+                        "kind": "cpu.copy",
+                        "input": "frames",
+                        "output": "output",
+                    }
+                ],
+            }
+        )
+
+
+def test_namespace_round_trips_through_the_document_form():
+    from shmpipeline.document import config_to_document
+
+    document = {
+        "namespace": "run-7",
+        "shared_memory": [
+            {"name": "frames", "shape": [2, 2], "dtype": "float64"},
+            {"name": "output", "shape": [2, 2], "dtype": "float64"},
+        ],
+        "kernels": [
+            {
+                "name": "copy",
+                "kind": "cpu.copy",
+                "input": "frames",
+                "output": "output",
+            }
+        ],
+    }
+    config = PipelineConfig.from_dict(document)
+    assert config_to_document(config)["namespace"] == "run-7"
+    # An unnamespaced pipeline must not grow the key.
+    plain = PipelineConfig.from_dict(
+        {k: v for k, v in document.items() if k != "namespace"}
+    )
+    assert "namespace" not in config_to_document(plain)

@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- An optional top-level `namespace` on a pipeline configuration. It scopes the
+  operating-system names of that pipeline's shared-memory segments while
+  leaving every name inside the graph unchanged, so two pipelines built from
+  the same document can run at once instead of both claiming `frames` and
+  silently reading each other's data. `SharedMemoryConfig.resource_name`
+  exposes the scoped name; graph wiring, `PipelineManager.get_stream`, and
+  anything identifying a stream by role keep using `name`. Configurations
+  without a namespace are unaffected and round-trip to the same document.
+
 ### Deprecated
 
 - AO-only centroid, tip/tilt, and tomographic built-ins are retained as

@@ -51,8 +51,8 @@ def _compute_rolling_exec_metrics(
 
 def _open_stream(spec: SharedMemoryConfig):
     if spec.storage == "gpu":
-        return pyshmem.open(spec.name, gpu_device=spec.gpu_device)
-    return pyshmem.open(spec.name)
+        return pyshmem.open(spec.resource_name, gpu_device=spec.gpu_device)
+    return pyshmem.open(spec.resource_name)
 
 
 def _pin_current_process(cpu_slot: int | None) -> None:

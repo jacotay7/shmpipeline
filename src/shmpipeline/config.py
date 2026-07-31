@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -187,6 +187,22 @@ class SharedMemoryConfig:
     notify: bool | None = None
     mode: str = "create_or_attach"
     initial: dict[str, Any] | None = None
+    namespace: str | None = field(default=None, repr=False)
+
+    @property
+    def resource_name(self) -> str:
+        """Return the operating-system name this stream occupies.
+
+        Graph wiring, ``get_stream`` and every diagnostic keep using ``name``,
+        which stays readable and stable. Only the name claimed in ``/dev/shm``
+        carries the namespace, because that is the one thing two pipelines
+        running at once genuinely cannot share.
+        """
+        return (
+            self.name
+            if self.namespace is None
+            else f"{self.namespace}.{self.name}"
+        )
 
     @classmethod
     def from_dict(cls, raw: Mapping[str, Any]) -> "SharedMemoryConfig":
@@ -883,6 +899,7 @@ class PipelineConfig:
     kernels: tuple[KernelConfig, ...]
     sources: tuple[SourceConfig, ...] = field(default_factory=tuple)
     sinks: tuple[SinkConfig, ...] = field(default_factory=tuple)
+    namespace: str | None = None
     base_path: Path = field(
         default_factory=lambda: Path.cwd().resolve(),
         repr=False,
@@ -909,8 +926,26 @@ class PipelineConfig:
         _reject_unexpected_keys(
             data,
             context="pipeline config",
-            allowed={"shared_memory", "kernels", "sources", "sinks"},
+            allowed={
+                "shared_memory",
+                "kernels",
+                "sources",
+                "sinks",
+                "namespace",
+            },
         )
+        namespace = data.get("namespace")
+        if namespace is not None:
+            if not isinstance(namespace, str) or not namespace.strip():
+                raise ConfigValidationError(
+                    "pipeline config field 'namespace' must be a non-empty string"
+                )
+            namespace = namespace.strip()
+            if any(character in namespace for character in "/\\\0"):
+                raise ConfigValidationError(
+                    "pipeline config field 'namespace' must not contain path "
+                    "separators or null bytes"
+                )
         shared_memory_raw = data.get("shared_memory")
         kernels_raw = data.get("kernels", [])
         sources_raw = data.get("sources", [])
@@ -937,7 +972,9 @@ class PipelineConfig:
             )
         return cls(
             shared_memory=tuple(
-                SharedMemoryConfig.from_dict(item)
+                replace(
+                    SharedMemoryConfig.from_dict(item), namespace=namespace
+                )
                 for item in shared_memory_raw
             ),
             kernels=tuple(
@@ -947,6 +984,7 @@ class PipelineConfig:
                 SourceConfig.from_dict(item) for item in sources_raw
             ),
             sinks=tuple(SinkConfig.from_dict(item) for item in sinks_raw),
+            namespace=namespace,
             base_path=(
                 Path.cwd().resolve()
                 if base_path is None
