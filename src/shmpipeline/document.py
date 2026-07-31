@@ -191,9 +191,14 @@ def config_to_document(config: PipelineConfig) -> Document:
                 }
         sinks.append(item)
 
-    return {
+    document: Document = {
         "shared_memory": shared_memory,
         "sources": sources,
         "kernels": kernels,
         "sinks": sinks,
     }
+    if config.namespace is not None:
+        # Emitted only when set, so an unnamespaced pipeline round-trips to
+        # exactly the document it came from.
+        document["namespace"] = config.namespace
+    return document

@@ -795,7 +795,7 @@ class PipelineManager:
             create_kwargs["cpu_mirror"] = spec.cpu_mirror
 
         try:
-            stream = pyshmem.create(spec.name, **create_kwargs)
+            stream = pyshmem.create(spec.resource_name, **create_kwargs)
         except FileExistsError:
             self._logger.info(
                 "shared memory already exists during create; retrying attach: name=%s",
@@ -830,8 +830,8 @@ class PipelineManager:
                     "shared memory exists but is not attachable; recreating stale stream: name=%s",
                     spec.name,
                 )
-                unlink_stream_name(spec.name)
-            stream = pyshmem.create(spec.name, **create_kwargs)
+                unlink_stream_name(spec.resource_name)
+            stream = pyshmem.create(spec.resource_name, **create_kwargs)
 
         self._logger.info(
             "created shared memory: name=%s storage=%s shape=%s dtype=%s",
@@ -863,8 +863,8 @@ class PipelineManager:
             if info["gpu_enabled"] and not info["creator_alive"]:
                 if not info["cpu_mirror"]:
                     return None
-                return pyshmem.open(spec.name, gpu_device=False)
-            return pyshmem.open(spec.name)
+                return pyshmem.open(spec.resource_name, gpu_device=False)
+            return pyshmem.open(spec.resource_name)
         except FileNotFoundError:
             return None
         except (OSError, RuntimeError, ValueError):

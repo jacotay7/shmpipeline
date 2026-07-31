@@ -3202,3 +3202,61 @@ def test_manager_runs_multi_output_kernel(tmp_path, shm_prefix, monkeypatch):
         manager.raise_if_failed()
     finally:
         manager.shutdown(force=True)
+
+
+def test_namespaced_pipelines_run_concurrently_without_colliding(tmp_path):
+    """Two pipelines with identical stream names must not share segments.
+
+    Without a namespace both would claim ``frames`` in /dev/shm and silently
+    read each other's data, which is the failure this feature exists to
+    prevent. Running them at once and checking each sees only its own writes is
+    the only test that actually demonstrates that; identical resource-name
+    strings would pass a unit test and still corrupt a real run.
+    """
+    import numpy as np
+
+    from shmpipeline import PipelineConfig
+    from shmpipeline.manager import PipelineManager
+
+    def build(namespace: str, value: float):
+        config = PipelineConfig.from_dict(
+            {
+                "namespace": namespace,
+                "shared_memory": [
+                    {"name": "frames", "shape": [4], "dtype": "float64"},
+                    {"name": "output", "shape": [4], "dtype": "float64"},
+                ],
+                "kernels": [
+                    {
+                        "name": "copy",
+                        "kind": "cpu.copy",
+                        "input": "frames",
+                        "output": "output",
+                    }
+                ],
+            },
+            base_path=tmp_path,
+        )
+        manager = PipelineManager(config)
+        manager.build()
+        return manager, np.full(4, value, dtype=np.float64)
+
+    first, first_value = build("alpha", 1.0)
+    second, second_value = build("beta", 2.0)
+    try:
+        assert (
+            first.config.shared_memory[0].resource_name
+            != second.config.shared_memory[0].resource_name
+        )
+        first.get_stream("frames").write(first_value)
+        second.get_stream("frames").write(second_value)
+        # Each pipeline still refers to its stream by the name in its document.
+        np.testing.assert_array_equal(
+            first.get_stream("frames").read(), first_value
+        )
+        np.testing.assert_array_equal(
+            second.get_stream("frames").read(), second_value
+        )
+    finally:
+        first.shutdown()
+        second.shutdown()
