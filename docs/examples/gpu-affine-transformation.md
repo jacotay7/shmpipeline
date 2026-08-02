@@ -34,3 +34,10 @@ python examples/gpu_affine_transformation/run_example.py
 ## When to use it
 
 Use this example after the CPU affine example when you want to confirm that the GPU runtime path is working correctly on your machine.
+
+For a large calibration matrix that changes rarely, the optional kernel
+parameter `matrix_layout: column_major` may improve repeated matrix-vector
+products. It keeps one additional matrix-sized device allocation and rebuilds
+that layout whenever the auxiliary matrix publication changes. Benchmark it on
+the deployment GPU; the default `source` layout avoids the conversion and
+extra storage.

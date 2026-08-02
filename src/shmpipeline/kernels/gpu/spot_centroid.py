@@ -59,7 +59,7 @@ class SpotCentroidGpuKernel(GpuKernel):
         self.background = float(parameters.get("background", 0.0))
         self.weight_power = float(parameters.get("weight_power", 1.0))
         rows, columns = context.trigger_input_spec.shape
-        dtype = self.output_buffer.dtype
+        dtype = self.output_dtype
         self._row_coords = torch.arange(
             rows, dtype=dtype, device=self.device
         ).view(rows, 1)

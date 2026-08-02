@@ -46,17 +46,45 @@ class GpuKernel(Kernel):
     storage = "gpu"
 
     def __init__(self, context) -> None:
-        """Allocate one reusable output buffer per output on the target GPU."""
+        """Store output metadata and defer compatibility staging allocations."""
         self.context = context
         self.device = torch.device(context.output_spec.gpu_device or "cuda")
-        self.output_buffers = [
-            torch.empty(
-                spec.shape,
-                dtype=torch_dtype_from_numpy(spec.dtype),
-                device=torch.device(spec.gpu_device or "cuda"),
-            )
-            for spec in context.output_specs
-        ]
-        # Primary output buffer retained for single-output kernels and the
-        # default compute_into path.
-        self.output_buffer = self.output_buffers[0]
+        self._output_buffers: list[torch.Tensor] | None = None
+
+    @property
+    def output_dtypes(self) -> tuple[torch.dtype, ...]:
+        """Return output dtypes without reserving device storage."""
+        return tuple(
+            torch_dtype_from_numpy(spec.dtype)
+            for spec in self.context.output_specs
+        )
+
+    @property
+    def output_dtype(self) -> torch.dtype:
+        """Return the primary output dtype without reserving device storage."""
+        return torch_dtype_from_numpy(self.context.output_spec.dtype)
+
+    @property
+    def output_buffers(self) -> list[torch.Tensor]:
+        """Lazily allocate legacy private staging buffers on first access.
+
+        Runtime publication writes directly into pyshmem output views.  The
+        property remains for third-party kernels that intentionally use the
+        historical staging API, without charging every built-in GPU worker for
+        an otherwise unused output-sized allocation.
+        """
+        if self._output_buffers is None:
+            self._output_buffers = [
+                torch.empty(
+                    spec.shape,
+                    dtype=torch_dtype_from_numpy(spec.dtype),
+                    device=torch.device(spec.gpu_device or "cuda"),
+                )
+                for spec in self.context.output_specs
+            ]
+        return self._output_buffers
+
+    @property
+    def output_buffer(self) -> torch.Tensor:
+        """Return the lazily allocated primary compatibility buffer."""
+        return self.output_buffers[0]

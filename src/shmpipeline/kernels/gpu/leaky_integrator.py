@@ -79,7 +79,11 @@ class LeakyIntegratorGpuKernel(GpuKernel):
         self._gain_alias = (
             "gain" if "gain" in context.config.auxiliary_by_alias else None
         )
-        self.state = torch.zeros_like(self.output_buffer)
+        self.state = torch.zeros(
+            context.output_spec.shape,
+            dtype=self.output_dtype,
+            device=self.device,
+        )
 
     def _resolve_scalar(
         self,

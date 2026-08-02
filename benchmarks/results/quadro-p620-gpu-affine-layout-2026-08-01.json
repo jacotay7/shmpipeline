@@ -1,0 +1,44 @@
+{
+  "benchmark": "gpu-affine-layout-and-lazy-staging",
+  "date": "2026-08-01",
+  "platform": "Linux Quadro P620",
+  "python": "3.13.13",
+  "torch": "2.13.0+cu126",
+  "artifact": "shmpipeline-ao/examples/keck_haka/assets/calibration.npz",
+  "artifact_sha256": "81c48b671147225937f252158bc8229bb9f699d9dfebf068d689a208551a02e8",
+  "matrix_shape": [2844, 3630],
+  "dtype": "float64",
+  "method": "five alternating repetitions of 1000 affine operations after 100 paired warmups; CUDA-event block timing divided by operation count",
+  "source_us_per_operation": [
+    1478.283203125,
+    1475.4744873046875,
+    1472.6461181640625,
+    1472.786376953125,
+    1473.8626708984375
+  ],
+  "column_major_us_per_operation": [
+    1409.7879638671875,
+    1407.7501220703125,
+    1408.6512451171875,
+    1407.5115966796875,
+    1406.9759521484375
+  ],
+  "source_median_us": 1473.8626708984375,
+  "column_major_median_us": 1407.7501220703125,
+  "speedup": 1.0469632698244034,
+  "latency_reduction_percent": 4.48566546487158,
+  "maximum_absolute_error": 8.326672684688674e-17,
+  "rms_error": 8.222156283897997e-18,
+  "layout_storage_bytes": 82589760,
+  "layout_setup_ms": {
+    "cold": 16.101728439331055,
+    "warm_median": 6.044672012329102
+  },
+  "lazy_staging": {
+    "shape": [1000000],
+    "dtype": "float32",
+    "live_bytes_at_kernel_construction": 0,
+    "live_bytes_after_compatibility_buffer_access": 4000256
+  },
+  "notes": "The layout option is explicit because its speed/storage crossover is device and shape dependent. Output differences are float64 GEMV reduction-order roundoff."
+}

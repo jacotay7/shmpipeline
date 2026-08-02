@@ -913,6 +913,83 @@ def test_affine_transform_gpu_kernel_applies_matrix_and_offset():
 
 
 @pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_affine_transform_gpu_column_major_cache_updates_with_auxiliary():
+    kernel = _instantiate_kernel(
+        AffineTransformGpuKernel,
+        input_shape=(3,),
+        output_shape=(2,),
+        auxiliary=[
+            {"name": "matrix", "shape": (2, 3)},
+            {"name": "offset", "shape": (2,)},
+        ],
+        parameters={"matrix_layout": "column_major"},
+        storage="gpu",
+    )
+    vector = torch.tensor([2.0, -1.0, 4.0], device="cuda:0")
+    offset = torch.tensor([1.0, -2.0], device="cuda:0")
+    first = torch.tensor([[1.0, 2.0, -1.0], [0.5, 0.0, 3.0]], device="cuda:0")
+    second = first + 1.0
+    output = torch.empty(2, device="cuda:0")
+
+    kernel.compute_into(vector, output, {"matrix": first, "offset": offset})
+    _assert_allclose(output, (first @ vector + offset).cpu().numpy())
+    cached = kernel._matrix_view
+    kernel.compute_into(vector, output, {"matrix": first, "offset": offset})
+    assert kernel._matrix_view is cached
+    kernel.compute_into(vector, output, {"matrix": second, "offset": offset})
+    _assert_allclose(output, (second @ vector + offset).cpu().numpy())
+    assert kernel._matrix_view is not cached
+
+
+def test_affine_transform_gpu_rejects_invalid_matrix_layout():
+    shared_memory = _make_shared_memory(
+        [
+            {
+                "name": "input",
+                "shape": [3],
+                "dtype": "float32",
+                "storage": "gpu",
+                "gpu_device": "cuda:0",
+            },
+            {
+                "name": "output",
+                "shape": [2],
+                "dtype": "float32",
+                "storage": "gpu",
+                "gpu_device": "cuda:0",
+            },
+            {
+                "name": "matrix",
+                "shape": [2, 3],
+                "dtype": "float32",
+                "storage": "gpu",
+                "gpu_device": "cuda:0",
+            },
+            {
+                "name": "offset",
+                "shape": [2],
+                "dtype": "float32",
+                "storage": "gpu",
+                "gpu_device": "cuda:0",
+            },
+        ]
+    )
+    config = KernelConfig.from_dict(
+        {
+            "name": "kernel_under_test",
+            "kind": "gpu.affine_transform",
+            "input": "input",
+            "output": "output",
+            "auxiliary": ["matrix", "offset"],
+            "parameters": {"matrix_layout": "diagonal"},
+        }
+    )
+
+    with pytest.raises(ConfigValidationError, match="'matrix_layout'"):
+        AffineTransformGpuKernel.validate_config(config, shared_memory)
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
 def test_leaky_integrator_gpu_kernel_updates_state():
     kernel = _instantiate_kernel(
         LeakyIntegratorGpuKernel,
@@ -1085,7 +1162,7 @@ def test_reduce_kernel_rejects_non_scalar_output():
 
 
 # ---------------------------------------------------------------------------
-# CPU kernels do not allocate an unused output_buffer (GPU kernels do)
+# CPU kernels expose no staging buffer; GPU compatibility buffers are lazy
 # ---------------------------------------------------------------------------
 
 
@@ -1100,7 +1177,7 @@ def test_cpu_kernel_has_no_output_buffer_attribute():
 
 
 @pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
-def test_gpu_kernel_still_has_output_buffer():
+def test_gpu_kernel_compatibility_output_buffer_is_lazy():
     from shmpipeline.kernels.gpu.scale import ScaleGpuKernel
 
     kernel = _instantiate_kernel(
@@ -1110,7 +1187,27 @@ def test_gpu_kernel_still_has_output_buffer():
         parameters={"factor": 1.0},
         storage="gpu",
     )
-    assert hasattr(kernel, "output_buffer")
+    assert kernel._output_buffers is None
+    output = kernel.output_buffer
+    assert kernel._output_buffers == [output]
+    assert output.shape == (4,)
+    assert output.dtype == torch.float32
+
+
+@pytest.mark.skipif(not CUDA_AVAILABLE, reason="CUDA is not available")
+def test_gpu_builtin_kernel_does_not_allocate_compatibility_output_buffer():
+    from shmpipeline.kernels.gpu.scale import ScaleGpuKernel
+
+    kernel = _instantiate_kernel(
+        ScaleGpuKernel,
+        input_shape=(1_000_000,),
+        output_shape=(1_000_000,),
+        parameters={"factor": 1.0},
+        storage="gpu",
+    )
+
+    assert kernel._output_buffers is None
+    assert kernel.output_dtype == torch.float32
 
 
 # ---------------------------------------------------------------------------

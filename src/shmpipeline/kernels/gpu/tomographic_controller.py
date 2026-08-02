@@ -157,7 +157,7 @@ class TomographicControllerGpuKernel(GpuKernel):
         rows, columns = input_shape[1:] if self._batched else input_shape
         tiles_y = rows // self.tile_size
         tiles_x = columns // self.tile_size
-        dtype = self.output_buffer.dtype
+        dtype = self.output_dtype
         calibrated_shape = (
             (8, rows, columns) if self._batched else (rows, columns)
         )
@@ -360,7 +360,7 @@ class TipTiltControllerGpuKernel(GpuKernel):
         self.leak = float(parameters.get("leak", 1.0))
         self.control_gain = float(parameters.get("control_gain", 1.0))
         rows, columns = context.trigger_input_spec.shape
-        dtype = self.output_buffer.dtype
+        dtype = self.output_dtype
         self._weights = torch.empty(
             (rows, columns), dtype=dtype, device=self.device
         )

@@ -65,7 +65,7 @@ class ShackHartmannCentroidGpuKernel(GpuKernel):
         coords = torch.arange(
             self.tile_size,
             device=self.device,
-            dtype=self.output_buffer.dtype,
+            dtype=self.output_dtype,
         )
         self._y_coords = coords.view(self.tile_size, 1)
         self._x_coords = coords.view(1, self.tile_size)

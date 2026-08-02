@@ -9,6 +9,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- GPU kernels now expose output dtype metadata without allocating device
+  storage, and retain the historical `output_buffer` / `output_buffers` API as
+  lazy compatibility staging. Built-in kernels write directly into pyshmem
+  publication views and therefore no longer reserve an unused output-sized
+  tensor at worker construction.
+- `gpu.affine_transform` accepts `parameters.matrix_layout: column_major` for
+  fixed, repeatedly reused matrices. The kernel builds the alternate storage
+  once per auxiliary generation and invalidates it when the matrix snapshot
+  changes; `source` remains the allocation-free default.
 - An optional top-level `namespace` on a pipeline configuration. It scopes the
   operating-system names of that pipeline's shared-memory segments while
   leaving every name inside the graph unchanged, so two pipelines built from
