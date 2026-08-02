@@ -108,3 +108,12 @@ the safe-read clone and CUDA synchronization, but it also lengthens producer
 lock hold time and must not be used with a producer that mutates CUDA storage
 outside pyshmem's `write`/write-view transaction. The batched tomography
 profile uses this mode to sustain 1 kHz with one 2 MiB camera cube per frame.
+
+GPU auxiliary inputs use safe private snapshots keyed by publication count.
+After the first read, an unchanged auxiliary is omitted from the per-frame
+multi-stream lock scope; a changed count restores its lock and refreshes the
+snapshot. A publication racing the unlocked count check can make one frame use
+the prior complete calibration generation, which is the ordinary auxiliary
+(non-trigger) contract, but payloads cannot tear. CPU auxiliaries remain
+borrowed under lock, and dynamic values that must trigger frame alignment
+should be declared as trigger inputs instead.

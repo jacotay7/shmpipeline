@@ -26,3 +26,9 @@ before adding a new comparison point.
 fixed-shape HAKA reconstructor comparison and lazy staging allocation check
 that closed those optimization-audit items. Its artifact digest pins the
 physical calibration input used for numerical parity.
+
+`linux-gpu-auxiliary-lock-scope-2026-08-01.json` measures the host lock scope
+removed by cached GPU auxiliaries and includes a same-graph HAKA full-loop
+comparison. The uncontended lock result is causal; the full-loop comparison
+shows the optimization is below scheduler/optics noise for that workload and
+is not presented as an aggregate speedup.

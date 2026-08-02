@@ -188,6 +188,59 @@ def test_locked_inputs_and_outputs_reads_all_streams():
         assert aux == {}
 
 
+def test_unchanged_private_gpu_auxiliary_snapshot_skips_shared_lock(
+    monkeypatch,
+):
+    config = KernelConfig.from_dict(
+        {
+            "name": "affine",
+            "kind": "gpu.affine_transform",
+            "input": "input",
+            "output": "output",
+            "auxiliary": {"matrix": "calibration"},
+        }
+    )
+    trigger = _FakeStream("input", [1.0], count=2, gpu_enabled=True)
+    calibration = _FakeStream(
+        "calibration", [[2.0]], count=3, gpu_enabled=True
+    )
+    output = _FakeStream("output", [0.0], gpu_enabled=True)
+    cached_value = np.array([[2.0]])
+    cache = {"matrix": (3, cached_value)}
+    locked_names = []
+
+    @contextmanager
+    def record_locked(streams, **_kwargs):
+        locked_names.append(tuple(stream.name for stream in streams))
+        yield streams
+
+    monkeypatch.setattr(runtime.pyshmem, "locked_many", record_locked)
+
+    with runtime._locked_inputs_and_outputs(
+        config,
+        trigger,
+        {"matrix": calibration},
+        {"output": output},
+        auxiliary_cache=cache,
+    ) as (_count, _trigger, auxiliary, _frame_ids):
+        assert auxiliary["matrix"] is cached_value
+
+    assert locked_names[-1] == ("input", "output")
+
+    calibration.count = 4
+    with runtime._locked_inputs_and_outputs(
+        config,
+        trigger,
+        {"matrix": calibration},
+        {"output": output},
+        auxiliary_cache=cache,
+    ):
+        pass
+
+    assert locked_names[-1] == ("calibration", "input", "output")
+    assert cache["matrix"][0] == 4
+
+
 def test_locked_views_remain_protected_until_compute_scope_exits(shm_prefix):
     trigger_name = f"{shm_prefix}_input"
     output_name = f"{shm_prefix}_output"

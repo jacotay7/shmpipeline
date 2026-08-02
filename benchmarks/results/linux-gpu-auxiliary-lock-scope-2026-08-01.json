@@ -1,0 +1,75 @@
+{
+  "benchmark": "cached-gpu-auxiliary-lock-scope",
+  "date": "2026-08-01",
+  "platform": "Linux 6.8 x86_64",
+  "cpu": "Intel Core i7-10700",
+  "pyshmem": "1.3.1",
+  "direct_lock_scope": {
+    "method": "seven alternating repetitions of 20000 uncontended pyshmem.locked_many scopes after 1000 warmups",
+    "four_streams_ns_per_scope": [
+      78692.9804,
+      79089.98155,
+      77773.2172,
+      78069.78885,
+      77986.9744,
+      78504.6406,
+      78595.14325
+    ],
+    "two_streams_ns_per_scope": [
+      42609.8404,
+      42896.3104,
+      42419.6621,
+      42523.2507,
+      42808.74195,
+      42626.49715,
+      42189.73045
+    ],
+    "four_streams_median_ns": 78504.6406,
+    "two_streams_median_ns": 42609.8404,
+    "speedup": 1.842406351749677,
+    "latency_reduction_percent": 45.72315716072458
+  },
+  "haka_full_loop": {
+    "method": "three 48-frame baseline runs followed immediately by three candidate runs; identical config and benchmark pipeline digests",
+    "config_digest": "f791183c3766e3658a97971805695142d85bf9ea6a3d934df0679e052ce58a54",
+    "benchmark_pipeline_digest": "6b93da9b73499275b5758dcd0cb7f9178862394f118a34ce60deb18004b569a8",
+    "baseline_revision": "f72a5d3",
+    "baseline_steady_throughput_hz": [
+      16.78746273590322,
+      16.48920195223287,
+      16.761995553141443
+    ],
+    "candidate_steady_throughput_hz": [
+      16.615455552443144,
+      16.673106470735796,
+      16.531947724965406
+    ],
+    "baseline_publication_p50_ms": [
+      53.56922300416045,
+      52.895643006195314,
+      53.837800995097496
+    ],
+    "candidate_publication_p50_ms": [
+      54.23214699840173,
+      54.17329700139817,
+      54.65669800469186
+    ],
+    "baseline_publication_p95_ms": [
+      55.503803002648056,
+      56.146700197132304,
+      55.9484962024726
+    ],
+    "candidate_publication_p95_ms": [
+      55.47856429038802,
+      55.26918880204903,
+      56.433378501969855
+    ],
+    "baseline_device_peak_delta_mib": [642, 646, 650],
+    "candidate_device_peak_delta_mib": [648, 644, 644],
+    "median_throughput_change_percent": -0.8742395870092845,
+    "median_publication_p50_change_percent": 1.2375090715611048,
+    "median_publication_p95_change_percent": -0.8399366274009168,
+    "observer_skips": 0
+  },
+  "interpretation": "The removed host lock work is causal and large for stages dominated by lock overhead. HAKA is dominated by optics and scheduling: throughput and p50 moved unfavorably while p95 and memory moved favorably, all by about one percent or less. No HAKA aggregate speedup is claimed."
+}

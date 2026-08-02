@@ -179,8 +179,27 @@ def _locked_inputs_and_outputs(
                 key=lambda item: item[1].name,
             )
         )
+    # A safe GPU auxiliary snapshot is private device storage.  If its
+    # publication count is unchanged, computing from that snapshot needs no
+    # lock on the shared source.  Should a writer publish after this count
+    # check, this frame consistently uses the prior complete generation and
+    # the next iteration refreshes the cache.  Trigger and output streams, CPU
+    # borrowed auxiliaries, and changed GPU auxiliaries remain locked.
+    cached_gpu_stream_ids = {
+        id(stream)
+        for name, stream in auxiliary_streams.items()
+        if auxiliary_cache is not None
+        and getattr(stream, "gpu_enabled", False)
+        and (cached := auxiliary_cache.get(name)) is not None
+        and cached[0] == getattr(stream, "count", None)
+    }
+    active_locked_streams = tuple(
+        stream
+        for _, stream in ordered_locked_streams
+        if id(stream) not in cached_gpu_stream_ids
+    )
     with pyshmem.locked_many(
-        tuple(stream for _, stream in ordered_locked_streams),
+        active_locked_streams,
         timeout=kernel_config.read_timeout,
         poll_interval=kernel_config.poll_interval,
     ):

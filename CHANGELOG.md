@@ -9,6 +9,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Worker lock scopes now omit unchanged GPU auxiliary streams after their
+  safe private snapshot is cached. Changed generations are still read under
+  the deterministic multi-stream lock, while trigger, output, and borrowed CPU
+  auxiliary locking is unchanged.
 - GPU kernels now expose output dtype metadata without allocating device
   storage, and retain the historical `output_buffer` / `output_buffers` API as
   lazy compatibility staging. Built-in kernels write directly into pyshmem
