@@ -124,4 +124,3 @@ class LeakyIntegratorGpuKernel(GpuKernel):
             out=output,
         )
         self.state.copy_(output)
-        torch.cuda.synchronize(output.device)

@@ -324,7 +324,6 @@ class TomographicControllerGpuKernel(GpuKernel):
         torch.minimum(
             output, self._aux(auxiliary_inputs, "command_high"), out=output
         )
-        torch.cuda.synchronize(output.device)
 
 
 class TipTiltControllerGpuKernel(GpuKernel):
@@ -403,4 +402,3 @@ class TipTiltControllerGpuKernel(GpuKernel):
         bias = as_gpu_tensor(auxiliary_inputs[aliases[1]], device=self.device)
         torch.matmul(matrix, self._state, out=output)
         torch.add(output, bias, out=output)
-        torch.cuda.synchronize(output.device)

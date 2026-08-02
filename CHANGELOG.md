@@ -27,6 +27,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Built-in GPU kernels no longer force a device-wide synchronization after every
+  operation.** The enclosing `pyshmem` write transaction remains the completion
+  and publication boundary, so direct kernel parity and cross-process GPU tests
+  retain their correctness contract while small GPU stages avoid a redundant
+  host wait.
+- Retired AO compatibility example pages are explicitly marked as orphaned, so
+  the strict Sphinx build stays green without restoring them to the current
+  navigation.
+
 - Control-plane commands now return actionable HTTP 400 details for plugin
   configuration and artifact contract errors instead of hiding them behind a
   generic Internal Server Error in GUI clients.

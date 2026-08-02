@@ -41,4 +41,3 @@ class ConcatenateGpuKernel(GpuKernel):
             as_gpu_tensor(value, device=self.device) for value in trigger_input
         )
         torch.cat(values, dim=self.axis, out=output)
-        torch.cuda.synchronize(output.device)

@@ -64,4 +64,3 @@ class ScaleOffsetGpuKernel(GpuKernel):
             out=output,
         )
         torch.sub(output, offset, out=output)
-        torch.cuda.synchronize(output.device)

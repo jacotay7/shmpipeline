@@ -46,4 +46,3 @@ class ScaleGpuKernel(GpuKernel):
             self.factor,
             out=output,
         )
-        torch.cuda.synchronize(output.device)

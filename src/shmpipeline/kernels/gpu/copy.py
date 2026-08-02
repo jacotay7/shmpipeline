@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-import torch
-
 from shmpipeline.config import KernelConfig, SharedMemoryConfig
 from shmpipeline.kernels.gpu._common import validate_unary_same_shape_and_dtype
 from shmpipeline.kernels.gpu.base import GpuKernel, as_gpu_tensor
@@ -33,5 +31,3 @@ class CopyGpuKernel(GpuKernel):
     ) -> None:
         del auxiliary_inputs
         output.copy_(as_gpu_tensor(trigger_input, device=self.device))
-        if isinstance(output, torch.Tensor):
-            torch.cuda.synchronize(output.device)

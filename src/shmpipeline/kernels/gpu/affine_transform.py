@@ -84,4 +84,3 @@ class AffineTransformGpuKernel(GpuKernel):
         )
         torch.matmul(matrix, vector, out=output)
         torch.add(output, offset, out=output)
-        torch.cuda.synchronize(output.device)

@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Observatory AO System
 
 This is the most representative pipeline in the repository: a high-order single-conjugate adaptive-optics style control chain sized to feel like a real observatory workload.

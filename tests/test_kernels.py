@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -72,6 +75,33 @@ else:  # pragma: no cover - exercised only when torch is unavailable
 pytestmark = pytest.mark.unit
 
 CUDA_AVAILABLE = torch is not None and torch.cuda.is_available()
+
+
+def test_builtin_gpu_kernels_defer_synchronization_to_publication() -> None:
+    """GPU arithmetic must not add a second completion boundary before publish."""
+    gpu_kernel_dir = (
+        Path(__file__).parents[1] / "src" / "shmpipeline" / "kernels" / "gpu"
+    )
+    offenders: list[str] = []
+    for path in sorted(gpu_kernel_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "synchronize"
+            ):
+                offenders.append(f"{path.name}:{node.lineno}")
+            elif (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "synchronize"
+            ):
+                offenders.append(f"{path.name}:{node.lineno}")
+    assert not offenders, (
+        "built-in GPU kernels must let the pyshmem publication transaction own "
+        f"completion; synchronization calls found at {offenders}"
+    )
 
 
 def _make_shared_memory(specs: list[dict]) -> dict[str, SharedMemoryConfig]:

@@ -39,4 +39,3 @@ class ElementwiseSubtractGpuKernel(GpuKernel):
         torch.sub(
             as_gpu_tensor(trigger_input, device=self.device), rhs, out=output
         )
-        torch.cuda.synchronize(output.device)

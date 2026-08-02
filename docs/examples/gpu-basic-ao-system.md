@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # GPU Basic AO System
 
 This example mirrors the CPU adaptive-optics style chain but keeps every stream in GPU shared memory.

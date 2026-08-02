@@ -94,4 +94,3 @@ class ShackHartmannCentroidGpuKernel(GpuKernel):
         mask = total > 0
         output[..., 0][mask] = y_weighted[mask] / total[mask] - self._center
         output[..., 1][mask] = x_weighted[mask] / total[mask] - self._center
-        torch.cuda.synchronize(output.device)

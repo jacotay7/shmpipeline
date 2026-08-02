@@ -138,7 +138,6 @@ class CustomOperationGpuKernel(GpuKernel):
                 raise RuntimeError(
                     f"unknown operation {instruction.operation!r}"
                 )
-        torch.cuda.synchronize(output.device)
 
     def _resolve_destination(
         self, operand, output: torch.Tensor

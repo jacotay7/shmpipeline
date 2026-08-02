@@ -75,6 +75,14 @@ small operation with a roughly 10 microsecond CPU floor can be slower on the
 GPU path. Prefer CPU streams for light arithmetic and reserve GPU stages for
 work large enough to amortize that fixed cost.
 
+Built-in GPU kernels enqueue their work on the active stream and return without
+forcing a device-wide wait. Runtime execution writes directly into a
+`pyshmem.write_view_locked()` transaction; that transaction synchronizes the
+producer stream before publishing the sequence number, so it is the single
+completion boundary. A caller that invokes a kernel outside a publication
+transaction must establish its own CUDA event or synchronization before
+consuming the result.
+
 For a fused GPU kernel whose producer uses pyshmem's synchronized publication
 API, `parameters.borrow_gpu_inputs: true` opts into a zero-copy locked input
 view. The runtime then holds the input lock for the entire compute call, so the

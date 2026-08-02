@@ -48,4 +48,3 @@ class AddConstantGpuKernel(GpuKernel):
             self.constant,
             out=output,
         )
-        torch.cuda.synchronize(output.device)

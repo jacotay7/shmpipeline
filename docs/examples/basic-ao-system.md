@@ -1,3 +1,7 @@
+---
+orphan: true
+---
+
 # Basic AO System
 
 This example builds a compact adaptive-optics style control chain on CPU streams.

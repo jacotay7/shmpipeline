@@ -39,4 +39,3 @@ class ElementwiseAddGpuKernel(GpuKernel):
         torch.add(
             as_gpu_tensor(trigger_input, device=self.device), rhs, out=output
         )
-        torch.cuda.synchronize(output.device)

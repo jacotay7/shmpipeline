@@ -55,4 +55,3 @@ class FlattenGpuKernel(GpuKernel):
                 as_gpu_tensor(trigger_input, device=self.device), (-1,)
             )
         )
-        torch.cuda.synchronize(output.device)

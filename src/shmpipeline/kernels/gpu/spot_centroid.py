@@ -94,4 +94,3 @@ class SpotCentroidGpuKernel(GpuKernel):
             output[1] = (
                 self._weights * self._column_coords
             ).sum() / total - self._column_center
-        torch.cuda.synchronize(output.device)
