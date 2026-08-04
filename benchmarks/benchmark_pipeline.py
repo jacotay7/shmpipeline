@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import json
 import platform
 import socket
@@ -46,6 +47,18 @@ def _source(value: str | None) -> dict[str, Any] | None:
     return result
 
 
+def _version(name: str) -> str | None:
+    """Installed version of ``name``, so results stay comparable across runs.
+
+    ``benchmarks/results/README.md`` asks every snapshot to carry the machine,
+    Python, pyshmem, and shmpipeline versions.
+    """
+    try:
+        return importlib.metadata.version(name)
+    except importlib.metadata.PackageNotFoundError:
+        return None
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     config = PipelineConfig.from_yaml(args.config)
     manager = PipelineManager(config)
@@ -68,6 +81,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "host": socket.gethostname(),
         "platform": platform.platform(),
         "python": platform.python_version(),
+        "pyshmem": _version("pyshmem"),
+        "shmpipeline": _version("shmpipeline"),
         "started_at_unix": started,
         "report": report,
     }

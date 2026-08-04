@@ -9,6 +9,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `examples/observatory_ao_system/showcase.py` renders an animated WebP of the
+  observatory AO pipeline actually running: live WFS image, measured centroids,
+  and deformable-mirror commands over a dataflow diagram of the five kernel
+  stages, each labelled with the execution time its live worker reported and
+  the loop rate from `PipelineManager.benchmark()`. The clip is the README
+  header image and is written to `docs/_static/images/`.
+- `benchmarks/results/rtx5090-linux-observatory-ao-2026-08-04.json` records the
+  five-stage observatory AO loop at 1,817 Hz on a Ryzen 9 9950X3D, with
+  per-stage execution time and jitter.
 - Worker lock scopes now omit unchanged GPU auxiliary streams after their
   safe private snapshot is cached. Changed generations are still read under
   the deterministic multi-stream lock, while trigger, output, and borrowed CPU
@@ -93,6 +102,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The README now leads with what shmpipeline is and does: badges, the
+  documentation link, the showcase clip, a YAML/Python/CLI quickstart, measured
+  benchmarks, and a feature list, replacing the previous link-first layout.
+- `benchmarks/benchmark_pipeline.py` records the installed `pyshmem` and
+  `shmpipeline` versions in every JSON snapshot, which `benchmarks/results/`
+  asks each result to carry so numbers stay comparable across runs.
 - Relicensed shmpipeline under MIT after a first-party authorship and
   provenance audit. Third-party dependencies retain their own licenses.
 
