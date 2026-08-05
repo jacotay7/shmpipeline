@@ -30,7 +30,12 @@ from shmpipeline.errors import (
 from shmpipeline.graph import PipelineGraph
 from shmpipeline.logging_utils import get_logger
 from shmpipeline.registry import KernelRegistry, get_default_registry
-from shmpipeline.runtime import drain_events, run_kernel_process
+from shmpipeline.runtime import (
+    ROLLING_METRICS_WINDOW,
+    _compute_rolling_throughput_hz,
+    drain_events,
+    run_kernel_process,
+)
 from shmpipeline.scheduling import (
     WorkerPlacementPolicy,
     normalize_placement_policy,
@@ -123,6 +128,16 @@ class _SourceController:
         self._last_write_time: float | None = None
         self._last_write_duration_s: float | None = None
         self._frames_written = 0
+        # Kernels have always reported a rolling rate while sources and sinks
+        # reported an average over their whole life. Because the clock starts
+        # when the thread does, that average permanently carries whatever the
+        # first frames cost -- waiting on calibration, CUDA context creation,
+        # plan building -- and can never recover from it. Two endpoints of one
+        # lock-stepped loop then disagree about the loop's rate, which is a
+        # reporting artifact that reads exactly like a real problem.
+        self._completion_times: deque[float] = deque(
+            maxlen=ROLLING_METRICS_WINDOW
+        )
         self._last_error: str | None = None
         self._traceback: str | None = None
         self._failure_reported = False
@@ -172,7 +187,13 @@ class _SourceController:
                 "poll_interval": self.spec.poll_interval,
                 "alive": self._thread.is_alive(),
                 "frames_written": self._frames_written,
+                # Retained with its original meaning: benchmarks and regression
+                # baselines parse it, and quietly redefining a published metric
+                # is how a baseline stops meaning anything.
                 "effective_rate_hz": effective_rate_hz,
+                "throughput_hz": _compute_rolling_throughput_hz(
+                    self._completion_times
+                ),
                 "started_at": self._started_at_wall,
                 "last_write_time": self._last_write_time,
                 "last_write_duration_ms": (
@@ -238,6 +259,7 @@ class _SourceController:
                     count = 1
                 with self._lock:
                     self._frames_written += count
+                    self._completion_times.append(finished)
                     self._last_write_time = time.time()
                     self._last_write_duration_s = finished - started
         except BaseException as exc:
@@ -288,6 +310,9 @@ class _SinkController:
         self._last_read_time: float | None = None
         self._last_read_duration_s: float | None = None
         self._frames_consumed = 0
+        self._completion_times: deque[float] = deque(
+            maxlen=ROLLING_METRICS_WINDOW
+        )
         self._missed_writes = 0
         self._last_error: str | None = None
         self._traceback: str | None = None
@@ -340,6 +365,9 @@ class _SinkController:
                 "frames_consumed": self._frames_consumed,
                 "missed_writes": self._missed_writes,
                 "effective_rate_hz": effective_rate_hz,
+                "throughput_hz": _compute_rolling_throughput_hz(
+                    self._completion_times
+                ),
                 "started_at": self._started_at_wall,
                 "last_read_time": self._last_read_time,
                 "last_read_duration_ms": (
@@ -400,6 +428,7 @@ class _SinkController:
                 last_seen_count = publication.count
                 with self._lock:
                     self._frames_consumed += 1
+                    self._completion_times.append(finished)
                     if missed > 0:
                         self._missed_writes += missed
                     self._last_read_time = time.time()

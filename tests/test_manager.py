@@ -3260,3 +3260,49 @@ def test_namespaced_pipelines_run_concurrently_without_colliding(tmp_path):
     finally:
         first.shutdown()
         second.shutdown()
+
+
+def test_endpoint_rate_metrics_separate_lifetime_from_recent(shm_prefix):
+    """Sources and sinks report a rolling rate as well as a lifetime average.
+
+    The two answer different questions and only one of them is comparable
+    across endpoints. ``effective_rate_hz`` divides by the time since the
+    thread started, which for a sink includes however long it waited before
+    its first payload ever arrived; that startup cost is averaged in
+    permanently and never ages out. Kernels have always reported a rolling
+    window instead, so two endpoints of one lock-stepped loop would disagree
+    about the loop's rate purely by construction -- which reads exactly like a
+    dropped-frame problem and is not one.
+
+    Both are published. The lifetime figure keeps its meaning because
+    benchmarks and regression baselines parse it.
+    """
+    config = _make_pipeline_config(
+        shm_prefix,
+        kind="cpu.scale",
+        parameters={"factor": 2.0},
+    )
+    manager = PipelineManager(config)
+    manager.build()
+    manager.start()
+    try:
+        input_stream = manager.get_stream(f"{shm_prefix}_input")
+        output_stream = manager.get_stream(f"{shm_prefix}_output")
+        payload = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32)
+        for _ in range(4):
+            baseline = output_stream.count
+            input_stream.write(payload)
+            _wait_for_next_write(output_stream, baseline, timeout=2.0)
+        sinks = manager.sink_status()
+        sources = manager.source_status()
+    finally:
+        manager.stop()
+        manager.shutdown()
+
+    for status in (*sinks.values(), *sources.values()):
+        assert "effective_rate_hz" in status
+        assert "throughput_hz" in status
+        assert status["throughput_hz"] >= 0.0
+        # A rolling window needs two completions to have a duration at all;
+        # a one-shot endpoint legitimately reports zero rather than a rate.
+        assert isinstance(status["throughput_hz"], float)
