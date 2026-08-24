@@ -540,9 +540,9 @@ GPU kernels (`kernels/gpu/*`, no CUDA on CI) and the PySide6 GUI
 
 ## Package Info
 
-- Package name on PyPI: `shmpipeline` (v1.0.5)
+- Package name on PyPI: `shmpipeline` (v1.2.0)
 - License: MIT
-- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.1.1,<2`, `PyYAML>=6.0`
+- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.3.1,<2`, `PyYAML>=6.0`
 - Optional extras: `gpu` (torch), `control` (fastapi/uvicorn/httpx), `gui` (PySide6/pyqtgraph)
 - Python: 3.9–3.13
 - GitHub: `https://github.com/jacotay7/shmpipeline`

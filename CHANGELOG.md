@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-24
+
 ### Added
 
 - `examples/observatory_ao_system/showcase.py` renders an animated WebP of the
@@ -49,6 +51,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **Raised the `pyshmem` floor to `>=1.3.1`.** `_read_sink_payload` calls
+  `read_after_publication()`, which pyshmem added in 1.3.1, but the declared
+  floor was `>=1.3.0` — a version that was never released (pyshmem went 1.2.0 →
+  1.3.1). Any resolver honouring the old floor could install a pyshmem without
+  the publication API, and every sink read would have failed with an
+  `AttributeError` at runtime instead of failing at install time.
 - **Built-in GPU kernels no longer force a device-wide synchronization after every
   operation.** The enclosing `pyshmem` write transaction remains the completion
   and publication boundary, so direct kernel parity and cross-process GPU tests
