@@ -941,6 +941,7 @@ def test_affine_transform_gpu_column_major_cache_updates_with_auxiliary():
     assert kernel._matrix_view is not cached
 
 
+@pytest.mark.skipif(torch is None, reason="torch is not installed")
 def test_affine_transform_gpu_rejects_invalid_matrix_layout():
     shared_memory = _make_shared_memory(
         [
