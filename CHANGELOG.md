@@ -7,6 +7,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- The GUI test for `_scalar_image_levels` skips when the optional GUI stack
+  is not installed, like the other GUI tests, instead of failing with
+  `AttributeError` (seen on the Arm benchmark host without the `gui` extra).
+
 ## [1.2.0] - 2026-08-24
 
 ### Added

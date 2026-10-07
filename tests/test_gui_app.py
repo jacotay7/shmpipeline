@@ -786,6 +786,9 @@ def test_viewer_slice_controls_survive_live_cube_updates(qapp, monkeypatch):
     ],
 )
 def test_scalar_image_levels_are_finite_and_non_degenerate(image, expected):
+    # A pure function, so it needs the module but not a QApplication.
+    if viewers_module is None:
+        pytest.skip(f"GUI stack is unavailable: {GUI_IMPORT_ERROR}")
     assert viewers_module._scalar_image_levels(image) == pytest.approx(
         expected
     )
