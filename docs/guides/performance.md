@@ -31,7 +31,15 @@ for a latency-sensitive pipeline.
 
 Streams created with `notify: true` use pyshmem's Linux futex notification path
 for parked readers. Notifications avoid idle polling, but still incur one
-wakeup syscall per write and fall back to polling on macOS.
+wakeup syscall per write and fall back to polling on macOS. Waking a parked
+worker adds roughly 6–10 microseconds to the producer's write on the Arm
+benchmark host, and the woken worker's scheduling latency (tens of
+microseconds on an idle core) dominates each notified hop.
+
+shmpipeline 1.3.0 requires pyshmem 1.4.0, which fixes a lost-wakeup race in
+these waits: a publication landing between a worker's count check and its
+park was slept through until the 10 ms trigger-wait slice expired, which
+appeared as ~10 ms p99 latency spikes on every notified hop.
 
 ## Worker placement
 

@@ -1,0 +1,235 @@
+{
+  "benchmark": "pipeline_latency",
+  "description": "benchmarks/benchmark_latency.py ping-pong (one frame in flight), driver pinned to CPU 28, workers round-robin from CPU 30, three interleaved runs per side; 'before' is pyshmem 1.3.8 + shmpipeline 1.2.0, 'after' is pyshmem 1.4.0 + shmpipeline 1.3.0 from source.",
+  "host": "80-core Arm Neoverse-N1, Linux 6.17, Python 3.13.15, NumPy 2.5.3",
+  "configs": {
+    "smoke": "benchmarks/smoke.yaml (cpu.copy, 64 float32)",
+    "observatory": "examples/observatory_ao_system/pipeline.yaml (5 stages)"
+  },
+  "results": {
+    "smoke": {
+      "before": {
+        "median_of_runs": {
+          "latency_us": {
+            "p50": 335.6,
+            "p99": 10640.8,
+            "p99.9": 10770.2,
+            "max": 11005.2
+          },
+          "frames_per_s": 1665.1
+        },
+        "runs": [
+          {
+            "latency_us": {
+              "max": 11005.2,
+              "p50": 341.2,
+              "p99": 10713.7,
+              "p99.9": 10844.1
+            },
+            "frames_per_s": 1391.3,
+            "workers_avg_exec_us": {
+              "copy": 136.4
+            }
+          },
+          {
+            "latency_us": {
+              "max": 10863.7,
+              "p50": 333.1,
+              "p99": 10628.3,
+              "p99.9": 10770.2
+            },
+            "frames_per_s": 1748.3,
+            "workers_avg_exec_us": {
+              "copy": 133.2
+            }
+          },
+          {
+            "latency_us": {
+              "max": 11900.8,
+              "p50": 335.6,
+              "p99": 10640.8,
+              "p99.9": 10768.7
+            },
+            "frames_per_s": 1665.1,
+            "workers_avg_exec_us": {
+              "copy": 133.6
+            }
+          }
+        ]
+      },
+      "after": {
+        "median_of_runs": {
+          "latency_us": {
+            "p50": 52.3,
+            "p99": 128.7,
+            "p99.9": 253.0,
+            "max": 3715.6
+          },
+          "frames_per_s": 18178.2
+        },
+        "runs": [
+          {
+            "latency_us": {
+              "max": 3699.2,
+              "p50": 51.4,
+              "p99": 109.7,
+              "p99.9": 253.0
+            },
+            "frames_per_s": 18178.2,
+            "workers_avg_exec_us": {
+              "copy": 12.9
+            }
+          },
+          {
+            "latency_us": {
+              "max": 3808.9,
+              "p50": 53.6,
+              "p99": 130.6,
+              "p99.9": 261.0
+            },
+            "frames_per_s": 17239.1,
+            "workers_avg_exec_us": {
+              "copy": 13.4
+            }
+          },
+          {
+            "latency_us": {
+              "max": 3715.6,
+              "p50": 52.3,
+              "p99": 128.7,
+              "p99.9": 248.0
+            },
+            "frames_per_s": 18249.6,
+            "workers_avg_exec_us": {
+              "copy": 14.1
+            }
+          }
+        ]
+      }
+    },
+    "observatory": {
+      "before": {
+        "median_of_runs": {
+          "latency_us": {
+            "p50": 4121.1,
+            "p99": 14861.2,
+            "p99.9": 23921.9,
+            "max": 24613.3
+          },
+          "frames_per_s": 195.9
+        },
+        "runs": [
+          {
+            "latency_us": {
+              "max": 24837.4,
+              "p50": 4194.7,
+              "p99": 17659.3,
+              "p99.9": 24396.7
+            },
+            "frames_per_s": 179.3,
+            "workers_avg_exec_us": {
+              "centroid_stage": 512.0,
+              "controller_stage": 313.8,
+              "flatten_stage": 171.7,
+              "reconstructor_stage": 1693.6,
+              "saturation_stage": 378.3
+            }
+          },
+          {
+            "latency_us": {
+              "max": 24613.3,
+              "p50": 4121.1,
+              "p99": 14861.2,
+              "p99.9": 23921.9
+            },
+            "frames_per_s": 195.9,
+            "workers_avg_exec_us": {
+              "centroid_stage": 510.6,
+              "controller_stage": 246.5,
+              "flatten_stage": 165.7,
+              "reconstructor_stage": 1192.2,
+              "saturation_stage": 294.1
+            }
+          },
+          {
+            "latency_us": {
+              "max": 10836.8,
+              "p50": 3979.0,
+              "p99": 4625.7,
+              "p99.9": 6291.7
+            },
+            "frames_per_s": 250.6,
+            "workers_avg_exec_us": {
+              "centroid_stage": 508.9,
+              "controller_stage": 242.5,
+              "flatten_stage": 161.2,
+              "reconstructor_stage": 1160.4,
+              "saturation_stage": 280.3
+            }
+          }
+        ]
+      },
+      "after": {
+        "median_of_runs": {
+          "latency_us": {
+            "p50": 2427.9,
+            "p99": 3012.7,
+            "p99.9": 4565.2,
+            "max": 8535.2
+          },
+          "frames_per_s": 408.2
+        },
+        "runs": [
+          {
+            "latency_us": {
+              "max": 26820.9,
+              "p50": 2662.2,
+              "p99": 8951.5,
+              "p99.9": 11724.9
+            },
+            "frames_per_s": 267.2,
+            "workers_avg_exec_us": {
+              "centroid_stage": 396.4,
+              "controller_stage": 101.8,
+              "flatten_stage": 57.7,
+              "reconstructor_stage": 1017.5,
+              "saturation_stage": 127.2
+            }
+          },
+          {
+            "latency_us": {
+              "max": 8185.2,
+              "p50": 2409.1,
+              "p99": 3012.7,
+              "p99.9": 4565.2
+            },
+            "frames_per_s": 419.4,
+            "workers_avg_exec_us": {
+              "centroid_stage": 354.6,
+              "controller_stage": 94.7,
+              "flatten_stage": 52.1,
+              "reconstructor_stage": 880.4,
+              "saturation_stage": 114.4
+            }
+          },
+          {
+            "latency_us": {
+              "max": 8535.2,
+              "p50": 2427.9,
+              "p99": 2926.7,
+              "p99.9": 3878.4
+            },
+            "frames_per_s": 408.2,
+            "workers_avg_exec_us": {
+              "centroid_stage": 388.5,
+              "controller_stage": 97.9,
+              "flatten_stage": 54.4,
+              "reconstructor_stage": 1015.4,
+              "saturation_stage": 122.1
+            }
+          }
+        ]
+      }
+    }
+  }
+}

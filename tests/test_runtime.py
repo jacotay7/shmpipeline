@@ -328,6 +328,46 @@ def test_compute_and_publish_outputs_cpu_zero_copy_multi_output():
     assert out_b.writes_started == 1 and out_b.writes_finished == 1
 
 
+def test_compute_and_publish_single_output_propagates_and_aborts():
+    from shmpipeline.kernel import Kernel
+
+    class _Doubler(Kernel):
+        kind = "test.rt_doubler"
+        storage = "cpu"
+        fail = False
+
+        def __init__(self):  # bypass context for this unit test
+            pass
+
+        def compute_into_multiple(self, trigger_input, outputs, aux):
+            assert len(outputs) == 1
+            if self.fail:
+                raise ValueError("kernel failed")
+            outputs[0][...] = trigger_input * 2.0
+
+    out = _FakeStream("out", np.zeros(2, dtype=np.float32))
+    kernel = _Doubler()
+    runtime._compute_and_publish_outputs(
+        kernel,
+        np.array([1.0, 2.0], dtype=np.float32),
+        {},
+        ("out",),
+        {"out": out},
+        frame_id=7,
+    )
+    np.testing.assert_allclose(out._array, [2.0, 4.0])
+    assert (out.writes_started, out.writes_finished) == (1, 1)
+    assert out.published_frame_id == 7
+
+    kernel.fail = True
+    with pytest.raises(ValueError, match="kernel failed"):
+        runtime._compute_and_publish_outputs(
+            kernel, np.ones(2, dtype=np.float32), {}, ("out",), {"out": out}
+        )
+    # The failed transaction was opened but never published.
+    assert (out.writes_started, out.writes_finished) == (2, 1)
+
+
 def test_send_worker_event_supports_queue_and_pipe():
     sent = []
 
