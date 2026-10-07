@@ -7,6 +7,39 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-07
+
+### Changed
+
+- **Requires pyshmem 1.4.0**, which fixes a lost-wakeup race in notification
+  waits and cuts pyshmem's per-call read/write/lock overhead by 2–4×. Every
+  kernel trigger is a notify stream, so on 1.3.x a publication landing
+  between a worker's count check and its futex park was slept through until
+  the 10 ms trigger-wait slice expired. That showed up as ~10 ms p99 spikes on
+  every notified hop.
+- The worker's per-frame loop does less Python work: it takes the plain
+  trigger dict without copying it or running an ABC `isinstance` check, it
+  only scans the GPU-auxiliary cache once the cache holds entries, it reads
+  `borrow_gpu_inputs` once per frame, and single-output kernels publish
+  without an `ExitStack`. On the smoke pipeline this saves ~2 µs of worker
+  time per frame (on top of the pyshmem gains).
+
+End-to-end latency with one frame in flight (`benchmarks/benchmark_latency.py`,
+80-core Arm Neoverse-N1, median of three interleaved runs,
+`benchmarks/results/neoverse-n1-latency-2026-10-07.json`):
+
+| Pipeline | 1.2.0 + pyshmem 1.3.8 p50 / p99 | 1.3.0 + pyshmem 1.4.0 p50 / p99 | frames/s |
+| --- | --- | --- | --- |
+| smoke (`cpu.copy`, 64 float32) | 336 µs / 10.6 ms | 52 µs / 129 µs | 1,665 → 18,178 |
+| observatory AO example (5 stages) | 4.12 ms / 14.9 ms | 2.43 ms / 3.01 ms | 196 → 408 |
+
+### Added
+
+- `benchmarks/benchmark_latency.py` measures publication-to-result latency
+  (p50/p99/p99.9/max) through a running pipeline, with optional driver and
+  worker CPU pinning; `benchmark_pipeline.py` reports output inter-arrival
+  spacing instead.
+
 ### Fixed
 
 - The GUI test for `_scalar_image_levels` skips when the optional GUI stack

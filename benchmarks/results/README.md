@@ -27,6 +27,11 @@ fixed-shape HAKA reconstructor comparison and lazy staging allocation check
 that closed those optimization-audit items. Its artifact digest pins the
 physical calibration input used for numerical parity.
 
+`neoverse-n1-latency-2026-10-07.json` is the before/after pair for
+pyshmem 1.4.0 + shmpipeline 1.3.0 (lost-wakeup fix and hot-path overhead),
+measured with `benchmark_latency.py` on the smoke and observatory pipelines,
+three interleaved runs per side, with per-run and median numbers.
+
 `linux-gpu-auxiliary-lock-scope-2026-08-01.json` measures the host lock scope
 removed by cached GPU auxiliaries and includes a same-graph HAKA full-loop
 comparison. The uncontended lock result is causal; the full-loop comparison

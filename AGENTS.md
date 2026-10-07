@@ -283,6 +283,15 @@ Each worker process (`run_kernel_process` in `runtime.py`):
 **Performance note**: CPU and GPU kernels use a zero-copy path that writes
 directly into the locked pyshmem buffer. Publication, mirror updates, CUDA
 synchronization, and abort handling belong to pyshmem's public transaction API.
+The per-frame loop (`_locked_inputs_and_outputs`, `_compute_and_publish_outputs`)
+runs at tens of kHz, so keep per-frame Python work out of it: the worker passes
+plain dicts (checked with `isinstance(x, (dict, Mapping))` so the ABC check is
+skipped), the single-output case skips `ExitStack`, and the GPU-auxiliary cache
+scan only runs once that cache holds entries. Most of the remaining per-frame
+cost is pyshmem's lock and futex syscalls. The unit tests drive these helpers
+with `_FakeStream` doubles that only provide `name`, `count`, `locked()` and
+`write_view_locked()`, so keep using pyshmem's public context-manager API
+rather than `acquire`/`release` directly.
 
 **GPU note**: safe GPU input reads remain snapshots because a file lock alone
 does not establish CUDA stream synchronization. When a CUDA handle is
@@ -540,9 +549,9 @@ GPU kernels (`kernels/gpu/*`, no CUDA on CI) and the PySide6 GUI
 
 ## Package Info
 
-- Package name on PyPI: `shmpipeline` (v1.2.0)
+- Package name on PyPI: `shmpipeline` (v1.3.0)
 - License: MIT
-- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.3.1,<2`, `PyYAML>=6.0`
+- Required deps: `numba>=0.60`, `numpy>=1.26,<3`, `pyshmem>=1.4.0,<2`, `PyYAML>=6.0`
 - Optional extras: `gpu` (torch), `control` (fastapi/uvicorn/httpx), `gui` (PySide6/pyqtgraph)
 - Python: 3.9–3.13
 - GitHub: `https://github.com/jacotay7/shmpipeline`
