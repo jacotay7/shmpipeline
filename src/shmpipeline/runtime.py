@@ -163,8 +163,10 @@ def _locked_inputs_and_outputs(
     The direct `safe=False` handle path can observe stale CUDA IPC contents
     across processes because it bypasses pyshmem's synchronization/copy logic.
     """
-    if isinstance(trigger_stream, Mapping):
-        trigger_streams = dict(trigger_stream)
+    # ``dict`` first: the worker passes a plain dict every frame and an
+    # isinstance check against the Mapping ABC costs more than the lookup.
+    if isinstance(trigger_stream, (dict, Mapping)):
+        trigger_streams = trigger_stream
     else:
         trigger_streams = {kernel_config.input: trigger_stream}
     if ordered_locked_streams is None:
@@ -185,19 +187,23 @@ def _locked_inputs_and_outputs(
     # check, this frame consistently uses the prior complete generation and
     # the next iteration refreshes the cache.  Trigger and output streams, CPU
     # borrowed auxiliaries, and changed GPU auxiliaries remain locked.
-    cached_gpu_stream_ids = {
-        id(stream)
-        for name, stream in auxiliary_streams.items()
-        if auxiliary_cache is not None
-        and getattr(stream, "gpu_enabled", False)
-        and (cached := auxiliary_cache.get(name)) is not None
-        and cached[0] == getattr(stream, "count", None)
-    }
+    cached_gpu_stream_ids = (
+        {
+            id(stream)
+            for name, stream in auxiliary_streams.items()
+            if getattr(stream, "gpu_enabled", False)
+            and (cached := auxiliary_cache.get(name)) is not None
+            and cached[0] == getattr(stream, "count", None)
+        }
+        if auxiliary_cache
+        else ()
+    )
     active_locked_streams = tuple(
         stream
         for _, stream in ordered_locked_streams
         if id(stream) not in cached_gpu_stream_ids
     )
+    borrow_gpu = bool(kernel_config.parameters.get("borrow_gpu_inputs", False))
     with pyshmem.locked_many(
         active_locked_streams,
         timeout=kernel_config.read_timeout,
@@ -207,12 +213,7 @@ def _locked_inputs_and_outputs(
             name: stream.count for name, stream in trigger_streams.items()
         }
         trigger_values = tuple(
-            _read_worker_input(
-                trigger_streams[name],
-                borrow_gpu=bool(
-                    kernel_config.parameters.get("borrow_gpu_inputs", False)
-                ),
-            )
+            _read_worker_input(trigger_streams[name], borrow_gpu=borrow_gpu)
             for name in kernel_config.trigger_inputs
         )
         trigger_input = (
@@ -287,6 +288,14 @@ def _compute_and_publish_outputs(
     ``frame_id`` propagates a publication token onto every output in the same
     locked transaction; ``None`` leaves each output's token unchanged.
     """
+    if len(ordered_output_names) == 1:
+        # The common single-output kernel needs no ExitStack.
+        stream = output_streams[ordered_output_names[0]]
+        with stream.write_view_locked(frame_id=frame_id) as output_view:
+            kernel.compute_into_multiple(
+                trigger_input, [output_view], auxiliary_inputs
+            )
+        return
     with ExitStack() as stack:
         output_views = [
             stack.enter_context(
@@ -420,7 +429,7 @@ def run_kernel_process(
                     auxiliary_inputs,
                     trigger_frame_ids,
                 ):
-                    if not isinstance(current_counts, Mapping):
+                    if not isinstance(current_counts, (dict, Mapping)):
                         current_counts = {kernel_config.input: current_counts}
                     advanced = {
                         name: current_counts[name] > last_seen_counts[name]
